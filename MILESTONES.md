@@ -9,6 +9,9 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **G4 — Postcard auto-framing** (graphics audit): postcard composer
   auto-frames the city (no more 68% background void in the photo), criteria
   in docs/gfx-audit-slate.json.
+
+## Open
+
 - [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
   and lose capacity after ~30 years with rebuild prompts, coal smog scales
   with load; power mix pie in the budget window.
@@ -24,14 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G1 — Night city legibility — per-zone window bake & tamed glow**: Rework the boot-baked night window layer in js/sprites.js windows(): per-zone lighting character (cool blue-white panes for C, sparse ~30-40% warm panes for R, sodium-orange for I), skip panes dark in…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
-- [ ] **G2 — Depth-correct night light pass**: Fix the painter-order violation where drawNightLights() (js/render.js:229) blits the whole nightQ additively after the full scene, letting street-lamp halos, C3 lobby spill and I2/I3 floodlight pools…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
-- [ ] **G3 — Fire that reads as fire — layered flames, char state, capped night bloom**: Overhaul drawFlames()/fire glow in js/render.js: replace per-frame Math.random() strobing with smooth sin-phase animation, layer each flame (dark red-orange base, brighter inner, yellow core) 2-3x tal…
-  (6 judge-approved criteria in docs/gfx-audit-slate.json)
-- [ ] **G4 — Postcard auto-framing — no more black void**: Before rendering the M14 postcard snapshot, compute the bounding box of developed (fallback: terrain) tiles and center+scale the postcard camera so the city fills the photo mount; fill any offscreen a…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G5 — Terrain seam & water repetition fix**: Kill the 'tiled bathroom floor' look: stroke tile edges only where terrain type changes (land/water, grass/forest) and fade same-type interior strokes to <= 0.05 alpha so lakes and meadows read as con…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G6 — Win95 chrome authenticity fixes**: Fix the broken/anachronistic chrome: replace the css/style.css:47 nth-child flex rule so every dialog close button docks flush right (or add .title-btns { margin-left: auto }); style range inputs as W…

@@ -292,6 +292,8 @@ function renderMinimap(city, mode) {
       else if (t === OV.POLICE) col = "#88f";
       else if (t === OV.FIRESTA) col = "#f55";
       else if (t === OV.COAL || t === OV.SOLAR) col = "#ff0";
+      else if (t === OV.MAYOR) col = "#fd6";
+      else if (t === OV.STADIUM) col = "#e5e";
       else if (t === OV.RUBBLE) col = "#654";
       else col = city.terr[i] === TERR.WATER ? "#136" : (city.terr[i] === TERR.FOREST ? "#0a3a12" : "#1c4a1c");
       if (city.fire[i]) col = "#f80";

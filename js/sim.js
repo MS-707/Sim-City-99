@@ -10,11 +10,13 @@ const TERR = { GRASS: 0, WATER: 1, FOREST: 2 };
 const OV = {
   NONE: 0, ROAD: 1, WIRE: 2, ZR: 3, ZC: 4, ZI: 5, PARK: 6,
   POLICE: 7, FIRESTA: 8, COAL: 9, SOLAR: 10, RUBBLE: 11,
+  MAYOR: 12, STADIUM: 13,
 };
 
 // footprint (w,h) per overlay type
 const OV_SIZE = {
   [OV.POLICE]: 2, [OV.FIRESTA]: 2, [OV.COAL]: 2, [OV.SOLAR]: 2,
+  [OV.STADIUM]: 2,
 };
 const sizeOf = (t) => OV_SIZE[t] || 1;
 
@@ -28,7 +30,27 @@ const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120 };
 const COST = {
   bulldoze: 1, road: 10, wire: 5, zr: 100, zc: 100, zi: 100,
   park: 50, tree: 25, police: 500, firesta: 500, coal: 3000, solar: 5000,
+  mayor: 0, stadium: 500, // milestone rewards — gifts (or nearly so)
 };
+
+// ---- city milestones (M2) ----
+// rank ladder; a city is TIERS[k] once pop >= TIERS[k].pop (monotonic ratchet)
+const TIERS = [
+  { name: "Settlement", pop: 0 },
+  { name: "Village",    pop: 100 },
+  { name: "Town",       pop: 400 },
+  { name: "City",       pop: 1500 },
+  { name: "Metropolis", pop: 5000 },
+];
+
+// reward tools gated behind a minimum tier (index into TIERS)
+const TOOL_TIER = { mayor: 2, stadium: 3 }; // Town / City
+
+function tierForPop(pop) {
+  let k = 0;
+  for (let t = 1; t < TIERS.length; t++) if (pop >= TIERS[t].pop) k = t;
+  return k;
+}
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -75,6 +97,9 @@ class City {
     this.powerDirty = true;
     this.messages = [];             // ticker event queue
     this.cityName = "Llamaville";
+    this.tier = 0;                  // index into TIERS, only ever rises
+    this.announcedTier = 0;         // highest tier already announced (newspaper)
+    this.newsQueue = [];            // pending newspaper editions (tier indices)
 
     this.generateTerrain(seed ?? ((Math.random() * 1e9) | 0));
   }
@@ -136,6 +161,7 @@ class City {
 
   place(tool, x, y) {
     if (tool === "bulldoze") return this.bulldoze(x, y);
+    if ((TOOL_TIER[tool] || 0) > this.tier) return { ok: false, reason: "locked" };
     if (!this.canPlace(tool, x, y)) return { ok: false, reason: "blocked" };
     const cost = this.toolCost(tool, x, y);
     if (this.funds < cost) return { ok: false, reason: "funds" };
@@ -342,6 +368,8 @@ class City {
       if (this.terr[i] === TERR.WATER) lv[i] = 60;
       else if (this.terr[i] === TERR.FOREST) lv[i] = 40;
       if (this.over[i] === OV.PARK) lv[i] = 90;
+      if (this.over[i] === OV.MAYOR) lv[i] = 130;    // the mayor's manicured lawns
+      if (this.over[i] === OV.STADIUM) lv[i] = 110;  // stadium pride (all 4 tiles)
     }
     const lvOut = new Uint8Array(n);
     this.diffuse(lv, lvOut, 4, 0.3);
@@ -406,16 +434,18 @@ class City {
 
   // ---------- demand ----------
   recomputeDemand() {
-    let pop = 0, cJobs = 0, iJobs = 0;
+    let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0;
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] === OV.ZR) pop += RES_POP[this.lvl[i]];
       else if (this.over[i] === OV.ZC) cJobs += COM_JOB[this.lvl[i]];
       else if (this.over[i] === OV.ZI) iJobs += IND_JOB[this.lvl[i]];
+      else if (this.over[i] === OV.STADIUM && this.anc[i] === i) stadiums++;
     }
     this.pop = pop; this.jobs = cJobs + iJobs;
     const taxMod = (7 - this.taxRate) * 0.05;         // low taxes juice demand
+    const stadMod = Math.min(2, stadiums) * 0.06;     // a stadium makes people move in
     const jobsAvail = this.jobs + 40 - pop * 0.62;    // 40 = external commuters
-    this.demand.r = clampD(jobsAvail / 220 + taxMod);
+    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod);
     this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6);
     this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4);
     function clampD(v) { return Math.max(-1, Math.min(1, v)); }
@@ -605,6 +635,18 @@ class City {
     if (this.tickCount % 5 === 0) this.recomputeTraffic();
     if (this.tickCount % 14 === 0) this.recomputeMaps();
     this.recomputeDemand();
+
+    // milestone check — promote to the highest qualifying rank, exactly once
+    const nt = tierForPop(this.pop);
+    if (nt > this.tier) {
+      this.tier = nt;
+      if (nt > this.announcedTier) {
+        this.announcedTier = nt;
+        this.newsQueue.push(nt);
+        this.pushMsg(`🏆 ${this.cityName} has grown into a ${TIERS[nt].name.toUpperCase()}! The papers are all over it.`);
+      }
+    }
+
     this.growthPass();
     if (this.tickCount % 2 === 0) this.fireTick();
     this.disasterTick();
@@ -629,10 +671,11 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 1, seed: this.seed, cityName: this.cityName,
+      v: 2, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       month: this.month, year: this.year, tickCount: this.tickCount,
       disastersEnabled: this.disastersEnabled,
+      tier: this.tier, announcedTier: this.announcedTier,
       terr: Array.from(this.terr), over: Array.from(this.over),
       lvl: Array.from(this.lvl), varnt: Array.from(this.varnt),
       anc: Array.from(this.anc),
@@ -652,6 +695,11 @@ class City {
     c.powerDirty = true;
     c.recomputePower(); c.recomputeAccess(); c.recomputeTraffic();
     c.recomputeMaps(); c.recomputeDemand();
+    // milestone state: restore, or (legacy v1 save) infer rank from population
+    // so loading never fires a promotion newspaper
+    c.tier = typeof d.tier === "number" ? d.tier : tierForPop(c.pop);
+    c.announcedTier = typeof d.announcedTier === "number" ? d.announcedTier : c.tier;
+    c.newsQueue = [];
     return c;
   }
 }
@@ -662,5 +710,6 @@ function toolOverlay(tool) {
     road: OV.ROAD, wire: OV.WIRE, zr: OV.ZR, zc: OV.ZC, zi: OV.ZI,
     park: OV.PARK, police: OV.POLICE, firesta: OV.FIRESTA,
     coal: OV.COAL, solar: OV.SOLAR,
+    mayor: OV.MAYOR, stadium: OV.STADIUM,
   })[tool] ?? OV.NONE;
 }

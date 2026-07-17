@@ -25,6 +25,11 @@ const TOOLS = [
   { id: "firesta",  name: "Fire Dept", key: "-", icon: null, spr: () => SPR.firesta },
   { id: "coal",     name: "Coal Pwr",  key: "=", icon: null, spr: () => SPR.coal },
   { id: "solar",    name: "Solar Pwr", key: "+", icon: null, spr: () => SPR.solar },
+  // milestone rewards — locked until the city earns its rank
+  { id: "mayor",    name: "Mayor Hse", key: "m", icon: null, spr: () => SPR.mayor,
+    minTier: TOOL_TIER.mayor },
+  { id: "stadium",  name: "Stadium",   key: "b", icon: null, spr: () => SPR.stadium,
+    minTier: TOOL_TIER.stadium },
 ];
 
 /* --------- 1997 newswire --------- */
@@ -78,12 +83,18 @@ function uiInit() {
   setTool("road");
 }
 
+function toolLocked(t) {
+  return (t.minTier || 0) > (city ? city.tier : 0);
+}
+
 function buildToolbar() {
   const tb = document.getElementById("toolbar");
   tb.innerHTML = "";
   for (const t of TOOLS) {
+    const locked = toolLocked(t);
     const b = document.createElement("div");
-    b.className = "toolbtn"; b.dataset.tool = t.id;
+    b.className = "toolbtn" + (locked ? " locked" : "");
+    b.dataset.tool = t.id;
     const ic = document.createElement("canvas");
     ic.width = 40; ic.height = 34;
     const g = ic.getContext("2d");
@@ -97,27 +108,48 @@ function buildToolbar() {
       g.font = "22px serif"; g.textAlign = "center"; g.textBaseline = "middle";
       g.fillText(t.icon, 20, 18);
     }
+    if (locked) { // grey veil + padlock
+      g.fillStyle = "rgba(192,192,192,.62)"; g.fillRect(0, 0, 40, 34);
+      g.font = "16px serif"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText("🔒", 20, 17);
+    }
     b.appendChild(ic);
     const lbl = document.createElement("span");
     lbl.textContent = t.name;
     b.appendChild(lbl);
     const cost = COST[t.id];
-    if (cost) {
+    if (locked) {
+      const c = document.createElement("span");
+      c.className = "cost"; c.textContent = "🔒 " + TIERS[t.minTier].name;
+      b.appendChild(c);
+    } else if (cost) {
       const c = document.createElement("span");
       c.className = "cost"; c.textContent = "§" + cost;
       b.appendChild(c);
+    } else if (t.minTier) {
+      const c = document.createElement("span");
+      c.className = "cost"; c.textContent = "FREE";
+      b.appendChild(c);
     }
-    b.title = `${t.name} (${t.key})${cost ? " — §" + cost : ""}`;
+    b.title = locked
+      ? `${t.name} — unlocked at ${TIERS[t.minTier].name} rank`
+      : `${t.name} (${t.key})${cost ? " — §" + cost : ""}`;
     b.addEventListener("click", () => { Snd.click(); setTool(t.id); });
+    b.classList.toggle("active", !locked && t.id === UI.tool);
     tb.appendChild(b);
   }
 }
 
 function setTool(id) {
+  const t = TOOLS.find(t => t.id === id);
+  if (t && toolLocked(t)) { // locked reward: refuse (clicks AND hotkeys)
+    Snd.denied();
+    setStatus(`🔒 ${t.name} unlocks at ${TIERS[t.minTier].name} rank.`);
+    return;
+  }
   UI.tool = id;
   document.querySelectorAll(".toolbtn").forEach(b =>
     b.classList.toggle("active", b.dataset.tool === id));
-  const t = TOOLS.find(t => t.id === id);
   const cost = COST[id];
   setStatus(`${t.name} selected${cost ? ` — §${cost} each` : ""}`);
 }
@@ -276,6 +308,8 @@ function applyToolAt(e) {
     }
   } else if (res.reason === "funds") {
     Snd.denied(); setStatus("⛔ Not enough funds!");
+  } else if (res.reason === "locked") {
+    Snd.denied(); setStatus("🔒 That reward isn't unlocked yet.");
   }
 }
 
@@ -391,7 +425,8 @@ function openQuery(x, y) {
   const i = y * MAP + x;
   const terrName = ["Grass", "Water", "Forest"][city.terr[i]];
   const ovName = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
-    "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble"][city.over[i]];
+    "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
+    "Mayor's House", "Stadium"][city.over[i]];
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
@@ -403,6 +438,42 @@ function openQuery(x, y) {
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
     <tr><td>Crime</td><td>${city.crime[i]}</td></tr>`;
   showDlg("dlg-query");
+}
+
+/* ================= milestone newspaper ================= */
+const NP_SUBHEADS = [
+  null, null,
+  "Mayor's mansion approved; hedge budget triples overnight",
+  "Council greenlights stadium; scalpers already outside",
+  "Skyline visible from THREE counties, claims tourism board",
+];
+
+function showNewspaper(k) {
+  const t = TIERS[k];
+  document.getElementById("np-date").textContent =
+    `${MONTHS[city.month]} ${city.year} — Pop. ${city.pop.toLocaleString()}`;
+  document.getElementById("np-headline").textContent =
+    `${city.cityName.toUpperCase()} IS NOW A ${t.name.toUpperCase()}!`;
+  const unlocks = TOOLS.filter(x => x.minTier === k).map(x => x.name);
+  document.getElementById("np-sub").textContent = unlocks.length
+    ? `City hall unlocks: ${unlocks.join(", ")} — check your toolbar, Mayor!`
+    : (NP_SUBHEADS[k] || "Experts stunned; property values 'through the roof'");
+  document.getElementById("np-body").textContent =
+    `Sources at city hall confirm that as of ${MONTHS[city.month]} ${city.year}, ` +
+    `${city.cityName} officially ranks as a ${t.name} (${TIERS[k].pop.toLocaleString()}+ residents). ` +
+    `Locals celebrated by waiting for a dial tone. "We always believed," said one ` +
+    `resident, clutching a Tamagotchi. The mayor's office promises this changes nothing, ` +
+    `except everything.`;
+  showDlg("dlg-news");
+  Snd.fanfare();
+}
+
+// called every frame from the main loop: pop pending editions one at a time
+function newsFrame() {
+  if (!city || !city.newsQueue || !city.newsQueue.length) return;
+  const dlg = document.getElementById("dlg-news");
+  if (!dlg.classList.contains("hidden")) return; // wait for current one to be read
+  showNewspaper(city.newsQueue.shift());
 }
 
 /* ================= ticker ================= */
@@ -430,7 +501,10 @@ function tickerFrame() {
 }
 
 /* ================= HUD refresh ================= */
+let uiTierShown = -1; // toolbar's last-built tier; rebuild on promotion / load
+
 function refreshHUD() {
+  if (city.tier !== uiTierShown) { uiTierShown = city.tier; buildToolbar(); }
   document.getElementById("sb-funds").textContent =
     "§ " + Math.round(city.funds).toLocaleString();
   document.getElementById("sb-date").textContent = `${MONTHS[city.month]} ${city.year}`;
@@ -443,7 +517,7 @@ function refreshHUD() {
     70 - city.taxRate * 2.4 + (city.demand.r > 0 ? 10 : -8) | 0));
   document.getElementById("v-approval").textContent = city.pop ? approval + "%" : "—";
   document.getElementById("city-title").textContent =
-    `SimCity 99 — ${city.cityName}, ${MONTHS[city.month]} ${city.year}`;
+    `SimCity 99 — ${city.cityName} [${TIERS[city.tier].name}], ${MONTHS[city.month]} ${city.year}`;
 
   const setBar = (id, v) => {
     const el = document.getElementById(id);

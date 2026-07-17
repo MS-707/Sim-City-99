@@ -409,6 +409,54 @@ function buildSprites() {
     g.restore();
   });
 
+  /* ---- milestone rewards ---- */
+  // Mayor's House: stately 1x1 manor with a flag and hedges
+  SPR.mayor = mkSprite(1, 1, 40, (g, ox, oy) => {
+    diamondPath(g, ox, oy);
+    g.fillStyle = "#5fae57"; g.fill();
+    g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
+    tinyHouse(g, ox - 2, oy - 2, 30, "#f2e7c9", "#2b4a8c");
+    tinyHouse(g, ox + 16, oy + 4, 16, "#f2e7c9", "#2b4a8c");
+    // hedges along the S edge
+    g.fillStyle = "#1d6e2a";
+    for (let k = 0; k < 4; k++) {
+      g.beginPath(); g.ellipse(ox - 20 + k * 7, oy + 9 + k * 1.5, 3.4, 2.2, 0, 0, 7); g.fill();
+    }
+    // flagpole + golden city flag
+    g.strokeStyle = "#d8d8e0"; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(ox - 22, oy + 2); g.lineTo(ox - 22, oy - 34); g.stroke();
+    g.fillStyle = "#ffd94e";
+    g.beginPath(); g.moveTo(ox - 22, oy - 34); g.lineTo(ox - 10, oy - 31);
+    g.lineTo(ox - 22, oy - 27); g.closePath(); g.fill();
+  });
+
+  // Stadium: 2x2 bowl with a green pitch and floodlights
+  SPR.stadium = mkSprite(2, 2, 52, (g, ox, oy) => {
+    const { N, E, S, W } = prism(g, ox, oy, 2, 2, 22, "#b8b2a4");
+    const cx = (E[0] + W[0]) / 2, cy = (N[1] + S[1]) / 2 - 22;
+    // concrete bowl rim
+    g.fillStyle = "#cac4b6";
+    g.beginPath(); g.ellipse(cx, cy, 52, 24, 0, 0, 7); g.fill();
+    g.strokeStyle = "#7d7869"; g.lineWidth = 1.5; g.stroke();
+    // seating rings
+    g.fillStyle = "#c0392b";
+    g.beginPath(); g.ellipse(cx, cy, 44, 20, 0, 0, 7); g.fill();
+    g.fillStyle = "#2f5f9e";
+    g.beginPath(); g.ellipse(cx, cy, 37, 16.5, 0, 0, 7); g.fill();
+    // the pitch
+    g.fillStyle = "#2f9c3f";
+    g.beginPath(); g.ellipse(cx, cy, 28, 12, 0, 0, 7); g.fill();
+    g.strokeStyle = "#e8f6e8"; g.lineWidth = 1;
+    g.beginPath(); g.ellipse(cx, cy, 8, 3.6, 0, 0, 7); g.stroke();
+    g.beginPath(); g.moveTo(cx - 28, cy); g.lineTo(cx + 28, cy); g.stroke();
+    // floodlight masts
+    for (const [fx, fy] of [[cx - 46, cy - 8], [cx + 46, cy - 8], [cx - 30, cy + 16], [cx + 30, cy + 16]]) {
+      g.strokeStyle = "#55565e"; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx, fy - 22); g.stroke();
+      g.fillStyle = "#fff7c8"; g.fillRect(fx - 4, fy - 27, 8, 5);
+    }
+  });
+
   // ---- "no power" bolt ----
   SPR.zap = (() => {
     const c = document.createElement("canvas"); c.width = 16; c.height = 22;
@@ -438,6 +486,8 @@ function spriteFor(city, i) {
     case OV.FIRESTA: return SPR.firesta;
     case OV.COAL:    return SPR.coal;
     case OV.SOLAR:   return SPR.solar;
+    case OV.MAYOR:   return SPR.mayor;
+    case OV.STADIUM: return SPR.stadium;
   }
   return null;
 }

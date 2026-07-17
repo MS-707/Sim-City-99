@@ -68,6 +68,11 @@ const Snd = {
     for (let k = 0; k < 6; k++) this.tone(900 + k * 120, 0.1, "sine", 0.1, k * 0.08, 300);
   },
   monthChime() { this.tone(1046, 0.08, "sine", 0.07); },
+  fanfare() { // milestone promotion — triumphant lil' bugle
+    const seq = [523.3, 659.3, 784, 1046.5];
+    seq.forEach((f, k) => this.tone(f, 0.16, "square", 0.16, k * 0.11));
+    this.tone(1046.5, 0.5, "triangle", 0.18, seq.length * 0.11);
+  },
 
   // ---- tiny generative jazz-ish loop (very 90s "city" mood) ----
   startMusic() {

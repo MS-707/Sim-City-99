@@ -6,15 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M2 — City milestones & rewards**: population tiers (Village → Town →
-  City → Metropolis) with newspaper popup, reward unlocks (e.g. Mayor's House,
-  Stadium), and title bar rank.
+- [ ] **M3 — More building variety**: school and hospital as placeable civics
+  with sim effects (education/health boost growth caps); more sprite variants
+  per zone level. (Stadium already exists as the M2 City-tier reward.)
 
 ## Open
 
-- [ ] **M3 — More building variety**: stadium, school, hospital as placeable
-  civics with sim effects (education/health boost growth caps); more sprite
-  variants per zone level.
 - [ ] **M4 — Advisors panel**: Win95 dialog with tabbed advisors (Finance,
   Safety, Environment) giving live, rule-based advice from sim state.
 - [ ] **M5 — Nicer terrain**: shoreline edge tiles (beach transitions), water
@@ -28,6 +25,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## Done
 
+- [x] **M2 — City milestones & rewards**: 5 population tiers
+  (Settlement → Village → Town → City → Metropolis) with monotonic promotion
+  ratchet, 1997-tabloid newspaper popup on promotion, tier-gated reward
+  buildings (Mayor's House at Town, Stadium at City) with sim effects, rank
+  in title bar, save-format v2 round-trip. Verified against 7 criteria.
 - [x] **M1 — Traffic simulation**: per-road congestion from zone trip
   generation; congestion lowers land value and growth; traffic minimap
   overlay; animated cars on roads. Verified against 8 criteria (all pass,

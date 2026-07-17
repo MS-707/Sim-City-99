@@ -173,3 +173,42 @@ body {
 .about .dim { color: #555; font-size: 11px; }
 #query-table td { padding: 1px 8px 1px 0; }
 #query-table td:first-child { color: #444; }
+
+/* ---------- locked reward tools ---------- */
+.toolbtn.locked { opacity: .55; cursor: not-allowed; }
+.toolbtn.locked .cost { color: #833; }
+
+/* ---------- milestone newspaper ---------- */
+#dlg-news { max-width: 440px; }
+.newspaper {
+  background: #f4ecd8; /* pulp paper */
+  color: #17130c;
+  border: 1px solid #6b6250;
+  margin: 4px; padding: 12px 14px;
+  font-family: "Times New Roman", Georgia, serif;
+}
+.np-masthead {
+  font-family: "Times New Roman", serif; font-variant: small-caps;
+  font-weight: bold; font-size: 30px; letter-spacing: 2px; text-align: center;
+  border-bottom: 3px double #17130c; padding-bottom: 3px;
+}
+.np-dateline {
+  display: flex; justify-content: space-between;
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  border-bottom: 1px solid #17130c; padding: 3px 2px 4px;
+}
+.np-headline {
+  font-family: "Impact", "Arial Black", sans-serif;
+  font-size: 27px; line-height: 1.05; text-align: center;
+  padding: 12px 4px 6px; text-transform: uppercase;
+}
+.np-sub {
+  text-align: center; font-style: italic; font-size: 13px;
+  border-bottom: 1px solid #17130c; padding-bottom: 8px;
+}
+.np-body {
+  font-size: 11px; line-height: 1.45; text-align: justify;
+  column-count: 2; column-gap: 12px; column-rule: 1px solid #beb49c;
+  padding-top: 8px;
+}
+.newspaper .dlg-buttons .btn95 { font-family: Tahoma, sans-serif; }

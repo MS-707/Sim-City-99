@@ -1,14 +1,19 @@
 /* ============ SimCity 99 — postcard photo mode (M14) ============ */
 "use strict";
 
-// "Send Postcard…" composes the CURRENT viewport into a retro 1997 postcard
-// on its own dedicated canvas (#postcard-canvas). The live #game canvas is
-// only ever a drawImage SOURCE here — it is never drawn onto, resized, read
-// back, or otherwise touched, and nothing in this file runs per frame: the
-// compose happens exactly once per menu click / recompose, the PNG encode
-// exactly once per Save click. The preview dialog therefore works even in a
-// sandboxed iframe where downloads are blocked — Save just degrades to a
-// polite status-bar apology while the preview stays on screen.
+// "Send Postcard…" composes a retro 1997 postcard on its own dedicated
+// canvas (#postcard-canvas). The photograph is shot by a dedicated postcard
+// camera (G4): the composer fits the developed city's bounding box (fallback:
+// the whole terrain diamond) into the photo mount and renders it offscreen
+// via renderPhotoTo — the live #game canvas and cam are never drawn onto,
+// resized, or mutated, no matter where the player left the view. A
+// season-matched banded sunset sky fills whatever the world doesn't cover,
+// so the photo never shows the renderer's void color. Nothing in this file
+// runs per frame: the compose happens exactly once per menu click /
+// recompose, the PNG encode exactly once per Save click. The preview dialog
+// therefore works even in a sandboxed iframe where downloads are blocked —
+// Save just degrades to a polite status-bar apology while the preview stays
+// on screen.
 
 const POSTCARD = {
   padL: 40, padR: 40,   // cream margins left / right of the photo mount
@@ -16,7 +21,67 @@ const POSTCARD = {
   padB: 96,             // bottom strip: headline + dateline live here
   photoW: 560,          // photo width; height follows the viewport aspect
   ring: 8,              // white photo-print mount around the photo
+  skyFrac: 0.22,        // top slice of the photo reserved for the sunset sky
+  zMin: 0.4, zMax: 1.35, // postcard-camera zoom clamp: giant cities crop to
+                         // their center, one-block towns don't blow up to mush
 };
+
+/* --------- auto-framing (G4) --------- */
+// tile bounding box of everything the mayor built — a brand-new map falls
+// back to the whole terrain diamond — padded out to world-space bounds with
+// headroom for the tallest tower sprites (~96px above their tile center)
+function postcardBounds() {
+  let minX = MAP, minY = MAP, maxX = -1, maxY = -1;
+  for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+    if (city.over[y * MAP + x] === OV.NONE) continue;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (maxX < 0) { minX = minY = 0; maxX = maxY = MAP - 1; }
+  return {
+    x0: worldX(minX, maxY) - HW - 28, x1: worldX(maxX, minY) + HW + 28,
+    y0: worldY(minX, minY) - HH - 96, y1: worldY(maxX, maxY) + HH + 20,
+  };
+}
+
+// season-matched sunset skies: [zenith, mid, horizon] stops, brightening
+// toward the horizon. Drawn as chunky bands — 1997 had no truecolor skies.
+const POSTCARD_SKY = {
+  spring: ["#4a5a9a", "#c97a9a", "#f5cf62"],
+  summer: ["#3a4a8e", "#e0784a", "#ffd35e"],
+  autumn: ["#553a6e", "#c05f2e", "#f2ab42"],
+  winter: ["#4a608c", "#93aac6", "#ecdcae"],
+};
+
+const pcRGB = (hex) =>
+  [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+const pcMix = (a, b, t) =>
+  [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const pcCSS = (c) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+
+// paint the sky band + below-horizon ground haze under the (transparent)
+// photo pass. ns-tinted with the exact dusk wash renderFrame lays over the
+// scene, so a midnight postcard gets a midnight sky. Returns the horizon
+// color for the seam haze.
+function drawPostcardSky(g, x, y, w, h, skyH, ns) {
+  const stops = POSTCARD_SKY[seasonOf(city.month)].map(pcRGB);
+  const tint = pcRGB(NIGHT_TINT), tintA = ns * NIGHT_MAX_ALPHA;
+  const at = (t) => pcMix(t < 0.55 ? pcMix(stops[0], stops[1], t / 0.55)
+                                   : pcMix(stops[1], stops[2], (t - 0.55) / 0.45),
+                          tint, tintA);
+  const bands = 12;
+  for (let k = 0; k < bands; k++) {
+    const y0 = Math.round(skyH * k / bands), y1 = Math.round(skyH * (k + 1) / bands);
+    g.fillStyle = pcCSS(at((k + 0.5) / bands));
+    g.fillRect(x, y + y0, w, y1 - y0);
+  }
+  const hz = at(1); // ground haze — visible only past the map's edges
+  g.fillStyle = pcCSS(pcMix(hz, [40, 34, 30], 0.35));
+  g.fillRect(x, y + skyH, w, h - skyH);
+  return hz;
+}
 
 /* --------- compose --------- */
 function composePostcard() {
@@ -66,11 +131,30 @@ function composePostcard() {
   g.strokeRect(px - P.ring + 0.5, py - P.ring + 0.5,
                pw + P.ring * 2 - 1, ph + P.ring * 2 - 1);
 
-  // the photograph: the entire live viewport, scaled into the photo area —
-  // whatever renderFrame last drew (night tint, season palette, disasters,
-  // cars) is exactly what the postcard shows
-  g.imageSmoothingEnabled = true;
-  g.drawImage(game, 0, 0, gw, gh, px, py, pw, ph);
+  // the photograph (G4): shot fresh from a dedicated postcard camera fitted
+  // to the developed city's bounding box, so the skyline fills the mount no
+  // matter where the live camera wandered — night tint, season palette,
+  // disasters and cars still render exactly as the game would draw them.
+  // renderPhotoTo restores the live canvas/cam; the sky band underneath
+  // catches everything past the map edge.
+  const skyH = Math.round(ph * P.skyFrac);
+  const ns = nightStrength(city, UI);
+  const hz = drawPostcardSky(g, px, py, pw, ph, skyH, ns);
+  const b = postcardBounds();
+  const z = Math.min(P.zMax, Math.max(P.zMin,
+    Math.min(pw / (b.x1 - b.x0), (ph - skyH) / (b.y1 - b.y0))));
+  const photo = document.createElement("canvas");
+  photo.width = pw;
+  photo.height = Math.max(1, ph - skyH);
+  renderPhotoTo(photo, city, { prefs: UI.prefs, hover: null },
+                (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, z);
+  g.drawImage(photo, px, py + skyH);
+  // a wisp of horizon haze so the skyline meets the sky, not a hard seam
+  const haze = g.createLinearGradient(0, py + skyH, 0, py + skyH + 14);
+  haze.addColorStop(0, `rgba(${hz[0] | 0},${hz[1] | 0},${hz[2] | 0},.45)`);
+  haze.addColorStop(1, `rgba(${hz[0] | 0},${hz[1] | 0},${hz[2] | 0},0)`);
+  g.fillStyle = haze;
+  g.fillRect(px, py + skyH, pw, 14);
   g.strokeStyle = "rgba(20,16,8,.55)";
   g.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
 

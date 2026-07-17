@@ -6,9 +6,10 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G4 — Postcard auto-framing** (graphics audit): postcard composer
-  auto-frames the city (no more 68% background void in the photo), criteria
-  in docs/gfx-audit-slate.json.
+- [ ] **G5 — Terrain seam & water repetition fix** (graphics audit): stroke
+  tile edges only where terrain type changes, fade same-type interior
+  strokes, kill the "tiled bathroom floor" look; water variation.
+  Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +28,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G5 — Terrain seam & water repetition fix**: Kill the 'tiled bathroom floor' look: stroke tile edges only where terrain type changes (land/water, grass/forest) and fade same-type interior strokes to <= 0.05 alpha so lakes and meadows read as con…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G6 — Win95 chrome authenticity fixes**: Fix the broken/anachronistic chrome: replace the css/style.css:47 nth-child flex rule so every dialog close button docks flush right (or add .title-btns { margin-left: auto }); style range inputs as W…
   (6 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G8 — Minimap camera rect, overlay legends & demand-meter zero line**: Make the map's information layer trustworthy: stroke the projected camera-viewport rectangle on the minimap every frame in renderMinimap() (js/render.js ~399); show a one-line legend strip under the m…
@@ -56,6 +55,14 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G4 — Postcard auto-framing**: postcardBounds() fits the developed
+  bbox (terrain fallback) into the photo mount via a dedicated
+  renderPhotoTo camera (live cam/canvas untouched, restored in finally);
+  season-matched 12-band sunset sky with night tint + horizon haze behind
+  the city. Hostile-camera void 56-100% -> 0%; empty cities frame the
+  terrain; M14 flow (filename/PNG/dims, state-reflecting photo, zero
+  per-frame cost) regression-guarded. Verified against 6 checks (all pass).
 
 - [x] **G3 — Fire visuals overhaul**: drawFlames rewritten as three stacked
   hue-band layers (dark red base / orange mid / yellow core) with pure

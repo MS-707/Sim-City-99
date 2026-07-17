@@ -222,12 +222,19 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
   L.key = key;
 }
 
-function renderFrame(city, uiState) {
+function renderFrame(city, uiState, clearBG) {
   frame++;
   const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
   nightDrawn = 0;
-  ctx.fillStyle = "#0a0a12";
-  ctx.fillRect(0, 0, cvs.width, cvs.height);
+  if (clearBG) {
+    // postcard photo pass (G4): transparent background — the composer lays
+    // its sunset-sky gradient underneath, so past the map edge the photo
+    // shows sky, never the void color
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+  } else {
+    ctx.fillStyle = "#0a0a12";
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+  }
 
   // cull margins sized to the sprite extents: buildings reach ~64px sideways,
   // ~110px above and ~48px below their anchor tile's diamond center
@@ -398,6 +405,27 @@ function renderFrame(city, uiState) {
   worldTransform();
   if (uiState.hover && uiState.tool !== "query") drawCursor(city, uiState);
   ctx.restore();
+}
+
+/* ---- postcard photo pass (G4) ---- */
+// One frame of the world shot onto ANY canvas from a dedicated camera —
+// without disturbing the live view. The render globals (cvs/ctx/cam) are
+// swapped in, the frame draws with a transparent background (the postcard
+// lays its sunset sky underneath), and a finally puts everything back
+// exactly: the visible #game canvas and cam are never mutated. The
+// terrain/night layer caches key on canvas size + camera, so they simply
+// rebuild on the next live frame — a once-per-click cost, nothing per-frame.
+function renderPhotoTo(canvas, city, uiState, cx, cy, cz) {
+  const oCvs = cvs, oCtx = ctx, ox = cam.x, oy = cam.y, oz = cam.z;
+  cvs = canvas;
+  ctx = canvas.getContext("2d");
+  cam.x = cx; cam.y = cy; cam.z = cz;
+  try {
+    renderFrame(city, uiState, true);
+  } finally {
+    cvs = oCvs; ctx = oCtx;
+    cam.x = ox; cam.y = oy; cam.z = oz;
+  }
 }
 
 // additive light pass over the dusk tint (G2): the per-tile light draws

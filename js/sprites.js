@@ -141,32 +141,85 @@ function buildSprites() {
     }));
   }
 
-  SPR.water = mkSprite(1, 1, 0, (g, ox, oy) => {
-    diamondPath(g, ox, oy);
-    const gr = g.createLinearGradient(ox, oy - HH, ox, oy + HH);
-    gr.addColorStop(0, "#2a6fbe"); gr.addColorStop(1, "#1c4f92");
-    g.fillStyle = gr; g.fill();
-    g.strokeStyle = "rgba(0,0,40,.25)"; g.stroke();
-    g.save(); diamondPath(g, ox, oy); g.clip();
-    g.strokeStyle = "rgba(210,235,255,.35)"; g.lineWidth = 1;
-    for (let k = 0; k < 4; k++) {
-      const wy = oy - HH + 4 + k * 7 + R() * 3, wx = ox - HW + R() * 30;
-      g.beginPath(); g.moveTo(wx, wy); g.bezierCurveTo(wx + 8, wy - 2, wx + 14, wy + 2, wx + 22, wy); g.stroke();
-    }
-    g.restore();
-  });
-
-  SPR.forest = [];
-  for (let v = 0; v < 3; v++) {
-    SPR.forest.push(mkSprite(1, 1, 26, (g, ox, oy) => {
+  // ---- water: a small family of frames cycled by the render frame counter.
+  // Wave/glint positions are pure arithmetic in (k, f) so every boot builds
+  // pixel-identical frames and equal frame values always render identically.
+  SPR.water = [];
+  for (let f = 0; f < 3; f++) {
+    SPR.water.push(mkSprite(1, 1, 0, (g, ox, oy) => {
       diamondPath(g, ox, oy);
-      g.fillStyle = "#3d8a3a"; g.fill();
-      g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
-      const n = 2 + (v % 2);
-      for (let k = 0; k < n; k++) {
-        drawTree(g, ox - 12 + k * 14 + R() * 6, oy + 6 - k * 5, 13 + R() * 5, 0.85 + R() * 0.4);
+      const gr = g.createLinearGradient(ox, oy - HH, ox, oy + HH);
+      gr.addColorStop(0, "#2a6fbe"); gr.addColorStop(1, "#1c4f92");
+      g.fillStyle = gr; g.fill();
+      g.strokeStyle = "rgba(0,0,40,.25)"; g.stroke();
+      g.save(); diamondPath(g, ox, oy); g.clip();
+      g.strokeStyle = "rgba(210,235,255,.35)"; g.lineWidth = 1;
+      for (let k = 0; k < 4; k++) {
+        const wy = oy - HH + 4 + k * 7 + ((k * 5 + f * 2) % 5);
+        const wx = ox - HW + ((k * 13 + f * 11) % 40);
+        g.beginPath(); g.moveTo(wx, wy);
+        g.bezierCurveTo(wx + 8, wy - 2, wx + 14, wy + 2, wx + 22, wy); g.stroke();
       }
+      g.fillStyle = "rgba(220,240,255,.5)"; // shimmering glints
+      for (let k = 0; k < 3; k++) {
+        g.fillRect(ox - HW + 4 + ((k * 23 + f * 17) % 54),
+                   oy - HH + 3 + ((k * 11 + f * 7) % 26), 2, 1);
+      }
+      g.restore();
     }));
+  }
+
+  // ---- shoreline sand bands (16 masks; bit0=N bit1=E bit2=S bit3=W) ----
+  // Drawn over a water tile on its land-facing edges AND over a land tile on
+  // its water-facing edges, so the beach straddles the seam with no hard line.
+  SPR.shore = [];
+  for (let m = 0; m < 16; m++) {
+    SPR.shore.push(mkSprite(1, 1, 4, (g, ox, oy) => {
+      if (!m) return; // open water / inland: no sand
+      const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+      const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
+      // clip to a slightly expanded diamond so the band hugs both sides of the seam
+      g.save();
+      g.translate(ox, oy); g.scale((TW + 6) / TW, (TH + 3) / TH); g.translate(-ox, -oy);
+      diamondPath(g, ox, oy);
+      g.restore();
+      g.save(); g.clip();
+      const lerp = (P, t) => [P[0] + (ox - P[0]) * t, P[1] + (oy - P[1]) * t];
+      for (let b = 0; b < 4; b++) {
+        if (!(m & (1 << b))) continue;
+        const [P0, P1] = edges[b];
+        g.lineCap = "butt";
+        g.strokeStyle = "#dcc37a"; g.lineWidth = 7; // main sand band on the edge
+        g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
+        g.strokeStyle = "#eeda9c"; g.lineWidth = 3; // dry-sand highlight
+        g.beginPath(); g.moveTo(...lerp(P0, 0.06)); g.lineTo(...lerp(P1, 0.06)); g.stroke();
+        g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 1.4; // surf foam
+        g.beginPath(); g.moveTo(...lerp(P0, 0.22)); g.lineTo(...lerp(P1, 0.22)); g.stroke();
+      }
+      g.restore();
+    }));
+  }
+
+  // ---- forest: 3 density tiers x 3 variants (tier picked by neighbor count) ----
+  SPR.forest = [];
+  const TREES_PER_TIER = [2, 4, 7];  // sparse / medium / dense
+  const TREE_SIZE_TIER = [10, 12, 14];
+  for (let d = 0; d < 3; d++) {
+    const fam = [];
+    for (let v = 0; v < 3; v++) {
+      fam.push(mkSprite(1, 1, 26, (g, ox, oy) => {
+        diamondPath(g, ox, oy);
+        g.fillStyle = "#3d8a3a"; g.fill();
+        g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
+        const n = TREES_PER_TIER[d] + (v % 2);
+        for (let k = 0; k < n; k++) {
+          drawTree(g, ox - 14 + ((k * 9 + v * 7 + d * 3) % 28) + R() * 4,
+                   oy + 7 - ((k * 5 + v * 3) % 11),
+                   TREE_SIZE_TIER[d] + R() * 4, 0.85 + R() * 0.4);
+        }
+      }));
+    }
+    SPR.forest.push(fam);
   }
 
   SPR.rubble = mkSprite(1, 1, 0, (g, ox, oy) => {
@@ -556,6 +609,47 @@ function roadMask(city, i) {
   if (road(x, y + 1)) m |= 4;
   if (road(x - 1, y)) m |= 8;
   return m;
+}
+
+// for a WATER tile: bitmask of 4-neighbors that are land (off-map counts as
+// water so map-border tiles never grow sand toward the void)
+function shoreMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let m = 0;
+  const land = (X, Y) => city.inMap(X, Y) && city.terr[city.idx(X, Y)] !== TERR.WATER;
+  if (land(x, y - 1)) m |= 1;
+  if (land(x + 1, y)) m |= 2;
+  if (land(x, y + 1)) m |= 4;
+  if (land(x - 1, y)) m |= 8;
+  return m;
+}
+
+// for a LAND tile: bitmask of 4-neighbors that are water (the beach fringe
+// drawn on the land side of the seam)
+function beachMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let m = 0;
+  const water = (X, Y) => city.inMap(X, Y) && city.terr[city.idx(X, Y)] === TERR.WATER;
+  if (water(x, y - 1)) m |= 1;
+  if (water(x + 1, y)) m |= 2;
+  if (water(x, y + 1)) m |= 4;
+  if (water(x - 1, y)) m |= 8;
+  return m;
+}
+
+// cluster-aware forest sprite: denser stands draw fuller canopies. Pure
+// function of (terr neighborhood, varnt) — deterministic per frame.
+function forestSprite(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let n = 0;
+  const forest = (X, Y) => city.inMap(X, Y) && city.terr[city.idx(X, Y)] === TERR.FOREST;
+  if (forest(x, y - 1)) n++;
+  if (forest(x + 1, y)) n++;
+  if (forest(x, y + 1)) n++;
+  if (forest(x - 1, y)) n++;
+  const tier = n <= 1 ? 0 : n <= 3 ? 1 : 2;
+  const fam = SPR.forest[tier];
+  return fam[city.varnt[i] % fam.length];
 }
 
 function wireMask(city, i) {

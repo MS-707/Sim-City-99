@@ -6,13 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M5 — Nicer terrain**: shoreline edge tiles (beach transitions), water
-  animation, tree autoclustering; bulldoze-to-waterfill tool.
+- [ ] **M6 — Audio & UI polish**: per-building ambient sounds when zoomed in,
+  budget window monthly auto-popup toggle, keyboard shortcut overlay (F1).
 
 ## Open
 
-- [ ] **M6 — Audio & UI polish**: per-building ambient sounds when zoomed in,
-  budget window monthly auto-popup toggle, keyboard shortcut overlay (F1).
 - [ ] **M7 — Time capsule events**: dated 1997→1999 in-game events that affect
   the sim (dot-com boom C demand spike, Y2K panic mini-event on Dec 1999).
 - [ ] **M8 — Public deploy**: publish a playable build as a shareable web page
@@ -23,8 +21,16 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M10 — Day/night cycle**: gradual day-night tint over the city, lit
   building windows at night, street lamps along roads, toggleable in Speed
   menu; disasters more dramatic in the dark.
+- [ ] **M11 — Bigger maps & map picker**: selectable map sizes (64/80/128) and
+  a terrain-preview picker on the splash screen with reroll button.
 
 ## Done
+
+- [x] **M5 — Nicer terrain**: 16-mask sand shoreline transitions (roadMask
+  pattern), 3-frame animated water cycled by the render frame counter (no
+  per-frame allocation), cluster-aware forest density sprites (3×3 variants,
+  deterministic per seed), §50 waterfill tool with live shoreline re-masking.
+  Verified against 7 criteria (all pass).
 
 - [x] **M4 — Advisors panel**: #dlg-advisors Win95 dialog (Windows menu) with
   three Win95-style tabs — Myrna Plutz (Finance), Chief Gus Ramirez (Safety),

@@ -48,6 +48,7 @@ function renderFrame(city, uiState) {
   const maxWY = cam.y + cvs.height / 2 / cam.z + margin;
 
   const blink = (frame / 24 | 0) % 2 === 0;
+  const waterFrame = (frame / 16 | 0) % SPR.water.length; // prebuilt frame cycle
 
   // painter's order: by (x + y), then x
   for (let s = 0; s <= (MAP - 1) * 2; s++) {
@@ -57,17 +58,29 @@ function renderFrame(city, uiState) {
       if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
       const i = y * MAP + x;
 
-      // terrain
+      // terrain (all sprites prebuilt in buildSprites — lookups only)
       const t = city.terr[i];
-      let tspr;
-      if (t === TERR.WATER) tspr = SPR.water;
-      else if (t === TERR.FOREST && city.over[i] === OV.NONE) tspr = SPR.forest[city.varnt[i] % 3];
-      else tspr = SPR.grass[city.varnt[i] % 4];
-      // buildings sit on grass; forests draw their own grass base
-      if (t === TERR.FOREST && city.over[i] === OV.NONE) {
-        ctx.drawImage(SPR.grass[city.varnt[i] % 4].c, wx - HW, wy - HH - HH + HH);
+      if (t === TERR.WATER) {
+        const w = SPR.water[waterFrame];
+        ctx.drawImage(w.c, wx - w.ox, wy - w.oy);
+        const sm = shoreMask(city, i); // sand on land-facing edges
+        if (sm) {
+          const s = SPR.shore[sm];
+          ctx.drawImage(s.c, wx - s.ox, wy - s.oy);
+        }
+      } else {
+        const gs = SPR.grass[city.varnt[i] % 4];
+        ctx.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
+        if (t === TERR.FOREST && city.over[i] === OV.NONE) {
+          const fs = forestSprite(city, i); // cluster-aware density
+          ctx.drawImage(fs.c, wx - fs.ox, wy - fs.oy);
+        }
+        const bm = beachMask(city, i); // beach fringe on the land side of the seam
+        if (bm) {
+          const s = SPR.shore[bm];
+          ctx.drawImage(s.c, wx - s.ox, wy - s.oy);
+        }
       }
-      ctx.drawImage(tspr.c, wx - tspr.ox, wy - tspr.oy);
 
       // overlay
       const ov = city.over[i];

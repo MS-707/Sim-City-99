@@ -29,7 +29,8 @@ const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120 };
 
 const COST = {
   bulldoze: 1, road: 10, wire: 5, zr: 100, zc: 100, zi: 100,
-  park: 50, tree: 25, police: 500, firesta: 500, coal: 3000, solar: 5000,
+  park: 50, tree: 25, waterfill: 50,
+  police: 500, firesta: 500, coal: 3000, solar: 5000,
   school: 400, hospital: 600,
   mayor: 0, stadium: 500, // milestone rewards — gifts (or nearly so)
 };
@@ -139,6 +140,13 @@ class City {
 
   // ---------- building / bulldozing ----------
   canPlace(tool, x, y) {
+    if (tool === "waterfill") {
+      // only bare grass or rubble may be flooded; anything else refuses
+      if (!this.inMap(x, y)) return false;
+      const i = this.idx(x, y);
+      if (this.terr[i] !== TERR.GRASS) return false;
+      return this.over[i] === OV.NONE || this.over[i] === OV.RUBBLE;
+    }
     const s = sizeOf(toolOverlay(tool));
     for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
       const X = x + dx, Y = y + dy;
@@ -173,6 +181,14 @@ class City {
       const i = this.idx(x, y);
       this.terr[i] = TERR.FOREST; this.varnt[i] = (Math.random() * 3) | 0;
       this.funds -= cost;
+      return { ok: true, cost };
+    }
+    if (tool === "waterfill") {
+      const i = this.idx(x, y);
+      this.terr[i] = TERR.WATER; this.over[i] = OV.NONE; // clears rubble
+      this.lvl[i] = 0; this.anc[i] = -1; this.varnt[i] = 0;
+      this.funds -= cost;
+      this.powerDirty = true; // water blocks conduction & road access
       return { ok: true, cost };
     }
     const s = sizeOf(type);

@@ -6,9 +6,10 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M18 — Helicopter & traffic copter reports**: a news chopper that
-  flies over congestion hotspots at random intervals; clicking it opens a
-  live "Traffic on the 5s" report naming the worst intersections.
+- [ ] **G1 — Night city legibility** (from the graphics audit): per-zone
+  window bake (cool C, sparse warm R, sodium I), tamed halo alpha, clamped
+  night compositing so roofs and silhouettes survive; dense-district
+  whiteout halved vs HEAD baseline. Criteria: docs/gfx-audit-slate.json.
 - [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
   and lose capacity after ~30 years with rebuild prompts, coal smog scales
   with load; power mix pie in the budget window.
@@ -61,6 +62,16 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **M18 — News helicopter & traffic reports**: congestion-gated chopper
+  (CHOPPER_TRAFFIC_T=160, month-rollover spawn chance, single instance,
+  bounded lifetime) that launches from the map edge, flies to the true
+  argmax congestion cluster, hovers with frame-driven rotor + ground shadow;
+  clicking/tapping it (screen-space hit test at any zoom, swallows the
+  click) opens "🚁 Traffic on the 5s" — top hotspots named by a
+  deterministic 90s street-name generator, live traffic figures, per-row
+  camera jump. Presentation-only (never serialized), O(1) per frame, zero
+  input regressions. Verified against 8 criteria (all pass).
 
 - [x] **M23 — Advisor bias & department funding** *(user priority)*: five
   0–100% department funding sliders (police, fire, roads, education, health)

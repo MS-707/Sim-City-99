@@ -6,13 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M4 — Advisors panel**: Win95 dialog with tabbed advisors (Finance,
-  Safety, Environment) giving live, rule-based advice from sim state.
+- [ ] **M5 — Nicer terrain**: shoreline edge tiles (beach transitions), water
+  animation, tree autoclustering; bulldoze-to-waterfill tool.
 
 ## Open
 
-- [ ] **M5 — Nicer terrain**: shoreline edge tiles (beach transitions), water
-  animation, tree autoclustering; bulldoze-to-waterfill tool.
 - [ ] **M6 — Audio & UI polish**: per-building ambient sounds when zoomed in,
   budget window monthly auto-popup toggle, keyboard shortcut overlay (F1).
 - [ ] **M7 — Time capsule events**: dated 1997→1999 in-game events that affect
@@ -22,8 +20,17 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M9 — Scenario mode**: 2-3 playable scenarios with win conditions
   (e.g. "Gridlock '97": fix congestion in a pre-built town; "Twister Season":
   survive and rebuild), selectable from the splash screen.
+- [ ] **M10 — Day/night cycle**: gradual day-night tint over the city, lit
+  building windows at night, street lamps along roads, toggleable in Speed
+  menu; disasters more dramatic in the dark.
 
 ## Done
+
+- [x] **M4 — Advisors panel**: #dlg-advisors Win95 dialog (Windows menu) with
+  three Win95-style tabs — Myrna Plutz (Finance), Chief Gus Ramirez (Safety),
+  Dr. Willow Greenfield (Environment) — procedural canvas portraits, 3+
+  threshold rules per advisor reading live sim state, 500ms live refresh even
+  while paused, draggable/closable. Verified against 7 criteria (all pass).
 
 - [x] **M3 — More building variety**: school and hospital as placeable 2×2
   civics with powered education/health coverage maps (stampCoverage, radius

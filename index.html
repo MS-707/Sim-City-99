@@ -134,6 +134,38 @@
     </div>
   </div>
 
+  <div id="dlg-advisors" class="win95 dlg hidden">
+    <div class="titlebar"><span>🏛️ City Advisors — Term 1997</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <div id="adv-tabs" class="adv-tabs">
+        <button class="tab95 active" data-adv="finance">💰 Finance</button><button class="tab95" data-adv="safety">🚨 Safety</button><button class="tab95" data-adv="environment">🌳 Environment</button>
+      </div>
+      <div class="adv-panel" data-adv="finance">
+        <div class="adv-head">
+          <canvas class="adv-portrait" id="adv-face-finance" width="48" height="48"></canvas>
+          <div><div class="adv-name">Myrna Plutz</div><div class="adv-title">City Treasurer, CPA since '82</div></div>
+        </div>
+        <ul class="adv-advice" id="adv-advice-finance"></ul>
+      </div>
+      <div class="adv-panel hidden" data-adv="safety">
+        <div class="adv-head">
+          <canvas class="adv-portrait" id="adv-face-safety" width="48" height="48"></canvas>
+          <div><div class="adv-name">Chief Gus Ramirez</div><div class="adv-title">Public Safety Commissioner</div></div>
+        </div>
+        <ul class="adv-advice" id="adv-advice-safety"></ul>
+      </div>
+      <div class="adv-panel hidden" data-adv="environment">
+        <div class="adv-head">
+          <canvas class="adv-portrait" id="adv-face-environment" width="48" height="48"></canvas>
+          <div><div class="adv-name">Dr. Willow Greenfield</div><div class="adv-title">Environmental Advisor, Ph.D.</div></div>
+        </div>
+        <ul class="adv-advice" id="adv-advice-environment"></ul>
+      </div>
+      <div class="adv-foot">☎ Advisors reachable by beeper, fax, or dial-up &bull; ©1997 City Hall Intranet — best viewed in Netscape</div>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
   <div id="dlg-query" class="win95 dlg hidden">
     <div class="titlebar"><span>🔍 Tile Info</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
     <div class="dlg-body"><table id="query-table"></table>
@@ -148,6 +180,7 @@
 <script src="js/sprites.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/advisors.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

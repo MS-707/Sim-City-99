@@ -174,6 +174,34 @@ body {
 #query-table td { padding: 1px 8px 1px 0; }
 #query-table td:first-child { color: #444; }
 
+/* ---------- advisors ---------- */
+#dlg-advisors { min-width: 400px; }
+.adv-tabs { display: flex; padding: 0 4px; position: relative; }
+.tab95 {
+  background: #c0c0c0; color: #000; cursor: pointer;
+  font-family: inherit; font-size: 12px; padding: 3px 12px 4px;
+  border: 2px solid; border-color: #fff #404040 #c0c0c0 #fff; border-bottom: none;
+  margin-right: 2px; position: relative; top: 2px;
+}
+.tab95.active {
+  font-weight: bold; top: 0; padding-bottom: 8px; z-index: 2;
+  margin-bottom: -2px; background: #c0c0c0;
+}
+.adv-panel {
+  border: 2px solid; border-color: #fff #404040 #404040 #fff;
+  background: #c0c0c0; padding: 8px; min-height: 170px; width: 380px;
+}
+.adv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.adv-portrait { border: 2px solid; border-color: #808080 #fff #fff #808080; image-rendering: pixelated; }
+.adv-name { font-weight: bold; font-size: 13px; }
+.adv-title { color: #444; font-size: 11px; font-style: italic; }
+.adv-advice { list-style: none; }
+.adv-advice li {
+  background: #ffffe1; border: 1px solid #808080;
+  padding: 4px 6px; margin-bottom: 5px; font-size: 11px; line-height: 1.35;
+}
+.adv-foot { margin-top: 6px; color: #555; font-size: 10px; text-align: center; }
+
 /* ---------- locked reward tools ---------- */
 .toolbtn.locked { opacity: .55; cursor: not-allowed; }
 .toolbtn.locked .cost { color: #833; }

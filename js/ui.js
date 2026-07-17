@@ -184,6 +184,7 @@ const MENUS = {
   windows: () => [
     ["Budget…", openBudget],
     ["Graphs…", openGraphs],
+    ["Advisors…", openAdvisors],
   ],
   sound: () => [
     [`${Snd.sfxOn ? "✓ " : ""}Sound Effects`, () => Snd.toggleSfx()],

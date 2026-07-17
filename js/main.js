@@ -55,6 +55,7 @@ function loop(now) {
   tickerFrame();
   refreshHUD();
   newsFrame();
+  advisorsFrame();
   if (++mmCounter % 15 === 0) renderMinimap(city, UI.mapMode);
 
   requestAnimationFrame(loop);

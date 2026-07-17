@@ -375,6 +375,80 @@ function bindCanvas() {
     cam.z = Math.max(0.4, Math.min(2.5, cam.z * f));
     clampCam();
   }, { passive: false });
+
+  /* --- touch input (M15): one finger builds, two fingers pan / pinch-zoom.
+     preventDefault on touchstart keeps the browser from replaying the tap as
+     synthetic mouse events (no double-build) and from scrolling the page.
+     A lone finger starts as a pending "tap" that builds nothing yet: if it
+     moves it becomes a paint drag, if it lifts it builds its tile, and if a
+     second finger lands (fingers rarely touch down in the same event) the
+     whole touch is promoted to a camera gesture that never builds. --- */
+  const TAP_SLOP = 8; // px of finger jitter still counting as a tap
+  const touch = { mode: null, sx: 0, sy: 0, lastMid: null, lastDist: 1 };
+  const pinchOf = (e) => {
+    const a = e.touches[0], b = e.touches[1];
+    return {
+      mid: { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 },
+      dist: Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)),
+    };
+  };
+
+  c.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    Snd.ensure();
+    if (e.touches.length >= 2) {
+      const { mid, dist } = pinchOf(e);
+      touch.mode = "gesture"; touch.lastMid = mid; touch.lastDist = dist;
+      UI.hover = null;
+    } else if (touch.mode === null) {
+      const t = e.touches[0];
+      const r = c.getBoundingClientRect();
+      touch.mode = "tap"; touch.sx = t.clientX; touch.sy = t.clientY;
+      UI.hover = screenToTile(t.clientX - r.left, t.clientY - r.top);
+    }
+  }, { passive: false });
+
+  c.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    if (touch.mode === "gesture" && e.touches.length >= 2) {
+      const { mid, dist } = pinchOf(e);
+      const r = c.getBoundingClientRect();
+      // pinch: rescale about the gesture midpoint so the tile under it stays put
+      const z2 = Math.max(0.4, Math.min(2.5, cam.z * (dist / touch.lastDist)));
+      const sx = mid.x - r.left - cvs.width / 2;
+      const sy = mid.y - r.top - cvs.height / 2;
+      cam.x += sx / cam.z - sx / z2;
+      cam.y += sy / cam.z - sy / z2;
+      cam.z = z2;
+      // two-finger pan: same sign convention as the mouse pan
+      cam.x -= (mid.x - touch.lastMid.x) / cam.z;
+      cam.y -= (mid.y - touch.lastMid.y) / cam.z;
+      clampCam();
+      touch.lastMid = mid; touch.lastDist = dist;
+    } else if ((touch.mode === "tap" || touch.mode === "paint") &&
+               e.touches.length === 1) {
+      const t = e.touches[0];
+      if (touch.mode === "tap") {
+        if (Math.hypot(t.clientX - touch.sx, t.clientY - touch.sy) < TAP_SLOP) return;
+        touch.mode = "paint";
+        // the drag's very first tile — where the finger went down
+        applyToolAt({ clientX: touch.sx, clientY: touch.sy });
+      }
+      const r = c.getBoundingClientRect();
+      UI.hover = screenToTile(t.clientX - r.left, t.clientY - r.top);
+      applyToolAt(t); // a Touch carries clientX/clientY — same mapping as the mouse
+    }
+  }, { passive: false });
+
+  const touchDone = (e) => {
+    if (e.cancelable) e.preventDefault(); // swallow the synthetic click too
+    if (touch.mode === "tap" && e.type === "touchend")
+      applyToolAt({ clientX: touch.sx, clientY: touch.sy }); // a clean tap builds
+    // a gesture keeps its claim until every finger lifts — no accidental builds
+    if (e.touches.length === 0) { touch.mode = null; UI.hover = null; }
+  };
+  c.addEventListener("touchend", touchDone, { passive: false });
+  c.addEventListener("touchcancel", touchDone, { passive: false });
 }
 
 function clampCam() {
@@ -578,7 +652,11 @@ function openShortcuts() {
     <tr><td class="kbd">Mouse wheel</td><td>Zoom in / out</td></tr>
     <tr><td class="kbd">Right / middle drag</td><td>Pan the map</td></tr>
     <tr><td class="kbd">Esc</td><td>Close dialogs</td></tr>
-    <tr><td class="kbd">F1</td><td>Toggle this window</td></tr>`;
+    <tr><td class="kbd">F1</td><td>Toggle this window</td></tr>
+    <tr class="ksep"><td colspan="2">— Touch —</td></tr>
+    <tr><td class="kbd">Tap / one-finger drag</td><td>Build with the selected tool</td></tr>
+    <tr><td class="kbd">Two-finger drag</td><td>Pan the map</td></tr>
+    <tr><td class="kbd">Pinch</td><td>Zoom in / out</td></tr>`;
   showDlg("dlg-shortcuts");
 }
 

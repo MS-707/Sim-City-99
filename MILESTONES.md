@@ -6,15 +6,13 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M15 — Touch & small-screen support**: tap-to-build, pinch zoom,
-  responsive toolbar/side panel so the game plays on tablets.
-
-## Open
-
 - [ ] **M16 — More scenarios & medals**: extend the M9 SCENARIOS table with
   2-3 more scripted challenges (e.g. "Blackout Summer": rebuild a grid after
   the '97 heat wave; "Y2K Ready": bunker the city before Dec 1999), plus
   bronze/silver/gold results by finish date and a trophy shelf dialog.
+
+## Open
+
 - [ ] **M17 — City Hall records**: a stats almanac dialog (yearly population,
   budget, disasters survived), plus named citizens ticker complaints tied to
   real tile problems (click to jump the camera there).
@@ -27,8 +25,19 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M20 — Soundtrack expansion**: 3-4 distinct generative music moods
   (calm building, bustling metropolis, disaster tension, night jazz) that
   crossfade based on sim state; music credits easter egg in About.
+- [ ] **M21 — Land value visualization & districts**: named districts painted
+  by the player, per-district stats in a dialog, district names on the map at
+  low zoom (SC2K-style neighborhood labels).
 
 ## Done
+
+- [x] **M15 — Touch & small-screen support**: one-finger tap/drag builds,
+  two-finger drag pans, pinch zooms about the gesture midpoint (clamped
+  0.4-2.5); synthetic-mouse double-fire guarded, touchmove preventDefault
+  (page never scrolls); @media <=900px collapses the sidepanel and turns the
+  toolbar into a horizontal scroll strip (viewport >=85% width on 768x1024);
+  gestures documented in About + F1; desktop mouse behavior byte-for-byte
+  regression-tested. Verified against 7 criteria (all pass).
 
 - [x] **M14 — Postcard photo mode**: File → "Send Postcard…" composes the
   live viewport (night tint, season, cars and all) onto a dedicated canvas

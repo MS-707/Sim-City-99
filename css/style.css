@@ -296,6 +296,24 @@ body {
 }
 .picker-seed { font-size: 10px; color: #333; }
 
+/* ---------- small screens (M15) ----------
+   Below 900px the classic 76px tool column + 184px side panel would starve
+   the viewport, so the toolbar becomes a horizontal scroll strip under the
+   map and the side panel bows out entirely. */
+@media (max-width: 900px) {
+  #win-main { inset: 2px; }
+  .mainrow { flex-direction: column; }
+  #viewport { order: 1; min-height: 0; }
+  #toolbar {
+    order: 2; width: 100%; max-height: 84px;
+    flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-top: 2px solid #808080;
+  }
+  .toolbtn { flex: 0 0 auto; width: 64px; }
+  #sidepanel { display: none; }
+  .dlg { top: 50%; max-width: 94vw; max-height: 96vh; overflow-y: auto; }
+}
+
 /* ---------- postcard photo mode (M14) ---------- */
 #dlg-postcard .dlg-body { text-align: center; }
 #postcard-canvas {

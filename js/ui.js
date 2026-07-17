@@ -277,6 +277,7 @@ const MENUS = {
       () => { UI.prefs.autoBudget = !UI.prefs.autoBudget; savePrefs(); }],
     ["Graphs…", openGraphs],
     ["Advisors…", openAdvisors],
+    ["Trophy Shelf… 🏆", openTrophies],
     "-",
     ["Keyboard Shortcuts… (F1)", openShortcuts],
   ],

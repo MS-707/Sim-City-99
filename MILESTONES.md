@@ -6,16 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M16 — More scenarios & medals**: extend the M9 SCENARIOS table with
-  2-3 more scripted challenges (e.g. "Blackout Summer": rebuild a grid after
-  the '97 heat wave; "Y2K Ready": bunker the city before Dec 1999), plus
-  bronze/silver/gold results by finish date and a trophy shelf dialog.
-
-## Open
-
 - [ ] **M17 — City Hall records**: a stats almanac dialog (yearly population,
   budget, disasters survived), plus named citizens ticker complaints tied to
   real tile problems (click to jump the camera there).
+
+## Open
+
 - [ ] **M18 — Helicopter & traffic copter reports**: a news chopper that
   flies over congestion hotspots at random intervals; clicking it opens a
   live "Traffic on the 5s" report naming the worst intersections.
@@ -28,8 +24,25 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M21 — Land value visualization & districts**: named districts painted
   by the player, per-district stats in a dialog, district names on the map at
   low zoom (SC2K-style neighborhood labels).
+- [ ] **M22 — Ordinances**: city ordinances dialog (curfew, recycling,
+  carpool incentive, arcade tax) with monthly costs/benefits wired into the
+  sim, unlocked by tier; advisors recommend relevant ordinances.
 
 ## Done
+
+- [x] **M16 — More scenarios & medals**: SCENARIOS grows to four with
+  "Blackout Summer '97" (rebuild Ampereville's scrapped grid to 300 powered
+  zone tiles before Jan 1999, under the June '97 heat-wave draw) and "Y2K
+  Ready" (open Jul 1999; hit 2,500 pop, +100 power margin and §4,000 banked
+  before the Dec '99 millennium-bug event) — both deterministic builders,
+  goals wired to live sim systems (recomputePower / census / treasury) and
+  the M7 era timeline; every scenario now declares machine-readable medal
+  cutoffs (months left at the win: gold/silver/bronze), the tier is announced
+  in the win Bugle + ticker, and best results live in a localStorage player
+  profile (simcity99.trophies, upgrade-only, never in the city save) shown by
+  a Win95 trophy-shelf dialog reachable from the Windows menu and the splash;
+  M9 scenarios byte-identical vs 6c25b04. Verified against 8 criteria (all
+  pass, 117 checks).
 
 - [x] **M15 — Touch & small-screen support**: one-finger tap/drag builds,
   two-finger drag pans, pinch zooms about the gesture midpoint (clamped

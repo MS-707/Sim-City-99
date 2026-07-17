@@ -314,6 +314,21 @@ body {
   .dlg { top: 50%; max-width: 94vw; max-height: 96vh; overflow-y: auto; }
 }
 
+/* ---------- more scenarios & medals (M16) ----------
+   Four+ scenario cards: the splash may now outgrow short viewports, so it
+   scrolls vertically (never horizontally — cards wrap) and the inner column
+   safe-centers with margin auto instead of clipping its top edge. */
+#splash { overflow-y: auto; }
+.splash-inner { margin: auto; padding: 18px 8px; max-width: 100%; }
+#btn-trophies-splash { margin-top: 16px; font-size: 11px; }
+#dlg-trophies { z-index: 55; } /* above the splash: reachable pre-game too */
+.trophy-table { width: 100%; border-collapse: collapse; min-width: 300px; }
+.trophy-table td { padding: 3px 6px; font-size: 12px; }
+.trophy-table td:first-child { font-size: 15px; text-align: center; width: 24px; }
+.trophy-table td:nth-child(2) { font-weight: bold; }
+.trophy-table tr.unwon td { color: #666; font-style: italic; font-weight: normal; }
+.trophy-note { margin-top: 8px; font-size: 10px; color: #555; text-align: center; }
+
 /* ---------- postcard photo mode (M14) ---------- */
 #dlg-postcard .dlg-body { text-align: center; }
 #postcard-canvas {

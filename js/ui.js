@@ -482,12 +482,28 @@ function bindDialogs() {
     document.getElementById("tax-label").textContent = slider.value + "%";
     fillBudgetTable();
   });
+
+  // M13: issue-bond button — refusal at the cap is handled by issueBond()
+  document.getElementById("btn-issue-bond").addEventListener("click", () => {
+    Snd.ensure();
+    const res = city.issueBond();
+    fillBondPanel(); fillBudgetTable();
+    if (res.ok) { Snd.cash(); setBondNote(""); }
+    else {
+      Snd.denied();
+      const msg = `⛔ Credit limit reached — the market refuses more than ${BOND_MAX} concurrent bonds.`;
+      setBondNote(msg);
+      city.pushMsg(msg);
+    }
+  });
 }
 
 function openBudget() {
   document.getElementById("tax-slider").value = city.taxRate;
   document.getElementById("tax-label").textContent = city.taxRate + "%";
   fillBudgetTable();
+  fillBondPanel();
+  setBondNote("");
   showDlg("dlg-budget");
 }
 
@@ -499,8 +515,53 @@ function fillBudgetTable() {
     <tr><td>Roads &amp; wires</td><td>${f(-b.roads)}</td></tr>
     <tr><td>Police &amp; fire</td><td>${f(-b.services)}</td></tr>
     <tr><td>Power plants</td><td>${f(-b.power)}</td></tr>
+    <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;
+}
+
+/* --------- municipal bonds panel (M13) --------- */
+function setBondNote(msg) { document.getElementById("bond-note").textContent = msg; }
+
+function fillBondPanel() {
+  const r = creditRating(city);            // recomputed on demand (pure fn)
+  const pct = (x) => (x * 100).toFixed(1) + "%";
+  document.getElementById("bond-rating").textContent =
+    `Credit rating: ${r.grade} — new bonds offered at ${pct(r.rateOffered)} APR`;
+  const tbl = document.getElementById("bond-table");
+  if (!city.bonds.length) {
+    tbl.innerHTML = `<tr><td>No active bonds — the city is debt-free.</td></tr>`;
+  } else {
+    tbl.innerHTML = city.bonds.map((b, k) =>
+      `<tr><td>§${b.principal.toLocaleString()} @ ${pct(b.rate)}</td>` +
+      `<td>${b.remaining} mo left</td>` +
+      `<td>§${b.balance.toLocaleString()} owed</td>` +
+      `<td><button class="btn95 tiny bond-payoff" data-bond="${k}">Pay Off</button></td></tr>`
+    ).join("");
+    tbl.querySelectorAll(".bond-payoff").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const res = city.payoffBond(+btn.dataset.bond);
+        fillBondPanel(); fillBudgetTable();
+        if (res.ok) {
+          Snd.cash();
+          setBondNote(`🏦 Bond retired early — §${res.cost.toLocaleString()} paid ` +
+            `(incl. §${res.fee.toLocaleString()} fee).`);
+        } else {
+          Snd.denied();
+          const msg = "⛔ The treasury can't cover that early payoff — request refused.";
+          setBondNote(msg);
+          city.pushMsg(msg);
+        }
+      }));
+  }
+  // at the borrowing cap the issue control visibly refuses (class + note);
+  // it stays clickable so the refusal path can announce itself
+  const atCap = city.bonds.length >= BOND_MAX;
+  const btn = document.getElementById("btn-issue-bond");
+  btn.classList.toggle("refused", atCap);
+  btn.textContent = atCap
+    ? `Bond limit reached (${BOND_MAX} max)`
+    : `Issue §${BOND_PRINCIPAL.toLocaleString()} Bond @ ${pct(r.rateOffered)}`;
 }
 
 function openShortcuts() {
@@ -619,6 +680,10 @@ function newsFrame() {
 const ticker = { queue: [], x: 0, current: "Welcome to 1997, Mayor. The city awaits." };
 
 function tickerFeed() {
+  // while paused the crawl keeps moving but never consumes city.messages —
+  // a paused mayor shouldn't miss queued civic notices (M13)
+  if (UI.speed === 0)
+    return NEWS_GENERIC[(Math.random() * NEWS_GENERIC.length) | 0];
   // city messages take priority
   if (city.messages.length) return city.messages.shift();
   // seasonal wires (M12): winter / summer color, gated purely by the month

@@ -6,14 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M13 — Bonds & loans**: issue municipal bonds from the budget window
-  (borrow now, repay with interest monthly), credit rating that reacts to
-  treasury health; advisors comment on debt.
+- [ ] **M14 — Postcard photo mode**: export a framed PNG "postcard from
+  1997" snapshot of the current view (city name, date, retro border).
 
 ## Open
 
-- [ ] **M14 — Postcard photo mode**: export a framed PNG "postcard from
-  1997" snapshot of the current view (city name, date, retro border).
 - [ ] **M15 — Touch & small-screen support**: tap-to-build, pinch zoom,
   responsive toolbar/side panel so the game plays on tablets.
 - [ ] **M16 — More scenarios & medals**: extend the M9 SCENARIOS table with
@@ -26,8 +23,19 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M18 — Helicopter & traffic copter reports**: a news chopper that
   flies over congestion hotspots at random intervals; clicking it opens a
   live "Traffic on the 5s" report naming the worst intersections.
+- [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
+  and lose capacity after ~30 years with rebuild prompts, coal smog scales
+  with load; power mix pie in the budget window.
 
 ## Done
+
+- [x] **M13 — Bonds & loans**: §5,000 municipal bonds issued from the budget
+  dialog, amortized over 12 monthly rollovers (annuity formula, debt-service
+  line in the budget + net), per-bond early payoff with a 2% fee, an
+  on-demand AAA–C credit rating (funds/debt thresholds) that prices new
+  bonds, a 4-bond borrowing cap with visible refusal, two new debt-aware
+  Myrna Plutz advisor rules, and save v5 round-tripping bond state (older
+  saves load debt-free). Verified against 8 criteria (all pass).
 
 - [x] **M12 — Seasons**: seasonOf(month) — a pure function of the calendar
   (Dec–Feb winter, then 3-month blocks), no new save state (still v4,

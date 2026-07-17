@@ -59,6 +59,44 @@ function tierForPop(pop) {
   return k;
 }
 
+/* ---- municipal bonds & credit rating (M13) ----
+   One instrument: a §5,000 general-obligation bond amortized over 12 monthly
+   rollovers (collectBudget charges the debt service — see the comments there
+   for the exact amortization formula). Borrowing cap: the city may float at
+   most BOND_MAX = 4 concurrent bonds, at any rating — the market refuses a
+   5th issue outright.
+
+   Credit rating: an ordinal 5-grade scale, best to worst
+       AAA > AA > A > B > C
+   recomputed ON DEMAND (a pure function of city state, evaluated whenever
+   the budget dialog renders or a bond is issued — no month rollover needed).
+   Documented threshold rules, as penalty points starting from 0:
+       funds <  0            +2   (treasury underwater)
+       0 <= funds < 2000     +1   (dangerously thin cushion)
+       +1 per active bond         (debt load)
+       grade = RATINGS[min(points, 4)]
+   Each grade maps to the APR offered on NEW bonds (rateOffered). Bonds that
+   are already issued keep the rate stamped on them at issue time forever. */
+const BOND_PRINCIPAL = 5000;
+const BOND_TERM = 12;   // months
+const BOND_MAX = 4;     // concurrent-bond borrowing cap (any rating)
+const RATINGS = [
+  { grade: "AAA", rate: 0.05 },
+  { grade: "AA",  rate: 0.07 },
+  { grade: "A",   rate: 0.10 },
+  { grade: "B",   rate: 0.14 },
+  { grade: "C",   rate: 0.20 },
+];
+
+function creditRating(c) {
+  let p = 0;
+  if (c.funds < 0) p += 2;
+  else if (c.funds < 2000) p += 1;
+  p += c.bonds.length;
+  const k = Math.min(p, RATINGS.length - 1);
+  return { grade: RATINGS[k].grade, rateOffered: RATINGS[k].rate, level: k };
+}
+
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 /* ---- seasons (M12) ----
@@ -91,7 +129,7 @@ const EVENTS = [
     headline: "🌡️ RECORD HEAT WAVE BAKES THE CITY — EVERY AC ON FULL BLAST",
     effect: { type: "powerDemand", mult: 1.25, months: 3 } },
   { id: "asian-flu-97", year: 1997, month: 10,
-    headline: "📉 ASIAN MARKET FLU BITES CITY BONDS — TREASURY TAKES A §1,500 BATH",
+    headline: "📉 ASIAN MARKET FLU BITES THE CITY TREASURY — A §1,500 BATH ON THE BAHT",
     effect: { type: "funds", amount: -1500 } },
   { id: "dotcom-boom-98", year: 1998, month: 5, paper: true,
     headline: "🌐 DOT-COM GOLD RUSH HITS MAIN STREET!",
@@ -170,7 +208,8 @@ class City {
     this.demand = { r: 0.4, c: 0.1, i: 0.5 };
     this.powerDemand = 0; this.powerSupply = 0;
     this.history = { pop: [], funds: [] };
-    this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, net: 0 };
+    this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, debt: 0, net: 0 };
+    this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
     this.disastersEnabled = true;
     this.disaster = null;           // {kind:'tornado'|'ufo', x, y, ticks}
     this.powerDirty = true;
@@ -750,6 +789,44 @@ class City {
     }
   }
 
+  // ---------- municipal bonds (M13) ----------
+  // Sells one §BOND_PRINCIPAL general-obligation bond at the rate the city's
+  // current credit rating commands (see creditRating above). The principal
+  // lands in the treasury immediately; repayment is a fixed amortized payment
+  // per month rollover, precomputed here by the standard annuity formula:
+  //     m       = rate / 12                       (monthly interest rate)
+  //     monthly = round(principal * m / (1 - (1 + m)^-term))
+  // Refused outright at the BOND_MAX concurrent-bond cap.
+  issueBond(amount = BOND_PRINCIPAL) {
+    if (this.bonds.length >= BOND_MAX) return { ok: false, reason: "limit" };
+    const rate = creditRating(this).rateOffered;
+    const m = rate / 12;
+    const monthly = Math.round(amount * m / (1 - Math.pow(1 + m, -BOND_TERM)));
+    this.bonds.push({ principal: amount, rate, term: BOND_TERM,
+                      remaining: BOND_TERM, monthly, balance: amount });
+    this.funds += amount;
+    this.pushMsg(`📜 City raises §${amount.toLocaleString()} on the municipal market ` +
+      `at ${(rate * 100).toFixed(1)}% — debt service §${monthly}/mo for ${BOND_TERM} months.`);
+    return { ok: true, rate, monthly };
+  }
+
+  // Early payoff (M13): a bond may be retired at any time for its remaining
+  // balance plus a flat 2% early-payoff fee:
+  //     cost = balance + round(balance * 0.02)
+  // Refused outright (no partial payment) if the treasury can't cover cost.
+  payoffBond(k) {
+    const b = this.bonds[k];
+    if (!b) return { ok: false, reason: "none" };
+    const fee = Math.round(b.balance * 0.02);
+    const cost = b.balance + fee;
+    if (this.funds < cost) return { ok: false, reason: "funds", cost, fee };
+    this.funds -= cost;
+    this.bonds.splice(k, 1);
+    this.pushMsg(`🏦 Debt cleared early — §${cost.toLocaleString()} handed to the ` +
+      `holders of the §${b.principal.toLocaleString()} issue (incl. §${fee.toLocaleString()} fee).`);
+    return { ok: true, cost, fee };
+  }
+
   // ---------- budget (monthly) ----------
   collectBudget() {
     let roads = 0, wires = 0, services = 0, plants = 0;
@@ -765,9 +842,34 @@ class City {
     const roadCost = Math.round(roads * 0.4 + wires * 0.15);
     const serviceCost = services * 25;
     const plantCost = plants * 40;
-    const net = taxes - roadCost - serviceCost - plantCost;
+    // ---- debt service (M13) ----
+    // Each active bond charges one payment per month rollover. The payment is
+    // the fixed amortized `monthly` stamped at issue (annuity formula — see
+    // issueBond):  monthly = round(principal * m / (1 - (1+m)^-term)),
+    // m = rate/12. Each month splits into interest = round(balance * m) plus
+    // principal (monthly - interest), which reduces balance; the FINAL month
+    // instead charges exactly balance + interest so the loan always clears to
+    // §0 with no residual. Total repaid over the full term is therefore
+    // principal + interest ≈ monthly * term (±§1/month rounding), which
+    // strictly exceeds principal. remaining decrements once per rollover; at
+    // 0 the bond retires and a payoff notice hits the ticker exactly once.
+    let debt = 0;
+    for (let k = this.bonds.length - 1; k >= 0; k--) {
+      const b = this.bonds[k];
+      const interest = Math.round(b.balance * (b.rate / 12));
+      const pay = b.remaining <= 1 ? b.balance + interest : b.monthly;
+      b.balance = b.remaining <= 1 ? 0 : Math.max(0, b.balance - (pay - interest));
+      debt += pay;
+      b.remaining--;
+      if (b.remaining <= 0) {
+        this.bonds.splice(k, 1);
+        this.pushMsg(`🎉 Bond paid off! The §${b.principal.toLocaleString()} issue is ` +
+          `fully repaid — the ledger sighs with relief.`);
+      }
+    }
+    const net = taxes - roadCost - serviceCost - plantCost - debt;
     this.funds += net;
-    this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost, net };
+    this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost, debt, net };
     if (this.funds < 0) this.pushMsg("💸 The city is BROKE. Raise taxes or cut back, Mayor!");
     this.history.pop.push(this.pop);
     this.history.funds.push(this.funds);
@@ -889,8 +991,9 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 4, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 5, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
+      bonds: this.bonds,
       month: this.month, year: this.year, tickCount: this.tickCount,
       disastersEnabled: this.disastersEnabled,
       tier: this.tier, announcedTier: this.announcedTier,
@@ -921,6 +1024,12 @@ class City {
     // remaining timers; a pre-M7 (v<=2) save simply has neither field, and
     // markPassedEvents() quietly retires anything the calendar already passed
     // so loading an old city never retro-fires 1997 headlines.
+    // municipal bonds (M13, save v5): restore each bond's full amortization
+    // state. A v4-or-earlier save simply has no bonds field and loads
+    // debt-free; the credit rating is never serialized — it's a pure function
+    // of funds + bonds, recomputed on demand (see creditRating).
+    c.bonds = Array.isArray(d.bonds)
+      ? d.bonds.map((b) => Object.assign({}, b)) : [];
     c.firedEvents = Array.isArray(d.firedEvents) ? d.firedEvents.slice() : [];
     c.activeMods = Array.isArray(d.activeMods)
       ? d.activeMods.map((m) => Object.assign({}, m)) : [];

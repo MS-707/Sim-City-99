@@ -53,6 +53,34 @@ function adviseFinance() {
   else
     out.push("We break exactly even each month. Suspiciously tidy — like a rigged game " +
       "of Minesweeper.");
+  // ---- M13: debt awareness — two rules (debt load, credit rating) ----
+  const bonds = city.bonds || [];
+  const debtSvc = Math.round(city.lastBudget.debt || 0);
+  const owed = bonds.reduce((s, b) => s + b.balance, 0);
+  // "drowning" = borrowed to the cap, or servicing debt with a treasury underwater
+  const drowning = bonds.length >= BOND_MAX || (bonds.length > 0 && city.funds < 0);
+  if (bonds.length === 0)
+    out.push("Zero bond debt on the books. We owe Wall Street nothing — exactly how " +
+      "I like my spreadsheets: empty and smug.");
+  else if (drowning)
+    out.push("Mayor, we're DROWNING in debt — §" + owed.toLocaleString() + " owed across " +
+      bonds.length + " bond" + (bonds.length === 1 ? "" : "s") + ", §" +
+      debtSvc.toLocaleString() + " a month in payments. The repo man drives a Geo Metro.");
+  else
+    out.push("We're carrying " + bonds.length + " bond" + (bonds.length === 1 ? "" : "s") +
+      " — §" + owed.toLocaleString() + " outstanding, §" + debtSvc.toLocaleString() +
+      " a month in debt service. Manageable, as long as nobody buys another stadium.");
+  const cr = creditRating(city);
+  if (cr.level === 0)
+    out.push("Our credit rating is a spotless AAA — lenders offer their very best " +
+      (cr.rateOffered * 100).toFixed(1) + "% interest. I framed the letter next to the fax.");
+  else if (cr.level <= 2)
+    out.push("Our credit rating has slipped to " + cr.grade + " — new bonds now cost " +
+      (cr.rateOffered * 100).toFixed(1) + "% interest. Tidy the books before it gets worse.");
+  else
+    out.push("The agencies rate us " + cr.grade + " — junk territory! New borrowing costs " +
+      (cr.rateOffered * 100).toFixed(1) + "% interest. Pay something off before they " +
+      "repossess the dot-matrix printer.");
   return out;
 }
 

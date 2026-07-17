@@ -12,8 +12,12 @@ is synthesized live with WebAudio.
 
 ## ▶ Play
 
-Open `index.html` in a browser. That's it. (Or serve the folder:
-`python3 -m http.server` → http://localhost:8000)
+**Play it now (single-file build):**
+[SimCity 99 on Claude Artifacts](https://claude.ai/code/artifact/11662dcc-e0db-4051-af9a-302d54c7c504)
+*(private by default — shareable from the page's share menu)*
+
+Or run it locally: open `index.html` in a browser. That's it. (Or serve the
+folder: `python3 -m http.server` → http://localhost:8000)
 
 ## ✨ Features
 

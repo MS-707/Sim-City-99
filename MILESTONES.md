@@ -6,14 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M8 — Public deploy**: publish a playable build as a shareable web page
-  and link it from the README.
-
-## Open
-
 - [ ] **M9 — Scenario mode**: 2-3 playable scenarios with win conditions
   (e.g. "Gridlock '97": fix congestion in a pre-built town; "Twister Season":
   survive and rebuild), selectable from the splash screen.
+
+## Open
+
 - [ ] **M10 — Day/night cycle**: gradual day-night tint over the city, lit
   building windows at night, street lamps along roads, toggleable in Speed
   menu; disasters more dramatic in the dark.
@@ -26,6 +24,11 @@ Queue policy: keep at least 5 open improvements at all times.
   treasury health; advisors comment on debt.
 
 ## Done
+
+- [x] **M8 — Public deploy**: single-file bundle (all CSS/JS inlined, zero
+  external requests) published as a Claude Artifact and linked from the
+  README; bundle smoke-tested headlessly (game boots, 200 ticks, all M1-M7
+  features present, zero console errors).
 
 - [x] **M7 — Time capsule events**: declarative EVENTS table (5 dated events
   1997–1999: heat wave, Asian financial flu, dot-com boom, GoldenEye tourism

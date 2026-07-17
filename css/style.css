@@ -1,0 +1,175 @@
+/* ============ SimCity 99 — Windows 95 chrome ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: "Tahoma", "MS Sans Serif", "Segoe UI", sans-serif;
+  font-size: 12px;
+  background: #008080; /* the teal */
+  color: #000;
+}
+#desktop { width: 100%; height: 100%; position: relative; }
+.hidden { display: none !important; }
+
+/* ---------- splash ---------- */
+#splash {
+  position: absolute; inset: 0; z-index: 50;
+  background:
+    radial-gradient(ellipse at 50% 110%, #1a3a6b 0%, #05102a 70%),
+    #05102a;
+  display: flex; align-items: center; justify-content: center;
+}
+.splash-inner { text-align: center; color: #fff; }
+.splash-logo {
+  font-family: "Impact", "Arial Black", sans-serif;
+  font-size: 84px; letter-spacing: 6px;
+  background: linear-gradient(#fff59b 15%, #ff9d00 45%, #7a2b00 55%, #ffd76b 90%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 40px rgba(255,160,0,.25);
+}
+.splash-sub { font-size: 20px; letter-spacing: 12px; color: #9fd3ff; margin-top: 4px; }
+.splash-tag { color: #6f86ad; margin: 18px 0 26px; font-size: 12px; }
+.splash-foot { color: #44557a; margin-top: 34px; font-size: 11px; }
+#splash .btn95.big { font-size: 16px; padding: 10px 26px; margin: 0 8px; }
+
+/* ---------- win95 widgets ---------- */
+.win95 {
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #fff #404040 #404040 #fff;
+  box-shadow: 1px 1px 0 #000;
+}
+.titlebar {
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff; font-weight: bold; padding: 3px 6px;
+  display: flex; align-items: center; gap: 6px;
+  cursor: default;
+}
+.titlebar > span:nth-child(2), #city-title { flex: 1; }
+#city-title { flex: 1; }
+.title-btns { display: flex; gap: 2px; }
+.tbtn {
+  width: 16px; height: 14px; background: #c0c0c0; color: #000;
+  border: 1px solid; border-color: #fff #404040 #404040 #fff;
+  font-size: 9px; line-height: 12px; text-align: center; cursor: pointer;
+}
+.btn95 {
+  background: #c0c0c0; border: 2px solid; border-color: #fff #404040 #404040 #fff;
+  padding: 3px 10px; font-family: inherit; font-size: 12px; cursor: pointer;
+}
+.btn95:active, .btn95.active { border-color: #404040 #fff #fff #404040; background: #b0b0b0; }
+.btn95.tiny { padding: 1px 4px; font-size: 10px; }
+
+/* ---------- main window layout ---------- */
+#win-main {
+  position: absolute; inset: 8px;
+  display: flex; flex-direction: column;
+}
+.menubar { display: flex; background: #c0c0c0; border-bottom: 1px solid #808080; }
+.menu { padding: 3px 10px; cursor: pointer; }
+.menu:hover, .menu.open { background: #000080; color: #fff; }
+.menudrop {
+  position: absolute; z-index: 40; min-width: 180px;
+  background: #c0c0c0; border: 2px solid; border-color: #fff #404040 #404040 #fff;
+  box-shadow: 2px 2px 0 rgba(0,0,0,.4); padding: 2px;
+}
+.menudrop .mitem { padding: 4px 22px 4px 24px; cursor: pointer; position: relative; white-space: nowrap; }
+.menudrop .mitem:hover { background: #000080; color: #fff; }
+.menudrop .mitem .check { position: absolute; left: 8px; }
+.menudrop .msep { height: 1px; background: #808080; border-bottom: 1px solid #fff; margin: 3px 2px; }
+
+.mainrow { flex: 1; display: flex; min-height: 0; }
+
+/* ---------- toolbar ---------- */
+#toolbar {
+  width: 76px; padding: 4px; background: #c0c0c0;
+  border-right: 2px solid #808080;
+  display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+}
+.toolbtn {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 3px 1px 2px; cursor: pointer;
+  border: 2px solid; border-color: #dfdfdf #808080 #808080 #dfdfdf;
+  background: #c0c0c0; font-size: 9px; line-height: 10px; text-align: center;
+}
+.toolbtn canvas { image-rendering: pixelated; margin-bottom: 1px; }
+.toolbtn.active { border-color: #404040 #fff #fff #404040; background: #9db3c8; }
+.toolbtn .cost { color: #555; font-size: 8px; }
+
+/* ---------- viewport ---------- */
+#viewport { flex: 1; position: relative; background: #000; min-width: 0; overflow: hidden; }
+#game { position: absolute; inset: 0; cursor: crosshair; }
+#tooltip {
+  position: absolute; pointer-events: none; z-index: 30;
+  background: #ffffe1; border: 1px solid #000; padding: 2px 6px; font-size: 11px;
+}
+
+/* ---------- side panel ---------- */
+#sidepanel {
+  width: 184px; background: #c0c0c0; border-left: 2px solid #fff;
+  padding: 4px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto;
+}
+.fs95 { border: 1px solid #808080; box-shadow: 1px 1px 0 #fff inset; padding: 5px; }
+.fs95 legend { font-size: 11px; padding: 0 4px; }
+
+#rci { display: flex; justify-content: space-around; height: 78px; }
+.rci-col { display: flex; flex-direction: column; align-items: center; font-weight: bold; }
+.rci-barwrap {
+  width: 18px; height: 60px; position: relative;
+  background: #808080; border: 1px inset #fff;
+}
+.rci-barwrap::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 1px solid #000;
+}
+.rci-bar { position: absolute; left: 2px; right: 2px; height: 0; }
+.rci-bar.r { background: #00b000; }
+.rci-bar.c { background: #2040ff; }
+.rci-bar.i { background: #d0b000; }
+
+#minimap { width: 100%; image-rendering: pixelated; border: 1px inset #fff; background:#000; cursor: pointer; display:block; }
+#mapmodes { display: flex; gap: 1px; margin-top: 3px; flex-wrap: wrap; }
+
+#vitals { width: 100%; border-collapse: collapse; }
+#vitals td { padding: 1px 2px; font-size: 11px; }
+#vitals td:last-child { text-align: right; font-weight: bold; }
+
+/* ---------- status bar ---------- */
+#statusbar {
+  display: flex; gap: 3px; padding: 2px 3px; background: #c0c0c0;
+  border-top: 1px solid #fff;
+}
+.sb-cell {
+  border: 1px solid; border-color: #808080 #fff #fff #808080;
+  padding: 2px 8px; white-space: nowrap;
+}
+.sb-cell.wide { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- ticker ---------- */
+#ticker {
+  height: 20px; background: #000; color: #3f3;
+  font-family: "Courier New", monospace; font-size: 13px; line-height: 20px;
+  overflow: hidden; white-space: nowrap; position: relative;
+}
+#ticker-text { position: absolute; will-change: transform; }
+
+/* ---------- dialogs ---------- */
+.dlg {
+  position: absolute; z-index: 45; left: 50%; top: 40%;
+  transform: translate(-50%, -50%); min-width: 300px;
+}
+.dlg .titlebar { cursor: move; }
+.dlg-body { padding: 10px; }
+.dlg-buttons { text-align: center; margin-top: 10px; }
+.dlg-buttons .btn95 { min-width: 70px; }
+.budget-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.budget-table td { padding: 2px 6px; font-size: 12px; }
+.budget-table td:last-child { text-align: right; font-family: "Courier New", monospace; }
+.budget-table tr.total td { border-top: 1px solid #000; font-weight: bold; }
+.budget-row { margin-bottom: 4px; }
+.budget-row input[type=range] { width: 100%; }
+#graph-canvas { border: 1px inset #fff; background: #fff; }
+.graph-legend { margin-top: 4px; font-size: 11px; }
+.about p { margin-bottom: 8px; }
+.about .dim { color: #555; font-size: 11px; }
+#query-table td { padding: 1px 8px 1px 0; }
+#query-table td:first-child { color: #444; }

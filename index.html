@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SimCity 99 — It's 1997 Somewhere</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E🏙️%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="desktop">
+
+  <!-- Splash screen -->
+  <div id="splash">
+    <div class="splash-inner">
+      <div class="splash-logo">SIMCITY&nbsp;99</div>
+      <div class="splash-sub">— THE 1997 EDITION —</div>
+      <div class="splash-tag">56k modem not required &bull; Best viewed in 800×600</div>
+      <button id="btn-new-city" class="btn95 big">▶ &nbsp;NEW CITY</button>
+      <button id="btn-load-city" class="btn95 big">💾 &nbsp;LOAD CITY</button>
+      <div class="splash-foot">© 1997 Totally Not Maxis &bull; All sprites &amp; sounds are original, synthesized in-browser</div>
+    </div>
+  </div>
+
+  <!-- Main window -->
+  <div id="win-main" class="win95 hidden">
+    <div class="titlebar">
+      <span class="title-icon">🏙️</span>
+      <span id="city-title">SimCity 99 — Llamaville, Jan 1997</span>
+      <span class="title-btns"><span class="tbtn">_</span><span class="tbtn">□</span><span class="tbtn">✕</span></span>
+    </div>
+
+    <div class="menubar">
+      <div class="menu" data-menu="file">File</div>
+      <div class="menu" data-menu="speed">Speed</div>
+      <div class="menu" data-menu="disasters">Disasters</div>
+      <div class="menu" data-menu="windows">Windows</div>
+      <div class="menu" data-menu="sound">Sound</div>
+      <div class="menu" data-menu="help">Help</div>
+    </div>
+    <div id="menudrop" class="menudrop hidden"></div>
+
+    <div class="mainrow">
+      <!-- Toolbar -->
+      <div id="toolbar"></div>
+
+      <!-- Viewport -->
+      <div id="viewport">
+        <canvas id="game"></canvas>
+        <div id="tooltip" class="hidden"></div>
+      </div>
+
+      <!-- Side panel -->
+      <div id="sidepanel">
+        <fieldset class="fs95"><legend>Demand</legend>
+          <div id="rci">
+            <div class="rci-col"><div class="rci-barwrap"><div id="rci-r" class="rci-bar r"></div></div><span>R</span></div>
+            <div class="rci-col"><div class="rci-barwrap"><div id="rci-c" class="rci-bar c"></div></div><span>C</span></div>
+            <div class="rci-col"><div class="rci-barwrap"><div id="rci-i" class="rci-bar i"></div></div><span>I</span></div>
+          </div>
+        </fieldset>
+        <fieldset class="fs95"><legend>Map</legend>
+          <canvas id="minimap" width="160" height="160"></canvas>
+          <div id="mapmodes">
+            <button class="btn95 tiny mm active" data-mode="all">City</button><button class="btn95 tiny mm" data-mode="power">Pwr</button><button class="btn95 tiny mm" data-mode="poll">Pol</button><button class="btn95 tiny mm" data-mode="value">Val</button><button class="btn95 tiny mm" data-mode="crime">Cri</button>
+          </div>
+        </fieldset>
+        <fieldset class="fs95"><legend>Vitals</legend>
+          <table id="vitals">
+            <tr><td>Population</td><td id="v-pop">0</td></tr>
+            <tr><td>Jobs</td><td id="v-jobs">0</td></tr>
+            <tr><td>Power</td><td id="v-power">0/0</td></tr>
+            <tr><td>Approval</td><td id="v-approval">—</td></tr>
+          </table>
+        </fieldset>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div id="statusbar">
+      <span id="sb-funds" class="sb-cell">§ 20,000</span>
+      <span id="sb-date" class="sb-cell">Jan 1997</span>
+      <span id="sb-pop" class="sb-cell">Pop: 0</span>
+      <span id="sb-tool" class="sb-cell wide">Welcome, Mayor.</span>
+      <span id="sb-speed" class="sb-cell">▶ Normal</span>
+    </div>
+
+    <!-- News ticker -->
+    <div id="ticker"><span id="ticker-text"></span></div>
+  </div>
+
+  <!-- Dialog windows -->
+  <div id="dlg-budget" class="win95 dlg hidden">
+    <div class="titlebar"><span>💰 City Budget — Fiscal 1997</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <div class="budget-row"><label>Property tax rate: <b id="tax-label">7%</b></label>
+        <input type="range" id="tax-slider" min="0" max="20" value="7"></div>
+      <table id="budget-table" class="budget-table"></table>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
+  <div id="dlg-graphs" class="win95 dlg hidden">
+    <div class="titlebar"><span>📈 City Graphs</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <canvas id="graph-canvas" width="360" height="180"></canvas>
+      <div class="graph-legend"><span style="color:#0a0">■ Population</span> <span style="color:#00a">■ Funds</span></div>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
+  <div id="dlg-about" class="win95 dlg hidden">
+    <div class="titlebar"><span>ℹ️ About SimCity 99</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body about">
+      <p><b>SimCity 99 — The 1997 Edition</b></p>
+      <p>A love letter to isometric city builders and the year 1997.<br>
+      All graphics are drawn procedurally on canvas and all audio is<br>
+      synthesized live with WebAudio. No copyrighted assets inside.</p>
+      <p class="dim">Tip: hold right mouse button to pan, scroll to zoom.<br>
+      Keys 1–9,0,-,= select tools &bull; Space pauses.</p>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
+  <div id="dlg-query" class="win95 dlg hidden">
+    <div class="titlebar"><span>🔍 Tile Info</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body"><table id="query-table"></table>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/sim.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

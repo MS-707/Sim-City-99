@@ -3,7 +3,12 @@
 
 // ---- shared constants ----
 const TW = 64, TH = 32, HW = TW / 2, HH = TH / 2; // iso tile metrics
-const MAP = 80;                                    // map is MAP x MAP tiles
+let MAP = 80;                                      // current map edge, MAP x MAP tiles (M11)
+const MAP_SIZES = [64, 80, 128];                   // sizes offered by the splash picker
+// The whole codebase indexes tiles as i = y * MAP + x against this one global.
+// It is only ever changed here, at city creation / load time, so every array
+// and every indexing site stays consistent with the city that owns the world.
+function setMapSize(n) { MAP = n; }
 
 const TERR = { GRASS: 0, WATER: 1, FOREST: 2 };
 
@@ -125,7 +130,9 @@ function mulberry32(a) {
 }
 
 class City {
-  constructor(seed) {
+  constructor(seed, size = 80) {
+    this.size = size;
+    setMapSize(size);        // FIRST: every array below is sized from MAP
     const n = MAP * MAP;
     this.terr    = new Uint8Array(n);
     this.over    = new Uint8Array(n);   // OV.*
@@ -157,6 +164,7 @@ class City {
     this.disastersEnabled = true;
     this.disaster = null;           // {kind:'tornado'|'ufo', x, y, ticks}
     this.powerDirty = true;
+    this.terrRev = 0;               // bumped whenever terrain pixels change (render cache key)
     this.messages = [];             // ticker event queue
     this.cityName = "Llamaville";
     this.tier = 0;                  // index into TIERS, only ever rises
@@ -180,7 +188,10 @@ class City {
     this.seed = seed;
     const rnd = mulberry32(seed);
     // coarse random grid, bilinear-interpolated => smooth heightmap
-    const C = 9, cell = MAP / (C - 1);
+    // coarse-grid resolution scales with map size so terrain features keep a
+    // constant absolute scale; MAP = 80 yields C = 9, the pre-M11 constant,
+    // so a given seed still generates the exact same classic-size map.
+    const C = Math.round(MAP / 10) + 1, cell = MAP / (C - 1);
     const g = [];
     for (let i = 0; i < C * C; i++) g.push(rnd());
     const hAt = (x, y) => {
@@ -245,6 +256,7 @@ class City {
       const i = this.idx(x, y);
       this.terr[i] = TERR.FOREST; this.varnt[i] = (Math.random() * 3) | 0;
       this.funds -= cost;
+      this.terrRev++;
       return { ok: true, cost };
     }
     if (tool === "waterfill") {
@@ -253,6 +265,7 @@ class City {
       this.lvl[i] = 0; this.anc[i] = -1; this.varnt[i] = 0;
       this.funds -= cost;
       this.powerDirty = true; // water blocks conduction & road access
+      this.terrRev++;
       return { ok: true, cost };
     }
     const s = sizeOf(type);
@@ -261,7 +274,7 @@ class City {
       const i = this.idx(x + dx, y + dy);
       this.over[i] = type; this.lvl[i] = 0; this.anc[i] = a;
       this.varnt[i] = (Math.random() * 5) | 0;
-      if (this.terr[i] === TERR.FOREST) this.terr[i] = TERR.GRASS;
+      if (this.terr[i] === TERR.FOREST) { this.terr[i] = TERR.GRASS; this.terrRev++; }
     }
     this.funds -= cost;
     this.powerDirty = true;
@@ -277,6 +290,7 @@ class City {
     if (this.over[i] === OV.NONE) { // clear forest
       this.terr[i] = TERR.GRASS;
       this.funds -= COST.bulldoze;
+      this.terrRev++;
       return { ok: true, cost: COST.bulldoze };
     }
     // remove the whole multi-tile building
@@ -629,7 +643,9 @@ class City {
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
           }
           this.powerDirty = true;
-        } else if (this.terr[i] === TERR.FOREST) this.terr[i] = TERR.GRASS;
+        } else if (this.terr[i] === TERR.FOREST) {
+          this.terr[i] = TERR.GRASS; this.terrRev++;
+        }
         continue;
       }
       // spread
@@ -705,7 +721,7 @@ class City {
           }
           this.powerDirty = true;
         } else if (this.terr[i] === TERR.FOREST && Math.random() < 0.4) {
-          this.terr[i] = TERR.GRASS;
+          this.terr[i] = TERR.GRASS; this.terrRev++;
         }
       }
     } else if (d.kind === "ufo") {
@@ -858,7 +874,7 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 3, seed: this.seed, cityName: this.cityName,
+      v: 4, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       month: this.month, year: this.year, tickCount: this.tickCount,
       disastersEnabled: this.disastersEnabled,
@@ -875,7 +891,11 @@ class City {
 
   static deserialize(json) {
     const d = JSON.parse(json);
-    const c = new City(d.seed);
+    // v<=3 saves predate the size field: they are always 80x80, but infer from
+    // the raw array length anyway so any well-formed save loads consistently.
+    const size = d.size ||
+      (Array.isArray(d.terr) ? Math.round(Math.sqrt(d.terr.length)) : 80) || 80;
+    const c = new City(d.seed, size);
     c.cityName = d.cityName; c.funds = d.funds; c.taxRate = d.taxRate;
     c.month = d.month; c.year = d.year; c.tickCount = d.tickCount;
     c.disastersEnabled = d.disastersEnabled;

@@ -18,6 +18,23 @@
       <div class="splash-tag">56k modem not required &bull; Best viewed in 800×600</div>
       <button id="btn-new-city" class="btn95 big">▶ &nbsp;NEW CITY</button>
       <button id="btn-load-city" class="btn95 big">💾 &nbsp;LOAD CITY</button>
+
+      <!-- Map picker for free play (M11): size + previewed terrain seed -->
+      <div id="map-picker" class="win95 picker95">
+        <div class="picker-head">— NEW CITY TERRAIN —</div>
+        <div class="picker-row">
+          <div class="picker-sizes">
+            <label class="picker-size"><input type="radio" name="mapsize" value="64"> 64&times;64 &mdash; Village</label>
+            <label class="picker-size"><input type="radio" name="mapsize" value="80" checked> 80&times;80 &mdash; Classic</label>
+            <label class="picker-size"><input type="radio" name="mapsize" value="128"> 128&times;128 &mdash; Megalopolis</label>
+            <button id="btn-reroll" class="btn95">🎲 &nbsp;Reroll Terrain</button>
+          </div>
+          <div class="picker-preview">
+            <canvas id="picker-canvas" width="160" height="160"></canvas>
+            <div id="picker-seed" class="picker-seed">Seed —</div>
+          </div>
+        </div>
+      </div>
       <div class="splash-foot">© 1997 Totally Not Maxis &bull; All sprites &amp; sounds are original, synthesized in-browser</div>
     </div>
   </div>

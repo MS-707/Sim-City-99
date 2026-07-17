@@ -96,7 +96,59 @@ function uiInit() {
   bindKeys();
   bindDialogs();
   bindMinimap();
+  pickerInit();
   setTool("road");
+}
+
+/* ================= splash map picker (M11) ================= */
+// Free-play map selection: size (64 / 80 / 128) + a real previewed terrain
+// for a concrete seed. NEW CITY consumes exactly what the preview shows;
+// untouched, the picker holds the classic 80x80 with a random seed.
+const PICKER = { seed: (Math.random() * 1e9) | 0, size: 80, terr: null };
+
+function pickerPreview() {
+  const cvp = document.getElementById("picker-canvas");
+  if (!cvp) return;
+  const prevMap = MAP;
+  // real terrain: the same City(seed, size) path NEW CITY takes
+  const c = new City(PICKER.seed, PICKER.size);
+  setMapSize(prevMap);            // peeking at a preview never resizes the world
+  PICKER.terr = c.terr;
+  const g = cvp.getContext("2d");
+  const n = PICKER.size, sc = cvp.width / n;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const i = y * n + x;
+    const t = c.terr[i];
+    g.fillStyle = t === TERR.WATER ? "#136"
+      : t === TERR.FOREST ? "#0a3a12"
+      : (c.varnt[i] % 2 ? "#215425" : "#1c4a1c");
+    g.fillRect(x * sc, y * sc, sc, sc);
+  }
+  const lbl = document.getElementById("picker-seed");
+  lbl.textContent = `Seed ${PICKER.seed} · ${n}×${n}`;
+  lbl.dataset.seed = PICKER.seed;
+}
+
+function pickerReroll() {
+  let s = (Math.random() * 1e9) | 0;
+  while (s === PICKER.seed) s = (Math.random() * 1e9) | 0;
+  PICKER.seed = s;
+  pickerPreview();
+}
+
+function pickerInit() {
+  if (!document.getElementById("map-picker")) return;
+  document.querySelectorAll('input[name="mapsize"]').forEach(r => {
+    r.addEventListener("change", () => {
+      PICKER.size = +r.value;
+      pickerPreview();
+    });
+  });
+  document.getElementById("btn-reroll").addEventListener("click", () => {
+    Snd.ensure(); Snd.click();
+    pickerReroll();
+  });
+  pickerPreview();
 }
 
 function toolLocked(t) {
@@ -620,16 +672,20 @@ function loadCity() {
   if (!json) { setStatus("No saved city found."); Snd.denied(); return false; }
   try {
     city = City.deserialize(json);
+    clampCam(); // a save may be a different map size than the last camera spot (M11)
     setStatus("City loaded. Welcome back, Mayor.");
     return true;
   } catch (e) { setStatus("Load failed: " + e.message); return false; }
 }
 
 function newCity() {
-  city = new City();
+  // consume exactly the seed + size the splash picker is previewing (M11)
+  city = new City(PICKER.seed, PICKER.size);
   const names = ["Llamaville", "Port Modem", "Beanieburg", "Dialup Falls",
     "Pixel Heights", "Cassette Creek", "Winsock City", "Grungetown"];
   city.cityName = names[(Math.random() * names.length) | 0];
   cam.x = 0; cam.y = MAP * HH; cam.z = 1;
   city.pushMsg(`🏗️ ${city.cityName} founded, January 1997. Taxes low, hopes high.`);
+  PICKER.seed = (Math.random() * 1e9) | 0; // the next city gets a fresh roll
+  pickerPreview();
 }

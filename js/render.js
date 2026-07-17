@@ -61,59 +61,97 @@ function screenToTile(sx, sy) {
   return { x: Math.round((A + B) / 2), y: Math.round((B - A) / 2) };
 }
 
-function renderFrame(city, uiState) {
-  frame++;
-  const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
-  nightQ.length = 0;
-  ctx.fillStyle = "#0a0a12";
-  ctx.fillRect(0, 0, cvs.width, cvs.height);
-  ctx.save();
-  worldTransform();
-  ctx.imageSmoothingEnabled = false;
+/* ---- flat-terrain layer cache (M11) ----
+   Grass / water / shore diamonds are flat and tile the plane exactly, so
+   they can be pre-composited once per (camera, water-frame, terrain-rev)
+   into an offscreen canvas and blitted in one drawImage per frame. Forest
+   sprites stay in the live pass — they rise above the diamond and must keep
+   painter-order occlusion against buildings. Big developed maps (128x128)
+   drop thousands of per-frame draw calls this way. */
+const terrLayer = { cv: null, g: null, key: "" };
 
-  const margin = 160;
-  const minWX = cam.x - cvs.width / 2 / cam.z - margin;
-  const maxWX = cam.x + cvs.width / 2 / cam.z + margin;
-  const minWY = cam.y - cvs.height / 2 / cam.z - margin;
-  const maxWY = cam.y + cvs.height / 2 / cam.z + margin;
-
-  const blink = (frame / 24 | 0) % 2 === 0;
-  const waterFrame = (frame / 16 | 0) % SPR.water.length; // prebuilt frame cycle
-
-  // painter's order: by (x + y), then x
+function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
+  const L = terrLayer;
+  if (!L.cv || L.cv.width !== cvs.width || L.cv.height !== cvs.height) {
+    L.cv = document.createElement("canvas");
+    L.cv.width = cvs.width; L.cv.height = cvs.height;
+    L.g = L.cv.getContext("2d");
+  }
+  const g = L.g;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, L.cv.width, L.cv.height);
+  g.translate(cvs.width / 2, cvs.height / 2);
+  g.scale(cam.z, cam.z);
+  g.translate(-cam.x, -cam.y);
+  g.imageSmoothingEnabled = false;
   for (let s = 0; s <= (MAP - 1) * 2; s++) {
     for (let x = Math.max(0, s - MAP + 1); x <= Math.min(MAP - 1, s); x++) {
       const y = s - x;
       const wx = worldX(x, y), wy = worldY(x, y);
       if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
       const i = y * MAP + x;
-
-      // terrain (all sprites prebuilt in buildSprites — lookups only)
-      const t = city.terr[i];
-      if (t === TERR.WATER) {
+      if (city.terr[i] === TERR.WATER) {
         const w = SPR.water[waterFrame];
-        ctx.drawImage(w.c, wx - w.ox, wy - w.oy);
+        g.drawImage(w.c, wx - w.ox, wy - w.oy);
         const sm = shoreMask(city, i); // sand on land-facing edges
-        if (sm) {
-          const s = SPR.shore[sm];
-          ctx.drawImage(s.c, wx - s.ox, wy - s.oy);
-        }
+        if (sm) { const sh = SPR.shore[sm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       } else {
         const gs = SPR.grass[city.varnt[i] % 4];
-        ctx.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
-        if (t === TERR.FOREST && city.over[i] === OV.NONE) {
-          const fs = forestSprite(city, i); // cluster-aware density
-          ctx.drawImage(fs.c, wx - fs.ox, wy - fs.oy);
-        }
+        g.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
         const bm = beachMask(city, i); // beach fringe on the land side of the seam
-        if (bm) {
-          const s = SPR.shore[bm];
-          ctx.drawImage(s.c, wx - s.ox, wy - s.oy);
-        }
+        if (bm) { const sh = SPR.shore[bm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+      }
+    }
+  }
+  L.key = key;
+}
+
+function renderFrame(city, uiState) {
+  frame++;
+  const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
+  nightQ.length = 0;
+  ctx.fillStyle = "#0a0a12";
+  ctx.fillRect(0, 0, cvs.width, cvs.height);
+
+  // cull margins sized to the sprite extents: buildings reach ~64px sideways,
+  // ~110px above and ~48px below their anchor tile's diamond center
+  const minWX = cam.x - cvs.width / 2 / cam.z - 80;
+  const maxWX = cam.x + cvs.width / 2 / cam.z + 80;
+  const minWY = cam.y - cvs.height / 2 / cam.z - 64;
+  const maxWY = cam.y + cvs.height / 2 / cam.z + 128;
+
+  const blink = (frame / 24 | 0) % 2 === 0;
+  const waterFrame = (frame / 16 | 0) % SPR.water.length; // prebuilt frame cycle
+
+  // flat terrain: one cached blit unless the camera / water / terrain moved
+  const tKey = `${cam.x},${cam.y},${cam.z},${cvs.width},${cvs.height},` +
+    `${waterFrame},${city.terrRev | 0},${city.seed},${MAP}`;
+  if (terrLayer.key !== tKey)
+    buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, tKey);
+  ctx.drawImage(terrLayer.cv, 0, 0);
+
+  ctx.save();
+  worldTransform();
+  ctx.imageSmoothingEnabled = false;
+
+  // painter's order: by (x + y), then x
+  for (let s = 0; s <= (MAP - 1) * 2; s++) {
+    for (let x = Math.max(0, s - MAP + 1); x <= Math.min(MAP - 1, s); x++) {
+      const y = s - x;
+      const i = y * MAP + x;
+      const ov = city.over[i];
+      const t = city.terr[i];
+      if (ov === OV.NONE && !city.fire[i] && t !== TERR.FOREST) continue;
+      const wx = worldX(x, y), wy = worldY(x, y);
+      if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
+
+      // forest rises above the flat layer — drawn live for correct occlusion
+      if (t === TERR.FOREST && ov === OV.NONE) {
+        const fs = forestSprite(city, i); // cluster-aware density
+        ctx.drawImage(fs.c, wx - fs.ox, wy - fs.oy);
       }
 
       // overlay
-      const ov = city.over[i];
       if (ov !== OV.NONE) {
         const size = sizeOf(ov);
         if (size === 1) {
@@ -405,6 +443,9 @@ function renderMinimap(city, mode) {
       if (city.fire[i]) col = "#f80";
     }
     g.fillStyle = col;
-    g.fillRect(x * sc, y * sc, sc, sc);
+    // integer pixel edges: every canvas pixel belongs wholly to one tile, so
+    // fractional scales (e.g. 160/128) never blend neighbouring tile colors
+    const px = Math.round(x * sc), py = Math.round(y * sc);
+    g.fillRect(px, py, Math.round((x + 1) * sc) - px, Math.round((y + 1) * sc) - py);
   }
 }

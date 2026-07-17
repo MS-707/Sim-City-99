@@ -45,7 +45,7 @@ function scnDeadlinePassed(c, sc) {
    road rows every 4th row, zones in between — every zone within reach of
    both power and a road. */
 function scnBuildTown(o) {
-  const c = new City(o.seed);
+  const c = new City(o.seed, 80); // scenarios stay pinned to the classic 80x80 map (M11)
   c.cityName = o.name;
   c.funds = 9e9;                        // construction budget; caller sets real funds
   const wx = ((o.x0 + o.x1) / 2) | 0;   // wire-spine column

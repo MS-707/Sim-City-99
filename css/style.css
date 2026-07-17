@@ -264,3 +264,27 @@ body {
 .scn-card .scn-desc { font-size: 10px; color: #333; line-height: 1.3; white-space: normal; }
 .scn-card .scn-goal { font-size: 10px; color: #000080; font-weight: bold; white-space: normal; }
 #sb-scenario { font-weight: bold; color: #000080; }
+
+/* ---------- splash map picker (M11) ---------- */
+.picker95 {
+  margin: 22px auto 0; padding: 8px 12px 10px; width: 420px;
+  color: #000; text-align: left;
+}
+.picker-head {
+  text-align: center; font-size: 11px; letter-spacing: 4px;
+  color: #000080; font-weight: bold; margin-bottom: 8px;
+}
+.picker-row { display: flex; gap: 12px; align-items: stretch; }
+.picker-sizes {
+  flex: 1; display: flex; flex-direction: column; gap: 6px;
+  justify-content: center;
+}
+.picker-size { display: block; cursor: pointer; font-size: 12px; }
+.picker-size input { margin-right: 5px; }
+#btn-reroll { margin-top: 8px; align-self: flex-start; }
+.picker-preview { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+#picker-canvas {
+  width: 160px; height: 160px; image-rendering: pixelated;
+  border: 2px solid; border-color: #404040 #fff #fff #404040; background: #000;
+}
+.picker-seed { font-size: 10px; color: #333; }

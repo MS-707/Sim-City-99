@@ -6,13 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M11 — Bigger maps & map picker**: selectable map sizes (64/80/128) and
-  a terrain-preview picker on the splash screen with reroll button.
+- [ ] **M12 — Seasons**: month-driven seasonal palette (snowy winters, autumn
+  forests), seasonal ticker flavor, snow plows/reduced traffic in winter.
 
 ## Open
 
-- [ ] **M12 — Seasons**: month-driven seasonal palette (snowy winters, autumn
-  forests), seasonal ticker flavor, snow plows/reduced traffic in winter.
 - [ ] **M13 — Bonds & loans**: issue municipal bonds from the budget window
   (borrow now, repay with interest monthly), credit rating that reacts to
   treasury health; advisors comment on debt.
@@ -24,8 +22,23 @@ Queue policy: keep at least 5 open improvements at all times.
   2-3 more scripted challenges (e.g. "Blackout Summer": rebuild a grid after
   the '97 heat wave; "Y2K Ready": bunker the city before Dec 1999), plus
   bronze/silver/gold results by finish date and a trophy shelf dialog.
+- [ ] **M17 — City Hall records**: a stats almanac dialog (yearly population,
+  budget, disasters survived), plus named citizens ticker complaints tied to
+  real tile problems (click to jump the camera there).
 
 ## Done
+
+- [x] **M11 — Bigger maps & map picker**: MAP is now a mutable global set only
+  at city creation/load (setMapSize); City(seed, size) stores its own size,
+  serializes it (save v4), and v3 80x80 saves still load byte-identically.
+  Splash gains a Win95 terrain picker — 64 Village / 80 Classic / 128
+  Megalopolis radio sizes, a real generated-terrain preview with visible
+  seed and reroll, NEW CITY consumes exactly the previewed seed+size (default
+  untouched: random 80x80). Minimap renders/click-maps any size with integer
+  pixel edges; M9 scenarios stay pinned to 80x80 (byte-identical baselines).
+  Render perf for 128x128: cached flat-terrain layer + sprite-tight cull
+  margins (developed-128 median frame 3.2 ms, mean tick 1.9 ms). Verified
+  against 8 criteria (all pass, zero console/page errors).
 
 - [x] **M10 — Day/night cycle**: deterministic tick-driven phase with gradual
   dawn/dusk ramps (midnight ~41% of noon luminance), boot-baked lit-window

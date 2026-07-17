@@ -6,10 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G3 — Fire that reads as fire** (graphics audit): layered smooth-phase
-  flames (no per-frame random strobing), 2-3x taller with three hue bands,
-  char/darken burning facades, rising smoke puffs, capped night fire bloom.
-  Criteria: docs/gfx-audit-slate.json.
+- [ ] **G4 — Postcard auto-framing** (graphics audit): postcard composer
+  auto-frames the city (no more 68% background void in the photo), criteria
+  in docs/gfx-audit-slate.json.
 - [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
   and lose capacity after ~30 years with rebuild prompts, coal smog scales
   with load; power mix pie in the budget window.
@@ -62,6 +61,16 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G3 — Fire visuals overhaul**: drawFlames rewritten as three stacked
+  hue-band layers (dark red base / orange mid / yellow core) with pure
+  sin-phase motion (zero per-frame Math.random), flames 57px tall; burning
+  facades char to ~53% luminance via a cached silhouette mask and revert on
+  extinguish; burning tiles spawn rising soft radial smoke puffs; warm
+  ground apron by day; night fire bloom capped at 0.35/sqrt(cluster) inside
+  G2's occlusion layer (8-tile midnight blaze: 42 near-white px vs 928).
+  Pixels away from fires byte-identical to HEAD. Verified against 7 checks
+  incl. G1/G2 regression guard (all pass).
 
 - [x] **G2 — Depth-correct night light pass**: nightQ replaced by
   per-diagonal punch/add buckets replayed onto a cached screen-space light

@@ -729,9 +729,12 @@ function buildSprites() {
   SPR.lamp = radialSprite(17, [
     [0, "rgba(255,242,200,0.95)"], [0.25, "rgba(255,214,140,0.55)"],
     [1, "rgba(255,180,80,0)"]]);
-  // disaster halos: fire glow, UFO beam wash, storm lightning flicker
+  // disaster halos: fire glow, UFO beam wash, storm lightning flicker.
+  // fireGlow bakes a full-alpha core (G3): the renderer owns its strength —
+  // FIRE_DAY_ALPHA for the daytime apron, and at night an alpha scaled by
+  // 1/sqrt(burning cluster size) capped at FIRE_GLOW_CORE.
   SPR.fireGlow = radialSprite(110, [
-    [0, "rgba(255,170,80,0.8)"], [0.5, "rgba(255,120,40,0.45)"],
+    [0, "rgba(255,170,80,1)"], [0.5, "rgba(255,120,40,0.55)"],
     [1, "rgba(255,80,20,0)"]]);
   SPR.ufoGlow = radialSprite(80, [
     [0, "rgba(160,255,160,0.65)"], [0.5, "rgba(120,255,140,0.3)"],
@@ -739,6 +742,14 @@ function buildSprites() {
   SPR.stormGlow = radialSprite(90, [
     [0, "rgba(200,215,255,0.6)"], [0.5, "rgba(170,190,255,0.28)"],
     [1, "rgba(140,160,255,0)"]]);
+  // smoke puffs (G3): radial-falloff sprites for the smoke[] pool — soft
+  // light gray for industry stacks, darker warm gray for fire smoke
+  SPR.puff = radialSprite(16, [
+    [0, "rgba(196,196,206,0.42)"], [0.55, "rgba(196,196,206,0.2)"],
+    [1, "rgba(196,196,206,0)"]]);
+  SPR.puffFire = radialSprite(16, [
+    [0, "rgba(88,82,78,0.95)"], [0.5, "rgba(126,120,116,0.55)"],
+    [1, "rgba(150,144,140,0)"]]);
 
   /* ---- news helicopter (M18) ----
      Built exactly once here at boot, like every other sprite: a fuselage,

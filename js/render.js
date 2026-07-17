@@ -3,7 +3,7 @@
 
 const cam = { x: 0, y: 0, z: 1 };   // world-space center + zoom
 let cvs, ctx, frame = 0;
-const smoke = [];                    // {x, y, age, drift}
+const smoke = [];                    // {x, y, age, drift, fire}
 const cars = [];                     // {id, x, y, fx, fy, tx, ty, p, spd, col}
 let carSeq = 0;
 const CAR_COLS = ["#e34a4a", "#4a8fe3", "#e8e8ee", "#f2c53a", "#57c957", "#b06fe0"];
@@ -37,6 +37,17 @@ const NIGHT_LIGHT_ALPHA = 0.7;    // G1: clamp on the additive night-light pass 
                                   // baked glows never blit at full alpha
 const NIGHT_MAX_DRAWS = 700;      // per-frame cap on night-light sprite draws
 
+/* ---- fire visuals (G3) ---- */
+const FIRE_GLOW_CORE = 0.35;      // cap on the additive night fire-bloom core
+                                  // alpha — per-glow alpha further scales by
+                                  // 1/sqrt(burning-tile count) so multi-tile
+                                  // blazes glow instead of whiting out
+const FIRE_DAY_ALPHA = 0.33;      // low-alpha warm ground glow under a burning
+                                  // tile — daytime fires read as heat, not
+                                  // street clutter
+const FIRE_CHAR_ALPHA = 0.52;     // char overlay strength: burning facades
+                                  // drop to ~50% of their pristine luminance
+
 /* ---- depth-correct night lights (G2) ----
    Night glow used to be queued during the tile loop and blitted in one
    additive pass AFTER the whole scene — so lamp halos, C3 lobby spill and
@@ -57,7 +68,7 @@ const NIGHT_MAX_DRAWS = 700;      // per-frame cap on night-light sprite draws
    ramp) and every other frame reuses it in a single composite. */
 const nightLayer = { cv: null, g: null, key: "" };
 const punchQ = [], addQ = [];     // current diagonal's buckets — reused
-const nightOps = [];              // whole-frame (mode, spr, wx, wy) replay list
+const nightOps = [];              // whole-frame (mode, spr, wx, wy, am) replay list
 let nightDrawn = 0;               // resets each rebuild, capped at NIGHT_MAX_DRAWS
 
 function nightLayerCtx() {
@@ -86,34 +97,36 @@ function nightPunch(spr, wx, wy) {
   punchQ.push(spr, wx, wy);
 }
 
-// queue one light sprite at this diagonal's depth, capped like the old queue
-function nightAdd(spr, wx, wy) {
+// queue one light sprite at this diagonal's depth, capped like the old
+// queue. am is a per-sprite alpha multiplier (G3: fire glow scales with
+// cluster size); everything else draws at the default 1.
+function nightAdd(spr, wx, wy, am = 1) {
   if (nightDrawn >= NIGHT_MAX_DRAWS) return;
   nightDrawn++;
-  addQ.push(spr, wx, wy);
+  addQ.push(spr, wx, wy, am);
 }
 
 // close one diagonal's buckets: its punches (erasing glow from the
 // diagonals behind) come before its own lights on the replay list
 function flushNightDiag() {
   for (let k = 0; k < punchQ.length; k += 3)
-    nightOps.push(0, punchQ[k], punchQ[k + 1], punchQ[k + 2]);
-  for (let k = 0; k < addQ.length; k += 3)
-    nightOps.push(1, addQ[k], addQ[k + 1], addQ[k + 2]);
+    nightOps.push(0, punchQ[k], punchQ[k + 1], punchQ[k + 2], 1);
+  for (let k = 0; k < addQ.length; k += 4)
+    nightOps.push(1, addQ[k], addQ[k + 1], addQ[k + 2], addQ[k + 3]);
   punchQ.length = 0; addQ.length = 0;
 }
 
 // replay the whole frame's bucketed ops onto the light layer in depth
 // order: destination-out for occluder silhouettes, lighter for lights —
-// clamped (G1), never full alpha. Composite op switches only when the op
-// kind changes between consecutive runs.
+// clamped (G1), never full alpha. Composite op / alpha switch only when
+// they change between consecutive runs.
 function drawNightLayer(g, ns) {
-  let mode = -1;
-  for (let k = 0; k < nightOps.length; k += 4) {
-    if (nightOps[k] !== mode) {
-      mode = nightOps[k];
+  let mode = -1, am = -1;
+  for (let k = 0; k < nightOps.length; k += 5) {
+    if (nightOps[k] !== mode || nightOps[k + 4] !== am) {
+      mode = nightOps[k]; am = nightOps[k + 4];
       g.globalCompositeOperation = mode ? "lighter" : "destination-out";
-      g.globalAlpha = mode ? ns * NIGHT_LIGHT_ALPHA : 1;
+      g.globalAlpha = mode ? ns * NIGHT_LIGHT_ALPHA * am : 1;
     }
     const s = nightOps[k + 1];
     g.drawImage(s.c, nightOps[k + 2] - s.ox, nightOps[k + 3] - s.oy);
@@ -245,6 +258,18 @@ function renderFrame(city, uiState) {
     `${ns},${city.tickCount},${city.terrRev},${city.devRev},${city.seed},${MAP}` : "";
   const ng = ns > 0 && nightLayer.key !== nKey ? nightLayerCtx() : null;
 
+  // G3: night fire bloom — one glow per burning tile stacks additively, so
+  // per-glow alpha is scaled by 1/sqrt(burning-tile count) with the core
+  // capped at FIRE_GLOW_CORE: an 8-tile blaze glows, it no longer whites
+  // out. (The NIGHT_LIGHT_ALPHA divisor cancels the clamp drawNightLayer
+  // applies to every add, making the drawn core exactly ns * cap / sqrt(n).)
+  let fireGlowMul = 0;
+  if (ng) {
+    let nf = 0;
+    for (let k = 0; k < city.fire.length; k++) if (city.fire[k]) nf++;
+    if (nf) fireGlowMul = FIRE_GLOW_CORE / (NIGHT_LIGHT_ALPHA * Math.sqrt(nf));
+  }
+
   // painter's order: by (x + y), then x
   for (let s = 0; s <= (MAP - 1) * 2; s++) {
     for (let x = Math.max(0, s - MAP + 1); x <= Math.min(MAP - 1, s); x++) {
@@ -255,6 +280,11 @@ function renderFrame(city, uiState) {
       if (ov === OV.NONE && !city.fire[i] && t !== TERR.FOREST) continue;
       const wx = worldX(x, y), wy = worldY(x, y);
       if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
+
+      // G3: a burning tile casts a warm glow onto its ground apron — drawn
+      // under the building/trees so the char state stays legible, visible
+      // by day as well as night (the additive bloom stacks on top after dark)
+      if (city.fire[i]) drawFireGround(wx, wy);
 
       // forest rises above the flat layer — drawn live for correct occlusion
       if (t === TERR.FOREST && ov === OV.NONE) {
@@ -270,6 +300,9 @@ function renderFrame(city, uiState) {
           const spr = spriteFor(city, i);
           if (spr) {
             ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+            // G3: burning buildings char — darkened while city.fire[i] is
+            // set, reverting the moment the fire ends
+            if (city.fire[i]) drawChar(spr, wx, wy);
             // G2: buildings occlude glow behind them; flat roads/wires don't
             if (ng && ov !== OV.ROAD && ov !== OV.WIRE)
               nightPunch(spr, wx, wy);
@@ -290,7 +323,8 @@ function renderFrame(city, uiState) {
             // the ground pool — unless the tile in front blocks the spill
             if (ov === OV.ROAD) {
               nightAdd(SPR.lamp, wx, wy);
-            } else if (spr && spr.night && city.powered[i]) {
+            } else if (spr && spr.night && city.powered[i] && !city.fire[i]) {
+              // (burning buildings show fire, not tidy lit windows — G3)
               nightAdd(spr.night, wx, wy);
               if (spr.pool && !poolBlocked(city, x, y))
                 nightAdd(spr.pool, wx, wy);
@@ -304,9 +338,15 @@ function renderFrame(city, uiState) {
             const awx = worldX(ax, ay), awy = worldY(ax, ay);
             if (spr) {
               ctx.drawImage(spr.c, awx - spr.ox, awy - spr.oy);
+              // G3: any burning footprint tile chars the whole building
+              let afire = false;
+              for (let fy = 0; fy < size && !afire; fy++)
+                for (let fx = 0; fx < size; fx++)
+                  if (city.fire[(ay + fy) * MAP + ax + fx]) { afire = true; break; }
+              if (afire) drawChar(spr, awx, awy);
               if (ng) {
                 nightPunch(spr, awx, awy); // G2: civics occlude glow too
-                if (spr.night && city.powered[a])
+                if (spr.night && city.powered[a] && !afire)
                   nightAdd(spr.night, awx, awy);
               }
             }
@@ -316,8 +356,8 @@ function renderFrame(city, uiState) {
 
       // fire on this tile
       if (city.fire[i]) {
-        drawFlames(wx, wy);
-        if (ng) nightAdd(SPR.fireGlow, wx, wy);
+        drawFlames(wx, wy, i);
+        if (ng) nightAdd(SPR.fireGlow, wx, wy, fireGlowMul);
       }
 
       // blinking "no power" bolt on developed but unpowered zones / civics
@@ -389,17 +429,67 @@ function drawNightLights(city, ns) {
   ctx.globalCompositeOperation = "source-over";
 }
 
-function drawFlames(wx, wy) {
-  for (let k = 0; k < 3; k++) {
-    const fx = wx - 10 + k * 10 + Math.random() * 4;
-    const h = 12 + Math.random() * 14;
-    ctx.fillStyle = k % 2 ? "rgba(255,140,0,.85)" : "rgba(255,220,60,.9)";
-    ctx.beginPath();
-    ctx.moveTo(fx - 4, wy); ctx.lineTo(fx + 4, wy); ctx.lineTo(fx, wy - h);
-    ctx.closePath(); ctx.fill();
+/* ---------------- fire visuals (G3) ---------------- */
+// warm ground glow on the burning tile's apron: the prebaked fireGlow disc
+// squashed to the ground plane at low alpha. Drawn inside the painter loop
+// BEFORE the tile's own building, so it tints the apron, not the facade.
+function drawFireGround(wx, wy) {
+  ctx.globalAlpha = FIRE_DAY_ALPHA;
+  ctx.drawImage(SPR.fireGlow.c, wx - 48, wy - 26, 96, 52);
+  ctx.globalAlpha = 1;
+}
+
+// char overlay: the sprite's own silhouette refilled near-black, cached on
+// the sprite object at first use. Drawn at FIRE_CHAR_ALPHA over the
+// pristine sprite, the facade lands around half its normal luminance while
+// the tile burns — and reverts the moment city.fire[i] clears, since the
+// overlay simply stops being drawn.
+function drawChar(spr, wx, wy) {
+  if (!spr.char) {
+    const c = document.createElement("canvas");
+    c.width = spr.c.width; c.height = spr.c.height;
+    const g = c.getContext("2d");
+    g.drawImage(spr.c, 0, 0);
+    g.globalCompositeOperation = "source-in";
+    g.fillStyle = "#16100c";
+    g.fillRect(0, 0, c.width, c.height);
+    spr.char = c;
   }
-  ctx.fillStyle = "rgba(40,40,40,.5)";
-  ctx.beginPath(); ctx.arc(wx + Math.random() * 8 - 4, wy - 22 - Math.random() * 8, 4, 0, 7); ctx.fill();
+  ctx.globalAlpha = FIRE_CHAR_ALPHA;
+  ctx.drawImage(spr.char, wx - spr.ox, wy - spr.oy);
+  ctx.globalAlpha = 1;
+}
+
+// flames as three stacked hue bands — wide dark-red base, orange mid,
+// yellow core — licking 40-70px above the tile base. Tongue heights and
+// sway are pure sin phases of (frame, tile index): NO Math.random anywhere
+// in the per-frame flame path, so consecutive frames differ only along the
+// slowly-moving tongue edges instead of strobing.
+const FLAME_BASE = "rgb(178,44,18)";  // dark red
+const FLAME_MID = "rgb(255,132,24)";  // orange
+const FLAME_CORE = "rgb(255,228,92)"; // yellow
+
+function flameLayer(wx, wy, w, hMax, t, n, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(wx - w, wy + 3);
+  for (let k = 0; k < n; k++) {
+    const v0 = wx - w + 2 * w * k / n;
+    const v1 = wx - w + 2 * w * (k + 1) / n;
+    const h = hMax * (0.82 + 0.18 * Math.sin(t * 1.7 + k * 2.63));
+    const tip = (v0 + v1) / 2 + Math.sin(t + k * 2.1) * 2.5;
+    ctx.quadraticCurveTo((v0 + tip) / 2, wy - h * 0.55, tip, wy - h);
+    ctx.quadraticCurveTo((v1 + tip) / 2, wy - h * 0.55, v1, wy + 3);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawFlames(wx, wy, i) {
+  const t = frame * 0.045 + (i % 97) * 0.83; // per-tile phase offset
+  flameLayer(wx, wy, 17, 52, t, 3, FLAME_BASE);
+  flameLayer(wx, wy, 12, 38, t + 1.9, 3, FLAME_MID);
+  flameLayer(wx, wy, 7, 24, t + 3.7, 2, FLAME_CORE);
 }
 
 /* ---------------- cars ---------------- */
@@ -457,11 +547,19 @@ function updateCars(city) {
 }
 
 function updateSmoke(city) {
-  // spawn from coal plants & big industry
+  // spawn from coal plants, big industry — and burning tiles (G3): each
+  // fire feeds 2-3 dark rising puffs into the shared pool
   if (frame % 6 === 0) {
     for (let i = 0; i < city.over.length; i++) {
       const t = city.over[i];
-      if (t === OV.COAL && city.anc[i] === i && Math.random() < 0.6) {
+      if (city.fire[i]) {
+        if (Math.random() < 0.2) {
+          const x = i % MAP, y = (i / MAP) | 0;
+          smoke.push({ x: worldX(x, y) + Math.random() * 18 - 9,
+                       y: worldY(x, y) - 26 - Math.random() * 8,
+                       age: 0, drift: Math.random() * 0.5 - 0.25, fire: true });
+        }
+      } else if (t === OV.COAL && city.anc[i] === i && Math.random() < 0.6) {
         const x = i % MAP, y = (i / MAP) | 0;
         smoke.push({ x: worldX(x, y) - 18, y: worldY(x, y) + HH - 78, age: 0, drift: Math.random() * 0.4 - 0.1 });
       } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && Math.random() < 0.25) {
@@ -471,14 +569,19 @@ function updateSmoke(city) {
       if (smoke.length > 160) break;
     }
   }
+  // soft-edged puffs (G3): prebaked radial-falloff sprites, scaled up and
+  // faded out as they age — fire smoke is darker and rises faster
   for (let k = smoke.length - 1; k >= 0; k--) {
     const p = smoke[k];
-    p.age++; p.y -= 0.45; p.x += p.drift;
-    if (p.age > 90) { smoke.splice(k, 1); continue; }
-    const a = 0.32 * (1 - p.age / 90);
-    ctx.fillStyle = `rgba(190,190,200,${a.toFixed(3)})`;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 3 + p.age * 0.09, 0, 7); ctx.fill();
+    const life = p.fire ? 80 : 90;
+    p.age++; p.y -= p.fire ? 0.55 : 0.45; p.x += p.drift;
+    if (p.age > life) { smoke.splice(k, 1); continue; }
+    const s = p.fire ? SPR.puffFire : SPR.puff;
+    const r = (p.fire ? 6 : 4) + p.age * (p.fire ? 0.14 : 0.09);
+    ctx.globalAlpha = 1 - p.age / life;
+    ctx.drawImage(s.c, p.x - r, p.y - r, r * 2, r * 2);
   }
+  ctx.globalAlpha = 1;
 }
 
 /* ---------------- news helicopter (M18) ---------------- */

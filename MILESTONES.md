@@ -24,6 +24,9 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
   and lose capacity after ~30 years with rebuild prompts, coal smog scales
   with load; power mix pie in the budget window.
+- [ ] **M20 — Soundtrack expansion**: 3-4 distinct generative music moods
+  (calm building, bustling metropolis, disaster tension, night jazz) that
+  crossfade based on sim state; music credits easter egg in About.
 
 ## Done
 

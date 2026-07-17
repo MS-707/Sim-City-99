@@ -58,14 +58,20 @@ function prism(g, ox, oy, w, h, ht, base, opts = {}) {
 }
 
 // rows x cols of window parallelograms on a face whose bottom edge runs p0->p1.
-// While GLOWG is set (the boot-time night bake in withNight), every pane is
-// also stamped, lit warm, onto the glow layer at the same coordinates.
+// While GLOWG is set (the boot-time night bake in withNight), day-lit panes
+// are also stamped onto the glow layer in the zone's own light color (G1).
 let GLOWG = null;
-const GLOW_WARM = "#ffe2a0"; // warm sodium-lamp window light
+// per-zone night lighting character (G1): each zone family lights up in its
+// own color so districts stay readable after dark
+const GLOW_WARM = "#f0b85c";   // warm amber — residential evening light
+const GLOW_COOL = "#a8ccf8";   // cool blue-white — commercial office glass
+const GLOW_SODIUM = "#ff9c3e"; // sodium orange — industrial yard shifts
 
-function windows(g, p0, p1, ht, rows, cols, lit = 0.5, color = "#ffe9a0", dark = "#20242c") {
+function windows(g, p0, p1, ht, rows, cols, lit = 0.5, color = "#ffe9a0", dark = "#20242c",
+                 glow = GLOW_WARM, glowFrac = 1) {
   const topPad = 6, botPad = 4;
   const usable = ht - topPad - botPad;
+  let dayLit = 0, nightLit = 0; // G1: running quota keeps night ≤ glowFrac of day-lit
   for (let r = 0; r < rows; r++) {
     const y0 = botPad + (r + 0.15) / rows * usable;
     const y1 = botPad + (r + 0.7) / rows * usable;
@@ -73,29 +79,36 @@ function windows(g, p0, p1, ht, rows, cols, lit = 0.5, color = "#ffe9a0", dark =
       const u0 = (c + 0.25) / cols, u1 = (c + 0.75) / cols;
       const ax = p0[0] + (p1[0] - p0[0]) * u0, ay = p0[1] + (p1[1] - p0[1]) * u0;
       const bx = p0[0] + (p1[0] - p0[0]) * u1, by = p0[1] + (p1[1] - p0[1]) * u1;
-      g.fillStyle = Math.random() < lit ? color : dark;
+      const isLit = Math.random() < lit;
+      g.fillStyle = isLit ? color : dark;
       g.beginPath();
       g.moveTo(ax, ay - y1); g.lineTo(bx, by - y1);
       g.lineTo(bx, by - y0); g.lineTo(ax, ay - y0);
       g.closePath(); g.fill();
-      if (GLOWG && (r * 2 + c * 3) % 5 < 4) {
-        // ~75% of panes glow after dark (fixed pattern), slightly inset so the
-        // warm light reads as crisp windows punching through the night
-        const ix = (bx - ax) * 0.1, iy = (by - ay) * 0.1, sy = (y1 - y0) * 0.1;
-        GLOWG.fillStyle = GLOW_WARM;
-        GLOWG.beginPath();
-        GLOWG.moveTo(ax + ix, ay + iy - y1 + sy); GLOWG.lineTo(bx - ix, by - iy - y1 + sy);
-        GLOWG.lineTo(bx - ix, by - iy - y0 - sy); GLOWG.lineTo(ax + ix, ay + iy - y0 - sy);
-        GLOWG.closePath(); GLOWG.fill();
+      if (GLOWG && isLit) {
+        // G1: only panes lit in the day sprite may glow at night; glowFrac
+        // caps the lit fraction (sparse ~40% for residential) and the pane is
+        // slightly inset so the light reads as crisp windows in the dark
+        dayLit++;
+        if (nightLit + 1 <= glowFrac * dayLit) {
+          nightLit++;
+          const ix = (bx - ax) * 0.1, iy = (by - ay) * 0.1, sy = (y1 - y0) * 0.1;
+          GLOWG.fillStyle = glow;
+          GLOWG.beginPath();
+          GLOWG.moveTo(ax + ix, ay + iy - y1 + sy); GLOWG.lineTo(bx - ix, by - iy - y1 + sy);
+          GLOWG.lineTo(bx - ix, by - iy - y0 - sy); GLOWG.lineTo(ax + ix, ay + iy - y0 - sy);
+          GLOWG.closePath(); GLOWG.fill();
+        }
       }
     }
   }
 }
 
-// build a sprite plus a prebaked night variant (M10): the draw callback runs
-// once with GLOWG set, so windows() bakes every pane, fully lit, into a glow
-// layer; a cheap 8-tap stamp adds self-glow bloom. All of this happens at
-// boot inside buildSprites — renderFrame only ever *looks up* spr.night.
+// build a sprite plus a prebaked night variant (M10/G1): the draw callback
+// runs once with GLOWG set, so windows() bakes its day-lit panes, in the
+// zone's light color, into a glow layer; a cheap 8-tap stamp adds a faint
+// halo. All of this happens at boot inside buildSprites — renderFrame only
+// ever *looks up* spr.night.
 function withNight(w, h, extraTop, draw) {
   const cw = (w + h) * HW, ch = extraTop + (w + h) * HH;
   const glow = document.createElement("canvas");
@@ -106,7 +119,7 @@ function withNight(w, h, extraTop, draw) {
   const night = document.createElement("canvas");
   night.width = cw; night.height = ch;
   const g = night.getContext("2d");
-  g.globalAlpha = 0.15; // soft halo around every lit pane
+  g.globalAlpha = 0.08; // faint halo around every lit pane (G1: tamed bloom)
   for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, -1], [-1, 1], [1, 1]])
     g.drawImage(glow, dx, dy);
   g.globalAlpha = 1;
@@ -441,15 +454,15 @@ function buildSprites() {
     SPR.r2.push(withNight(1, 1, 46, (g, ox, oy) => {
       const base = ["#b06a4a", "#9c8a6e", "#7e8fa0", "#8a9a7a", "#a87888"][v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 36, base);
-      windows(g, up(W, 0), up(S, 0), 36, 3, 2, 0.55);
-      windows(g, up(S, 0), up(E, 0), 36, 3, 3, 0.55);
+      windows(g, up(W, 0), up(S, 0), 36, 3, 2, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+      windows(g, up(S, 0), up(E, 0), 36, 3, 3, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       g.fillStyle = "#4c4c52"; g.fillRect(ox - 6, oy - 36 - HH + 2, 8, 5); // roof AC
     }));
     SPR.r3.push(withNight(1, 1, 82, (g, ox, oy) => {
       const base = ["#c9c1ae", "#a9b6c4", "#c7a9a1", "#b4c4ae", "#cbb98e"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base);
-      windows(g, up(W, 0), up(S, 0), 68, 6, 3, 0.6);
-      windows(g, up(S, 0), up(E, 0), 68, 6, 3, 0.6);
+      windows(g, up(W, 0), up(S, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+      windows(g, up(S, 0), up(E, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       g.strokeStyle = "#333"; g.lineWidth = 1.5;
       g.beginPath(); g.moveTo(ox, N[1] - 68); g.lineTo(ox, N[1] - 80); g.stroke();
       g.fillStyle = "#e33"; g.fillRect(ox - 1, N[1] - 82, 3, 3);
@@ -474,20 +487,20 @@ function buildSprites() {
     SPR.c2.push(withNight(1, 1, 56, (g, ox, oy) => {
       const base = ["#8ba3b5", "#a39b8b", "#8b9b8f", "#9b8ba3", "#b5a08b"][v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base);
-      windows(g, up(W, 0), up(S, 0), 44, 4, 3, 0.65, "#cfe8ff");
-      windows(g, up(S, 0), up(E, 0), 44, 4, 4, 0.65, "#cfe8ff");
+      windows(g, up(W, 0), up(S, 0), 44, 4, 3, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
+      windows(g, up(S, 0), up(E, 0), 44, 4, 4, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
     }));
     SPR.c3.push(withNight(1, 1, 104, (g, ox, oy) => {
       const glass = ["#3e6f9e", "#2e8a84", "#7a6a4e", "#5e4e8e", "#8e4e5e"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
         { top: shade(glass, 1.5), left: shade(glass, 0.62), right: shade(glass, 0.88) });
-      windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45));
-      windows(g, up(S, 0), up(E, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5));
+      windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
+      windows(g, up(S, 0), up(E, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
       g.strokeStyle = "#222"; g.lineWidth = 2;
       g.beginPath(); g.moveTo(ox, N[1] - 88); g.lineTo(ox, N[1] - 102); g.stroke();
       g.fillStyle = "#f33"; g.fillRect(ox - 1.5, N[1] - 104, 3, 3);
       if (GLOWG) { // lit lobby spilling onto the plaza
-        GLOWG.fillStyle = GLOW_WARM;
+        GLOWG.fillStyle = GLOW_COOL;
         GLOWG.beginPath(); GLOWG.ellipse(S[0], S[1] - 2, 12, 5, 0, 0, 7); GLOWG.fill();
       }
     }));
@@ -506,10 +519,10 @@ function buildSprites() {
     SPR.i2.push(withNight(1, 1, 56, (g, ox, oy) => {
       const base = ["#8f7f6f", "#7f8272", "#94836a", "#6f7f8f", "#877a88"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base);
-      windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f");
+      windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
       stack(g, ox - 10, N[1] - 24, 22, 6);
       if (GLOWG) { // night shift: yard floodlight pool + stack beacon
-        GLOWG.fillStyle = GLOW_WARM;
+        GLOWG.fillStyle = GLOW_SODIUM;
         GLOWG.beginPath(); GLOWG.ellipse(ox + 8, oy + 4, 15, 6, 0, 0, 7); GLOWG.fill();
         GLOWG.fillStyle = "#ff6a4a";
         GLOWG.fillRect(ox - 11, N[1] - 49, 3, 3);
@@ -518,7 +531,7 @@ function buildSprites() {
     SPR.i3.push(withNight(1, 1, 74, (g, ox, oy) => {
       const base = ["#77706a", "#6f7078", "#7c6f62", "#6a7770", "#78645e"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base);
-      windows(g, up(W, 0), up(S, 0), 38, 2, 2, 0.35, "#ffd27f");
+      windows(g, up(W, 0), up(S, 0), 38, 2, 2, 0.35, "#ffd27f", "#20242c", GLOW_SODIUM);
       stack(g, ox - 12, N[1] - 34, 30, 7);
       stack(g, ox + 2, N[1] - 30, 24, 6);
       g.fillStyle = "#a8b2ba"; // storage tank
@@ -526,7 +539,7 @@ function buildSprites() {
       g.fillRect(ox + 9, N[1] - 30, 14, 8);
       g.beginPath(); g.ellipse(ox + 16, N[1] - 22, 7, 4, 0, 0, 7); g.fill();
       if (GLOWG) { // night shift: yard floodlight pool + stack beacons
-        GLOWG.fillStyle = GLOW_WARM;
+        GLOWG.fillStyle = GLOW_SODIUM;
         GLOWG.beginPath(); GLOWG.ellipse(ox - 2, oy + 6, 17, 7, 0, 0, 7); GLOWG.fill();
         GLOWG.fillStyle = "#ff6a4a";
         GLOWG.fillRect(ox - 13, N[1] - 67, 3, 3);
@@ -538,8 +551,8 @@ function buildSprites() {
   /* ---- civic 2x2 buildings ---- */
   SPR.police = withNight(2, 2, 46, (g, ox, oy) => {
     const { W, S, E } = prism(g, ox, oy, 2, 2, 30, "#b9c4d4");
-    windows(g, up(W, 0), up(S, 0), 30, 2, 4, 0.7, "#dce9ff");
-    windows(g, up(S, 0), up(E, 0), 30, 2, 4, 0.7, "#dce9ff");
+    windows(g, up(W, 0), up(S, 0), 30, 2, 4, 0.7, "#dce9ff", "#20242c", GLOW_COOL);
+    windows(g, up(S, 0), up(E, 0), 30, 2, 4, 0.7, "#dce9ff", "#20242c", GLOW_COOL);
     // blue band + badge
     poly(g, [up(S, 22), up(E, 22), up(E, 28), up(S, 28)], "#173e8c");
     poly(g, [up(W, 22), up(S, 22), up(S, 28), up(W, 28)], "#102e6b");
@@ -561,7 +574,7 @@ function buildSprites() {
 
   SPR.coal = withNight(2, 2, 78, (g, ox, oy) => {
     const { W, S, E, N } = prism(g, ox, oy, 2, 2, 34, "#5c5c64");
-    windows(g, up(S, 0), up(E, 0), 34, 2, 4, 0.5, "#ffb54e");
+    windows(g, up(S, 0), up(E, 0), 34, 2, 4, 0.5, "#ffb54e", "#20242c", GLOW_SODIUM);
     stack(g, ox - 18, N[1] - 26, 44, 10, true);
     stack(g, ox + 14, N[1] - 20, 36, 9, true);
     g.fillStyle = "#2f2f36"; // coal pile
@@ -616,8 +629,8 @@ function buildSprites() {
   // Hospital: white slab with blue window bands and a red-cross helipad roof
   SPR.hospital = withNight(2, 2, 62, (g, ox, oy) => {
     const { W, S, E, N } = prism(g, ox, oy, 2, 2, 34, "#e6e3da");
-    windows(g, up(W, 0), up(S, 0), 34, 3, 4, 0.75, "#bfe0f2");
-    windows(g, up(S, 0), up(E, 0), 34, 3, 4, 0.75, "#bfe0f2");
+    windows(g, up(W, 0), up(S, 0), 34, 3, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
+    windows(g, up(S, 0), up(E, 0), 34, 3, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
     // emergency canopy on SE face
     const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
     poly(g, [up(dm(0.3), 12), up(dm(0.7), 12), up(dm(0.7), 15), up(dm(0.3), 15)], "#c94040");

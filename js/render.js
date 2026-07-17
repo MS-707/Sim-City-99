@@ -30,7 +30,11 @@ const worldY = (x, y) => (x + y) * HH + HH;
 // equal tickCount values always produce identical lighting, and the phase
 // advances by itself as the sim ticks.
 const NIGHT_TINT = "#0a1230";     // dusk wash color (screen-space overlay)
-const NIGHT_MAX_ALPHA = 0.7;      // overlay opacity at deepest night
+const NIGHT_MAX_ALPHA = 0.6;      // G1: lerp facades ~60% toward the tint at deepest
+                                  // night instead of covering them — silhouettes,
+                                  // roof diamonds and zone colors stay readable
+const NIGHT_LIGHT_ALPHA = 0.7;    // G1: clamp on the additive night-light pass —
+                                  // baked glows never blit at full alpha
 const NIGHT_MAX_Q = 3 * 700;      // draw cap on queued (sprite,x,y) triples
 const nightQ = [];                // reused every frame — never reallocated
 
@@ -239,7 +243,7 @@ function renderFrame(city, uiState) {
 // allocated here, no gradients built, no getImageData.
 function drawNightLights(city, ns) {
   ctx.globalCompositeOperation = "lighter";
-  ctx.globalAlpha = ns;
+  ctx.globalAlpha = ns * NIGHT_LIGHT_ALPHA; // clamped (G1) — no full-alpha stacking
   for (let k = 0; k < nightQ.length; k += 3) {
     const s = nightQ[k];
     ctx.drawImage(s.c, nightQ[k + 1] - s.ox, nightQ[k + 2] - s.oy);

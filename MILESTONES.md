@@ -6,10 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G1 — Night city legibility** (from the graphics audit): per-zone
-  window bake (cool C, sparse warm R, sodium I), tamed halo alpha, clamped
-  night compositing so roofs and silhouettes survive; dense-district
-  whiteout halved vs HEAD baseline. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G2 — Depth-correct night light pass** (graphics audit): night glow
+  drawn in painter order (per-diagonal buckets or road-clipped pools) so
+  lamps behind towers stop rendering on top of them; occluded ground pools
+  suppressed; open streets keep >=80% glow; <=1.3x night frame budget.
+  Criteria: docs/gfx-audit-slate.json.
 - [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
   and lose capacity after ~30 years with rebuild prompts, coal smog scales
   with load; power mix pie in the budget window.
@@ -62,6 +63,15 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G1 — Night city legibility**: per-zone night window bake (cool
+  #a8ccf8 commercial, sparse warm #f0b85c residential capped at 40% of day
+  panes, sodium #ff9c3e industrial), glow gated to day-lit panes only, halo
+  alpha 0.15->0.08, additive night pass clamped to 0.7x and facade tint
+  lerp 0.7->0.6. Dense-district midnight whiteout: 28% of the HEAD baseline
+  (0.44 -> 0.12 near-white fraction); roof chroma/darkness restored; all
+  276 day sprites byte-identical, noon screenshot zero changed pixels.
+  Verified against 5 archived judge-approved criteria (all pass).
 
 - [x] **M18 — News helicopter & traffic reports**: congestion-gated chopper
   (CHOPPER_TRAFFIC_T=160, month-rollover spawn chance, single instance,

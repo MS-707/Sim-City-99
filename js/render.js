@@ -24,6 +24,36 @@ function renderInit(canvas) {
 const worldX = (x, y) => (x - y) * HW;
 const worldY = (x, y) => (x + y) * HH + HH;
 
+/* ---------------- day/night cycle (M10) ---------------- */
+// One in-game day spans the 24-tick month: hour = tickCount % 24, midnight on
+// the month boundary, noon at hour 12. Both functions are pure in sim time —
+// equal tickCount values always produce identical lighting, and the phase
+// advances by itself as the sim ticks.
+const NIGHT_TINT = "#0a1230";     // dusk wash color (screen-space overlay)
+const NIGHT_MAX_ALPHA = 0.7;      // overlay opacity at deepest night
+const NIGHT_MAX_Q = 3 * 700;      // draw cap on queued (sprite,x,y) triples
+const nightQ = [];                // reused every frame — never reallocated
+
+function dayPhase(tickCount) {    // 0 = midnight … 0.5 = noon … → 1
+  return (((tickCount % 24) + 24) % 24) / 24;
+}
+
+// 0 = full day, 1 = deepest night; linear dawn/dusk ramps between the noon
+// plateau (hours 9–15) and the midnight plateau (hours 23–01). With the
+// Speed-menu "Day/Night Cycle" pref off the phase is forced to full day and
+// every night draw is skipped entirely.
+function nightStrength(city, uiState) {
+  if (uiState && uiState.prefs && uiState.prefs.dayNight === false) return 0;
+  const d = Math.abs(dayPhase(city.tickCount) * 24 - 12); // hours from noon
+  return Math.max(0, Math.min(1, (d - 3) / 8));
+}
+
+function worldTransform() {
+  ctx.translate(cvs.width / 2, cvs.height / 2);
+  ctx.scale(cam.z, cam.z);
+  ctx.translate(-cam.x, -cam.y);
+}
+
 function screenToTile(sx, sy) {
   const wx = (sx - cvs.width / 2) / cam.z + cam.x;
   const wy = (sy - cvs.height / 2) / cam.z + cam.y;
@@ -33,12 +63,12 @@ function screenToTile(sx, sy) {
 
 function renderFrame(city, uiState) {
   frame++;
+  const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
+  nightQ.length = 0;
   ctx.fillStyle = "#0a0a12";
   ctx.fillRect(0, 0, cvs.width, cvs.height);
   ctx.save();
-  ctx.translate(cvs.width / 2, cvs.height / 2);
-  ctx.scale(cam.z, cam.z);
-  ctx.translate(-cam.x, -cam.y);
+  worldTransform();
   ctx.imageSmoothingEnabled = false;
 
   const margin = 160;
@@ -89,19 +119,35 @@ function renderFrame(city, uiState) {
         if (size === 1) {
           const spr = spriteFor(city, i);
           if (spr) ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+          if (ns > 0 && nightQ.length < NIGHT_MAX_Q) {
+            // queue night lights (drawn after the dusk tint): street lamps on
+            // road tiles, prebaked lit-window glow on powered zones
+            if (ov === OV.ROAD) {
+              nightQ.push(SPR.lamp, wx, wy);
+            } else if (spr && spr.night && city.powered[i]) {
+              nightQ.push(spr.night, wx, wy);
+            }
+          }
         } else {
           const a = city.anc[i];
           const ax = a % MAP, ay = (a / MAP) | 0;
           if (x === ax + size - 1 && y === ay + size - 1) {
             const spr = spriteFor(city, a);
             const awx = worldX(ax, ay), awy = worldY(ax, ay);
-            if (spr) ctx.drawImage(spr.c, awx - spr.ox, awy - spr.oy);
+            if (spr) {
+              ctx.drawImage(spr.c, awx - spr.ox, awy - spr.oy);
+              if (ns > 0 && spr.night && city.powered[a] && nightQ.length < NIGHT_MAX_Q)
+                nightQ.push(spr.night, awx, awy);
+            }
           }
         }
       }
 
       // fire on this tile
-      if (city.fire[i]) drawFlames(wx, wy);
+      if (city.fire[i]) {
+        drawFlames(wx, wy);
+        if (ns > 0 && nightQ.length < NIGHT_MAX_Q) nightQ.push(SPR.fireGlow, wx, wy);
+      }
 
       // blinking "no power" bolt on developed but unpowered zones / civics
       if (blink && !city.powered[i] &&
@@ -117,9 +163,48 @@ function renderFrame(city, uiState) {
   updateCars(city);
   updateSmoke(city);
   drawDisaster(city);
-  if (uiState.hover && uiState.tool !== "query") drawCursor(city, uiState);
-
   ctx.restore();
+
+  // dusk tint: one screen-space fill over the whole scene — no per-tile work,
+  // no pixel reads. Skipped entirely by day / with the cycle pref off.
+  if (ns > 0) {
+    ctx.globalAlpha = ns * NIGHT_MAX_ALPHA;
+    ctx.fillStyle = NIGHT_TINT;
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.save();
+  worldTransform();
+  if (ns > 0) drawNightLights(city, ns);
+  if (uiState.hover && uiState.tool !== "query") drawCursor(city, uiState);
+  ctx.restore();
+}
+
+// additive light pass over the dusk tint: prebaked lamp / window / halo
+// sprites queued during the tile loop. Lookups + drawImage only — nothing is
+// allocated here, no gradients built, no getImageData.
+function drawNightLights(city, ns) {
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = ns;
+  for (let k = 0; k < nightQ.length; k += 3) {
+    const s = nightQ[k];
+    ctx.drawImage(s.c, nightQ[k + 1] - s.ox, nightQ[k + 2] - s.oy);
+  }
+  const d = city.disaster;
+  if (d) {
+    const wx = worldX(d.x, d.y), wy = worldY(d.x, d.y);
+    if (d.kind === "ufo") {
+      // the abduction beam washes the ground green at night
+      ctx.drawImage(SPR.ufoGlow.c, wx - SPR.ufoGlow.ox, wy - SPR.ufoGlow.oy - 16);
+    } else if (d.kind === "tornado") {
+      // lightning flicker around the funnel
+      ctx.globalAlpha = ns * (0.35 + 0.65 * Math.abs(Math.sin(frame * 0.31)));
+      ctx.drawImage(SPR.stormGlow.c, wx - SPR.stormGlow.ox, wy - SPR.stormGlow.oy - 24);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
 }
 
 function drawFlames(wx, wy) {

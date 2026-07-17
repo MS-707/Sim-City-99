@@ -17,7 +17,7 @@ const PREFS_KEY = "simcity99.prefs";
 function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch (e) {}
-  return Object.assign({ autoBudget: false }, p);
+  return Object.assign({ autoBudget: false, dayNight: true }, p);
 }
 function savePrefs() {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(UI.prefs)); } catch (e) {}
@@ -186,6 +186,9 @@ const MENUS = {
     [`${UI.speed === 0.5 ? "● " : ""}Turtle`, () => setSpeed(0.5)],
     [`${UI.speed === 1 ? "● " : ""}Llama`, () => setSpeed(1)],
     [`${UI.speed === 2 ? "● " : ""}Cheetah`, () => setSpeed(2)],
+    "-",
+    [`${UI.prefs.dayNight ? "✓ " : ""}Day/Night Cycle`,
+      () => { UI.prefs.dayNight = !UI.prefs.dayNight; savePrefs(); }],
   ],
   disasters: () => [
     ["Start Fire 🔥", () => { city.startDisaster("fire"); Snd.siren(); }],

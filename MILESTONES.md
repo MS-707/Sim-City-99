@@ -6,14 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M10 — Day/night cycle**: gradual day-night tint over the city, lit
-  building windows at night, street lamps along roads, toggleable in Speed
-  menu; disasters more dramatic in the dark.
+- [ ] **M11 — Bigger maps & map picker**: selectable map sizes (64/80/128) and
+  a terrain-preview picker on the splash screen with reroll button.
 
 ## Open
 
-- [ ] **M11 — Bigger maps & map picker**: selectable map sizes (64/80/128) and
-  a terrain-preview picker on the splash screen with reroll button.
 - [ ] **M12 — Seasons**: month-driven seasonal palette (snowy winters, autumn
   forests), seasonal ticker flavor, snow plows/reduced traffic in winter.
 - [ ] **M13 — Bonds & loans**: issue municipal bonds from the budget window
@@ -29,6 +26,13 @@ Queue policy: keep at least 5 open improvements at all times.
   bronze/silver/gold results by finish date and a trophy shelf dialog.
 
 ## Done
+
+- [x] **M10 — Day/night cycle**: deterministic tick-driven phase with gradual
+  dawn/dusk ramps (midnight ~41% of noon luminance), boot-baked lit-window
+  night sprites, street-lamp glow on roads, night-amplified disaster glow,
+  '✓ Day/Night Cycle' Speed-menu toggle persisted in prefs (zero night cost
+  when off), night render median 1.4x noon. Verified against 7 criteria
+  (all pass).
 
 - [x] **M9 — Scenario mode**: declarative SCENARIOS table (js/scenarios.js)
   with two playable scenarios — "Gridlock '97" (deterministic pre-built

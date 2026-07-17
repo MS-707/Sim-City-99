@@ -250,6 +250,8 @@ const MENUS = {
     ["Save City", saveCity],
     ["Load City", loadCity],
     "-",
+    ["Send Postcard… 📮", openPostcard],
+    "-",
     ["About SimCity 99", () => showDlg("dlg-about")],
   ],
   speed: () => [

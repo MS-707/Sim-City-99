@@ -199,6 +199,19 @@
     </div>
   </div>
 
+  <!-- Postcard photo mode (M14): composed on its own canvas, never #game -->
+  <div id="dlg-postcard" class="win95 dlg hidden">
+    <div class="titlebar"><span>📮 Postcard from the Mayor</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body postcardbox">
+      <canvas id="postcard-canvas" width="640" height="480"></canvas>
+      <div id="postcard-caption" class="postcard-caption"></div>
+      <div class="dlg-buttons">
+        <button id="btn-postcard-save" class="btn95">💾 Save PNG</button>
+        <button class="btn95 dlg-close">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="dlg-query" class="win95 dlg hidden">
     <div class="titlebar"><span>🔍 Tile Info</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
     <div class="dlg-body"><table id="query-table"></table>
@@ -214,6 +227,7 @@
 <script src="js/render.js"></script>
 <script src="js/ambience.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/postcard.js"></script>
 <script src="js/advisors.js"></script>
 <script src="js/scenarios.js"></script>
 <script src="js/main.js"></script>

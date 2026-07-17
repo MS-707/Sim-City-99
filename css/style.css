@@ -295,3 +295,14 @@ body {
   border: 2px solid; border-color: #404040 #fff #fff #404040; background: #000;
 }
 .picker-seed { font-size: 10px; color: #333; }
+
+/* ---------- postcard photo mode (M14) ---------- */
+#dlg-postcard .dlg-body { text-align: center; }
+#postcard-canvas {
+  display: block; margin: 0 auto;
+  max-width: min(62vw, 660px); max-height: 58vh;
+  width: auto; height: auto;
+  border: 1px solid #808080; background: #fff;
+  box-shadow: 2px 3px 0 rgba(0,0,0,.35);
+}
+.postcard-caption { margin-top: 6px; font-size: 11px; color: #333; font-style: italic; }

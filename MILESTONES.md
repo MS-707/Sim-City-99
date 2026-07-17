@@ -6,13 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M14 — Postcard photo mode**: export a framed PNG "postcard from
-  1997" snapshot of the current view (city name, date, retro border).
+- [ ] **M15 — Touch & small-screen support**: tap-to-build, pinch zoom,
+  responsive toolbar/side panel so the game plays on tablets.
 
 ## Open
 
-- [ ] **M15 — Touch & small-screen support**: tap-to-build, pinch zoom,
-  responsive toolbar/side panel so the game plays on tablets.
 - [ ] **M16 — More scenarios & medals**: extend the M9 SCENARIOS table with
   2-3 more scripted challenges (e.g. "Blackout Summer": rebuild a grid after
   the '97 heat wave; "Y2K Ready": bunker the city before Dec 1999), plus
@@ -28,6 +26,15 @@ Queue policy: keep at least 5 open improvements at all times.
   with load; power mix pie in the budget window.
 
 ## Done
+
+- [x] **M14 — Postcard photo mode**: File → "Send Postcard…" composes the
+  live viewport (night tint, season, cars and all) onto a dedicated canvas
+  with airmail border, photo mount, SC99 stamp, wavy postmark, "Greetings
+  from <CITY>!" headline and dateline; Win95 preview dialog with Save PNG
+  (blob download named simcity99-<city>-<mon><year>.png, graceful in
+  sandboxed iframes) — zero per-frame cost. Implemented via workflow
+  criteria; verification run inline after the workflow's verify agent hit
+  a usage-credit failure: 16/16 checks pass across 6 criteria.
 
 - [x] **M13 — Bonds & loans**: §5,000 municipal bonds issued from the budget
   dialog, amortized over 12 monthly rollovers (annuity formula, debt-service

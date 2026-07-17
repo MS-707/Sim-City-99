@@ -6,17 +6,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M23 — Advisor bias & department funding** *(user priority)*:
-  per-department funding sliders in the budget window (police, fire, roads,
-  education, health) replacing flat upkeep, with service effectiveness
-  (coverage radius/potency, road wear) scaling with funding level; advisors
-  gain departmental BIAS — each advisor champions their own budget and reacts
-  to the player's policy moves, not just city state: cut taxes and Finance
-  cheers while the Public Works/Transportation advisor flips out about the
-  starved road budget; raise taxes past ~9% and advisors warn about resident
-  exodus (wired to the existing demand penalty). Add a 4th Transportation
-  advisor tab biased toward road/transit funding. Advice lines must cite the
-  advisor's actual department numbers and escalate in tone as funding falls.
 - [ ] **M18 — Helicopter & traffic copter reports**: a news chopper that
   flies over congestion hotspots at random intervals; clicking it opens a
   live "Traffic on the 5s" report naming the worst intersections.
@@ -34,6 +23,24 @@ Queue policy: keep at least 5 open improvements at all times.
   sim, unlocked by tier; advisors recommend relevant ordinances.
 
 ## Done
+
+- [x] **M23 — Advisor bias & department funding** *(user priority)*: five
+  0–100% department funding sliders (police, fire, roads, education, health)
+  in the budget dialog; collectBudget charges each department its legacy
+  upkeep scaled by its own funding level (round(base × f/100), 100% ==
+  legacy exactly, save v7 with v6 saves defaulting to 100%); service
+  coverage radius/potency scale with funding (round(radius(0.4+0.6f)),
+  potency × f, zero at 0%); roads accrue wear per rollover
+  (Δ = round(18(100−F)/100) − round(10F/100)) with a 1.6× congestion factor
+  at full wear, pothole tint, and crumble-to-rubble at 0% funding; 4th
+  Transportation advisor tab (Big Ray Kowalski, hard-hat portrait) reading
+  live funding %, congestion index and wear; department champions escalate
+  through content/grumble/flip-out registers citing the live %; advisors
+  react to policy DELTAS — tax cuts draw a Kowalski protest citing the
+  projected § shortfall while Finance approves, deep cuts rile the service
+  advisors, hikes ≥10% draw a four-advisor exodus warning citing the
+  existing (7−rate)×0.05 demand modifier (still the single tax→demand
+  lever). Verified against 8 criteria (all pass, 78 checks).
 
 - [x] **M17 — City Hall records**: #dlg-almanac (Windows menu) with one row
   per completed year + a YTD row — end-of-year population, total tax income,

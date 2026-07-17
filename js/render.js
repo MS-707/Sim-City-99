@@ -161,6 +161,16 @@ function renderFrame(city, uiState) {
         if (size === 1) {
           const spr = spriteFor(city, i);
           if (spr) ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+          // pothole tint (M23): unmaintained roads visibly darken with wear
+          if (ov === OV.ROAD && city.roadWear[i] > 96) {
+            ctx.globalAlpha = Math.min(0.38, (city.roadWear[i] - 96) / 400);
+            ctx.fillStyle = "#181008";
+            ctx.beginPath();
+            ctx.moveTo(wx, wy - HH); ctx.lineTo(wx + HW, wy);
+            ctx.lineTo(wx, wy + HH); ctx.lineTo(wx - HW, wy);
+            ctx.closePath(); ctx.fill();
+            ctx.globalAlpha = 1;
+          }
           if (ns > 0 && nightQ.length < NIGHT_MAX_Q) {
             // queue night lights (drawn after the dusk tint): street lamps on
             // road tiles, prebaked lit-window glow on powered zones

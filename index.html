@@ -114,6 +114,19 @@
       <div class="budget-row"><label>Property tax rate: <b id="tax-label">7%</b></label>
         <input type="range" id="tax-slider" min="0" max="20" value="7"></div>
       <table id="budget-table" class="budget-table"></table>
+      <!-- Department funding (M23): five 0–100% sliders with live labels -->
+      <fieldset class="fs95 fundbox"><legend>Department Funding</legend>
+        <div class="fund-row"><label>🚓 Police <b id="fund-label-police">100%</b></label>
+          <input type="range" class="fund-slider" id="fund-police" data-dept="police" min="0" max="100" value="100"></div>
+        <div class="fund-row"><label>🚒 Fire <b id="fund-label-fire">100%</b></label>
+          <input type="range" class="fund-slider" id="fund-fire" data-dept="fire" min="0" max="100" value="100"></div>
+        <div class="fund-row"><label>🚧 Roads <b id="fund-label-roads">100%</b></label>
+          <input type="range" class="fund-slider" id="fund-roads" data-dept="roads" min="0" max="100" value="100"></div>
+        <div class="fund-row"><label>🎓 Education <b id="fund-label-edu">100%</b></label>
+          <input type="range" class="fund-slider" id="fund-edu" data-dept="edu" min="0" max="100" value="100"></div>
+        <div class="fund-row"><label>🏥 Health <b id="fund-label-health">100%</b></label>
+          <input type="range" class="fund-slider" id="fund-health" data-dept="health" min="0" max="100" value="100"></div>
+      </fieldset>
       <!-- Municipal bonds (M13) -->
       <fieldset class="fs95 bondbox"><legend>Municipal Bonds</legend>
         <div id="bond-rating" class="bond-rating"></div>
@@ -167,7 +180,7 @@
     <div class="titlebar"><span>🏛️ City Advisors — Term 1997</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
     <div class="dlg-body">
       <div id="adv-tabs" class="adv-tabs">
-        <button class="tab95 active" data-adv="finance">💰 Finance</button><button class="tab95" data-adv="safety">🚨 Safety</button><button class="tab95" data-adv="environment">🌳 Environment</button>
+        <button class="tab95 active" data-adv="finance">💰 Finance</button><button class="tab95" data-adv="safety">🚨 Safety</button><button class="tab95" data-adv="environment">🌳 Environment</button><button class="tab95" data-adv="transport">🚧 Transport</button>
       </div>
       <div class="adv-panel" data-adv="finance">
         <div class="adv-head">
@@ -189,6 +202,13 @@
           <div><div class="adv-name">Dr. Willow Greenfield</div><div class="adv-title">Environmental Advisor, Ph.D.</div></div>
         </div>
         <ul class="adv-advice" id="adv-advice-environment"></ul>
+      </div>
+      <div class="adv-panel hidden" data-adv="transport">
+        <div class="adv-head">
+          <canvas class="adv-portrait" id="adv-face-transport" width="48" height="48"></canvas>
+          <div><div class="adv-name">Big Ray Kowalski</div><div class="adv-title">Public Works Superintendent, Local 99</div></div>
+        </div>
+        <ul class="adv-advice" id="adv-advice-transport"></ul>
       </div>
       <div class="adv-foot">☎ Advisors reachable by beeper, fax, or dial-up &bull; ©1997 City Hall Intranet — best viewed in Netscape</div>
       <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>

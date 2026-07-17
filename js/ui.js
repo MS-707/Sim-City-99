@@ -562,6 +562,16 @@ function bindDialogs() {
     fillBudgetTable();
   });
 
+  // M23: five per-department funding sliders — each drives city.funding
+  // live (no reopen needed): % label + budget table refresh on every input
+  document.querySelectorAll(".fund-slider").forEach((s) => {
+    s.addEventListener("input", () => {
+      city.funding[s.dataset.dept] = +s.value;
+      document.getElementById("fund-label-" + s.dataset.dept).textContent = s.value + "%";
+      fillBudgetTable();
+    });
+  });
+
   // M13: issue-bond button — refusal at the cap is handled by issueBond()
   document.getElementById("btn-issue-bond").addEventListener("click", () => {
     Snd.ensure();
@@ -580,6 +590,10 @@ function bindDialogs() {
 function openBudget() {
   document.getElementById("tax-slider").value = city.taxRate;
   document.getElementById("tax-label").textContent = city.taxRate + "%";
+  for (const dept of ["police", "fire", "roads", "edu", "health"]) { // M23
+    document.getElementById("fund-" + dept).value = city.funding[dept];
+    document.getElementById("fund-label-" + dept).textContent = city.funding[dept] + "%";
+  }
   fillBudgetTable();
   fillBondPanel();
   setBondNote("");
@@ -588,12 +602,20 @@ function openBudget() {
 
 function fillBudgetTable() {
   const b = city.lastBudget;
+  // M23: per-department lines — funding level + charge, projected LIVE from
+  // city.deptCosts() (same documented formula collectBudget charges with),
+  // so dragging a funding slider updates the table without reopening
+  const dc = city.deptCosts();
+  const fd = city.funding;
   const f = (n) => (n < 0 ? "-§" : "§") + Math.abs(n).toLocaleString();
   document.getElementById("budget-table").innerHTML = `
     <tr><td>Tax revenue</td><td>${f(b.taxes)}</td></tr>
-    <tr><td>Roads &amp; wires</td><td>${f(-b.roads)}</td></tr>
-    <tr><td>Police &amp; fire</td><td>${f(-b.services)}</td></tr>
-    <tr><td>Power plants</td><td>${f(-b.power)}</td></tr>
+    <tr><td>Roads &amp; wires (${fd.roads}%)</td><td>${f(-dc.roads)}</td></tr>
+    <tr><td>Police (${fd.police}%)</td><td>${f(-dc.police)}</td></tr>
+    <tr><td>Fire (${fd.fire}%)</td><td>${f(-dc.fire)}</td></tr>
+    <tr><td>Education (${fd.edu}%)</td><td>${f(-dc.edu)}</td></tr>
+    <tr><td>Health (${fd.health}%)</td><td>${f(-dc.health)}</td></tr>
+    <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;

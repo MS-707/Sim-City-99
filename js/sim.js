@@ -243,13 +243,18 @@ class City {
 
     this.funds = 20000;
     this.taxRate = 7;               // percent
+    // M23: per-department funding levels, 0..100 (% of full funding).
+    // A fresh city funds everything at 100%. Serialized in save v7.
+    this.funding = { police: 100, fire: 100, roads: 100, edu: 100, health: 100 };
+    this.roadWear = new Uint8Array(n); // M23: road wear 0..255 (save v7)
     this.month = 0; this.year = 1997;
     this.tickCount = 0;
     this.pop = 0; this.jobs = 0;
     this.demand = { r: 0.4, c: 0.1, i: 0.5 };
     this.powerDemand = 0; this.powerSupply = 0;
     this.history = { pop: [], funds: [] };
-    this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, debt: 0, net: 0 };
+    this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, debt: 0, net: 0,
+      dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0 } };
     this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
     this.disastersEnabled = true;
     this.disaster = null;           // {kind:'tornado'|'ufo', x, y, ticks}
@@ -553,9 +558,55 @@ class City {
     // per-tile clamp so even saturated arterials visibly clear up.
     const seasonMul = seasonOf(this.month) === "winter" ? 0.72 : 1;
     for (let i = 0; i < n; i++) {
+      // M23 road-wear capacity penalty: worn pavement carries traffic worse —
+      // the load a road effectively carries is scaled by (1 + wear/255 * 0.6),
+      // i.e. a fully worn road congests as if it hauled 60% more trips.
+      // wear = 0 gives a factor of exactly 1: the legacy arithmetic untouched.
+      const wearMul = 1 + this.roadWear[i] / 255 * 0.6;
       this.traffic[i] = this.over[i] === OV.ROAD
-        ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i]) * seasonMul * 0.5)
+        ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i] * wearMul) * seasonMul * 0.5)
         : 0;
+    }
+  }
+
+  /* ---- road wear (M23) ----
+     Runs exactly once per month rollover. With F = funding.roads (0..100),
+     every road tile's wear counter (city.roadWear, 0..255, serialized in
+     save v7) moves by the documented delta
+         Δ = round(18 * (100 - F) / 100) - round(10 * F / 100)
+     clamped to [0, 255]:
+         F = 100 → Δ = 0 - 10 = -10   full funding: crews out-repair all wear;
+                                      wear pins at 0 and roads behave exactly
+                                      as they did pre-M23 (no penalty at all)
+         F = 50  → Δ = 9 - 5  = +4    strictly between the extremes
+         F = 0   → Δ = 18 - 0 = +18   no crews: a fresh road saturates to 255
+                                      in ceil(255 / 18) = 15 rollovers
+     Consequences (both measurable):
+       1. capacity penalty — recomputeTraffic scales each road's carried load
+          by (1 + wear/255 * 0.6); see the comment there.
+       2. crumble — while F is EXACTLY 0, a road tile already at wear 255 has
+          a 35% chance per rollover to decay to OV.RUBBLE. Documented horizon:
+          at 0% funding the first crumbled roads appear within ~20 month
+          rollovers (15 to saturate + a few 35% draws). At any F > 0 roads
+          never crumble, and wear itself repairs whenever Δ < 0. */
+  roadWearTick() {
+    const F = this.funding.roads;
+    const delta = Math.round(18 * (100 - F) / 100) - Math.round(10 * F / 100);
+    let crumbled = 0;
+    for (let i = 0; i < this.over.length; i++) {
+      if (this.over[i] !== OV.ROAD) { this.roadWear[i] = 0; continue; }
+      this.roadWear[i] = Math.max(0, Math.min(255, this.roadWear[i] + delta));
+      if (F === 0 && this.roadWear[i] >= 255 && Math.random() < 0.35) {
+        this.over[i] = OV.RUBBLE; this.lvl[i] = 0; this.anc[i] = -1;
+        this.roadWear[i] = 0;
+        crumbled++;
+      }
+    }
+    if (crumbled) {
+      this.powerDirty = true;
+      this.pushMsg(`🕳️ ${crumbled} stretch${crumbled === 1 ? "" : "es"} of ` +
+        `unmaintained road crumble${crumbled === 1 ? "s" : ""} into rubble! ` +
+        `Public works begs the mayor for a budget.`);
     }
   }
 
@@ -590,11 +641,13 @@ class City {
     const trOut = new Uint8Array(n);
     this.diffuse(tr, trOut, 2, 0.35);
 
-    // police / fire / education / health coverage
-    this.stampCoverage(OV.POLICE, this.polCov, 12);
-    this.stampCoverage(OV.FIRESTA, this.fireCov, 12);
-    this.stampCoverage(OV.SCHOOL, this.eduCov, 14);
-    this.stampCoverage(OV.HOSPITAL, this.medCov, 14);
+    // police / fire / education / health coverage — each department's stamp
+    // is scaled by its OWN funding level only (M23), so cutting one budget
+    // never perturbs the other three coverage arrays
+    this.stampCoverage(OV.POLICE, this.polCov, 12, this.funding.police / 100);
+    this.stampCoverage(OV.FIRESTA, this.fireCov, 12, this.funding.fire / 100);
+    this.stampCoverage(OV.SCHOOL, this.eduCov, 14, this.funding.edu / 100);
+    this.stampCoverage(OV.HOSPITAL, this.medCov, 14, this.funding.health / 100);
 
     for (let i = 0; i < n; i++) {
       let v = 40 + lvOut[i] - this.poll[i] * 0.7 - trOut[i] * 0.4  // traffic penalty
@@ -628,19 +681,31 @@ class City {
     for (let i = 0; i < out.length; i++) out[i] = Math.max(0, Math.min(255, a[i]));
   }
 
-  stampCoverage(type, out, radius) {
+  /* Service effectiveness scales with department funding (M23).
+     Documented formula, with f = funding / 100 (0..1):
+         R      = round(radius * (0.4 + 0.6 * f))        effective radius
+         val(d) = round((R - d) * 18 * f)                potency at manhattan d
+     stamped for d <= R around each POWERED anchor, max-combined, clamped 255.
+     At f = 1 this reduces to the legacy v6 stamp exactly — (radius - d) * 18
+     over the full radii 12/12/14/14 — so default play is unchanged. Potency
+     scales linearly with f, so coverage is strictly monotone in funding
+     (100% > 50% > 25% wherever any station reaches). Documented floor at 0%:
+     f = 0 stamps nothing at all — the coverage array is all zeros. */
+  stampCoverage(type, out, radius, f = 1) {
     out.fill(0);
+    if (f <= 0) return; // 0% funding: the documented floor — zero coverage
+    const R = Math.round(radius * (0.4 + 0.6 * f));
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] !== type || this.anc[i] !== i) continue;
       if (!this.powered[i]) continue; // stations need power
       const x = i % MAP, y = (i / MAP) | 0;
-      for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
         const X = x + dx, Y = y + dy;
         if (!this.inMap(X, Y)) continue;
         const d = Math.abs(dx) + Math.abs(dy);
-        if (d > radius) continue;
+        if (d > R) continue;
         const j = this.idx(X, Y);
-        out[j] = Math.max(out[j], Math.min(255, (radius - d) * 18));
+        out[j] = Math.max(out[j], Math.min(255, Math.round((R - d) * 18 * f)));
       }
     }
   }
@@ -878,21 +943,53 @@ class City {
     return { ok: true, cost, fee };
   }
 
-  // ---------- budget (monthly) ----------
-  collectBudget() {
-    let roads = 0, wires = 0, services = 0, plants = 0;
+  /* ---- per-department upkeep (M23) ----
+     Replaces the old flat upkeep (all service anchors lumped at §25 apiece,
+     roads*0.4 + wires*0.15). Each department's monthly charge is its legacy
+     full-funding cost scaled by its own funding level and rounded ONCE
+     (Math.round, half-up) — the documented formula:
+         police = round(policeStations * 25 * funding.police / 100)
+         fire   = round(fireStations   * 25 * funding.fire   / 100)
+         edu    = round(schools        * 25 * funding.edu    / 100)
+         health = round(hospitals      * 25 * funding.health / 100)
+         roads  = round((roadTiles * 0.4 + wireTiles * 0.15) * funding.roads / 100)
+     Invariants: all departments at 100% reproduce the legacy totals exactly
+     (stations * 25 summed; road line = round(roads*0.4 + wires*0.15)); a
+     department at 0% charges exactly §0; 50% charges exactly half the raw
+     (pre-round) legacy figure, rounded once by the formula above.
+     Used by collectBudget() for the real monthly charge and by the budget
+     dialog for its live per-department projection. */
+  deptCosts() {
+    let roads = 0, wires = 0, police = 0, fireSt = 0, schools = 0,
+        hospitals = 0, plants = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (t === OV.ROAD) roads++;
       else if (t === OV.WIRE) wires++;
-      else if ((t === OV.POLICE || t === OV.FIRESTA || t === OV.SCHOOL ||
-                t === OV.HOSPITAL) && this.anc[i] === i) services++;
+      else if (t === OV.POLICE && this.anc[i] === i) police++;
+      else if (t === OV.FIRESTA && this.anc[i] === i) fireSt++;
+      else if (t === OV.SCHOOL && this.anc[i] === i) schools++;
+      else if (t === OV.HOSPITAL && this.anc[i] === i) hospitals++;
       else if ((t === OV.COAL || t === OV.SOLAR) && this.anc[i] === i) plants++;
     }
+    const f = this.funding;
+    return {
+      police: Math.round(police * 25 * f.police / 100),
+      fire:   Math.round(fireSt * 25 * f.fire / 100),
+      edu:    Math.round(schools * 25 * f.edu / 100),
+      health: Math.round(hospitals * 25 * f.health / 100),
+      roads:  Math.round((roads * 0.4 + wires * 0.15) * f.roads / 100),
+      plants: plants * 40,
+    };
+  }
+
+  // ---------- budget (monthly) ----------
+  collectBudget() {
+    const dc = this.deptCosts(); // per-department charges (M23) — formula above
     const taxes = Math.round(this.pop * this.taxRate * 0.28 + this.jobs * this.taxRate * 0.18);
-    const roadCost = Math.round(roads * 0.4 + wires * 0.15);
-    const serviceCost = services * 25;
-    const plantCost = plants * 40;
+    const roadCost = dc.roads;
+    const serviceCost = dc.police + dc.fire + dc.edu + dc.health;
+    const plantCost = dc.plants;
     // ---- debt service (M13) ----
     // Each active bond charges one payment per month rollover. The payment is
     // the fixed amortized `monthly` stamped at issue (annuity formula — see
@@ -920,7 +1017,10 @@ class City {
     }
     const net = taxes - roadCost - serviceCost - plantCost - debt;
     this.funds += net;
-    this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost, debt, net };
+    this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost, debt, net,
+      // M23: the per-department breakdown actually charged this month
+      dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
+              edu: dc.edu, health: dc.health } };
     if (this.funds < 0) this.pushMsg("💸 The city is BROKE. Raise taxes or cut back, Mayor!");
     this.history.pop.push(this.pop);
     this.history.funds.push(this.funds);
@@ -1086,6 +1186,7 @@ class City {
       this.month++;
       if (this.month >= 12) { this.month = 0; this.year++; }
       this.eventsTick();
+      this.roadWearTick();    // road wear & crumble (M23) — rollover only
       this.collectBudget();
       this.updateRecords();   // City Hall records (M17) — rollover only
       this.scanComplaints();  // citizen complaints (M17) — rollover only
@@ -1102,8 +1203,11 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 6, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 7, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
+      // M23 (save v7): per-department funding levels + road wear counters
+      funding: this.funding,
+      roadWear: Array.from(this.roadWear),
       bonds: this.bonds,
       month: this.month, year: this.year, tickCount: this.tickCount,
       disastersEnabled: this.disastersEnabled,
@@ -1132,6 +1236,12 @@ class City {
     c.disastersEnabled = d.disastersEnabled;
     c.terr.set(d.terr); c.over.set(d.over); c.lvl.set(d.lvl);
     c.varnt.set(d.varnt); c.anc.set(d.anc);
+    // M23 (save v7): department funding + road wear. A v6-or-earlier save has
+    // neither field: every department loads at the 100% default and all roads
+    // load pristine (wear 0) — the city keeps playing exactly as before.
+    c.funding = Object.assign({ police: 100, fire: 100, roads: 100, edu: 100, health: 100 },
+      (d.funding && typeof d.funding === "object") ? d.funding : {});
+    if (Array.isArray(d.roadWear)) c.roadWear.set(d.roadWear);
     c.history = d.history || { pop: [], funds: [] };
     // time-capsule events (M7): restore fired ids + live modifiers with their
     // remaining timers; a pre-M7 (v<=2) save simply has neither field, and

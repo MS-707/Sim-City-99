@@ -167,6 +167,11 @@ body {
 .budget-table tr.total td { border-top: 1px solid #000; font-weight: bold; }
 .budget-row { margin-bottom: 4px; }
 .budget-row input[type=range] { width: 100%; }
+/* department funding sliders (M23) */
+.fundbox { margin-top: 8px; }
+.fund-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; font-size: 12px; }
+.fund-row label { flex: 0 0 128px; display: flex; justify-content: space-between; }
+.fund-row input[type=range] { flex: 1; min-width: 0; }
 /* municipal bonds panel (M13) */
 .bondbox { margin-top: 10px; }
 .bondbox .dlg-buttons { margin-top: 6px; }

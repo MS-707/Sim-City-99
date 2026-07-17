@@ -21,6 +21,81 @@ function advParkCount() {
   return n;
 }
 
+function advRoadStats() { // road wear / decay aggregates (M23)
+  let roads = 0, worn = 0, wearSum = 0, rubble = 0;
+  for (let i = 0; i < city.over.length; i++) {
+    if (city.over[i] === OV.ROAD) {
+      roads++; wearSum += city.roadWear[i];
+      if (city.roadWear[i] >= 128) worn++;      // past the pothole line
+    } else if (city.over[i] === OV.RUBBLE) rubble++;
+  }
+  return { roads, worn, rubble, meanWear: roads ? wearSum / roads : 0 };
+}
+
+/* --------- M23: department champions & severity registers ---------
+   Documented department → champion advisor mapping (each champion carries
+   that department's funding line in its own panel, and no one else's):
+       police → safety      (Chief Gus Ramirez)
+       fire   → safety      (Chief Gus Ramirez)
+       roads  → transport   (Big Ray Kowalski)
+       edu    → finance     (Myrna Plutz — schools live in her ledger)
+       health → environment (Dr. Willow Greenfield — community wellbeing)
+   Three severity registers keyed to the live funding percentage f:
+       f >= 80   content     — calm line, no exclamation marks, no alarm words
+       40..79    grumbling   — pointed complaint
+       f <  40   flipping out — urgent markup: '!' plus an ALL-CAPS alarm word
+   Every register cites the live percentage verbatim ("<f>%"). */
+const DEPT_CHAMPION = { police: "safety", fire: "safety", roads: "transport",
+                        edu: "finance", health: "environment" };
+const DEPT_LINES = {
+  police: {
+    ok: (f) => "Police funding sits at " + f + "% — precincts humming, radios " +
+      "crackling, donut supply lines secure.",
+    grumble: (f) => "Police funding down at " + f + "%? My patrols are stretched " +
+      "thin — half the units are sharing one pager, Mayor.",
+    mad: (f) => "Police at " + f + "% funding is a full-blown CRISIS! Precincts " +
+      "are going dark and the hoodlums know it — restore my budget NOW!",
+  },
+  fire: {
+    ok: (f) => "Fire department funding holds at " + f + "% — trucks polished, " +
+      "hydrants tested, response times snappy.",
+    grumble: (f) => "Fire funding at " + f + "%? We're patching hoses with duct " +
+      "tape and hope. One bad VCR fire and we're in trouble.",
+    mad: (f) => "Fire funding at " + f + "% is an EMERGENCY! Half the trucks " +
+      "won't start — the whole city is one spark from a blaze, Mayor!",
+  },
+  roads: {
+    ok: (f) => "Roads funding sits at " + f + "% — my crews are out there every " +
+      "morning, thermos in hand, keeping the asphalt smooth as a fresh zamboni pass.",
+    grumble: (f) => "Roads funding down at " + f + "%? My crews are rationing " +
+      "asphalt and the potholes are winning, Mayor. Kowalski does not approve.",
+    mad: (f) => "Roads at " + f + "% funding?! This is SABOTAGE of the public " +
+      "works! The pavement is crumbling under our tires — fund my crews NOW, Mayor!",
+  },
+  edu: {
+    ok: (f) => "Education funding stands at " + f + "% — the schools balance " +
+      "their books, and an educated citizen is a taxpaying citizen, dear.",
+    grumble: (f) => "Education funding cut to " + f + "%? The schools are " +
+      "photocopying textbooks and the PTA is faxing me hourly, Mayor.",
+    mad: (f) => "Education at " + f + "% funding is a SCANDAL! Schools are " +
+      "closing classrooms — an uneducated city is a poor city, Mayor. Fix it!",
+  },
+  health: {
+    ok: (f) => "Health funding rests at " + f + "% — the hospitals are calm, " +
+      "the healing crystals purely decorative, man.",
+    grumble: (f) => "Health funding down at " + f + "%? Hospital wait times are " +
+      "longer than a Phish set, man. The community vibe is suffering.",
+    mad: (f) => "Health at " + f + "% funding is a public health DISASTER! " +
+      "Hospitals are turning folks away — this is seriously bad karma, Mayor!",
+  },
+};
+
+function deptFundingLine(dept) {
+  const f = city.funding[dept];
+  const t = DEPT_LINES[dept];
+  return f >= 80 ? t.ok(f) : f >= 40 ? t.grumble(f) : t.mad(f);
+}
+
 /* --------- rule engines: each rule picks one line by threshold --------- */
 function adviseFinance() {
   const out = [];
@@ -81,6 +156,7 @@ function adviseFinance() {
     out.push("The agencies rate us " + cr.grade + " — junk territory! New borrowing costs " +
       (cr.rateOffered * 100).toFixed(1) + "% interest. Pay something off before they " +
       "repossess the dot-matrix printer.");
+  out.push(deptFundingLine("edu")); // M23: Myrna champions the education budget
   return out;
 }
 
@@ -105,6 +181,9 @@ function adviseSafety() {
       "We need more fire houses.");
   else
     out.push("Fire crews are well placed — response faster than a 56k handshake.");
+  // M23: the Chief champions BOTH uniformed budgets — police and fire
+  out.push(deptFundingLine("police"));
+  out.push(deptFundingLine("fire"));
   return out;
 }
 
@@ -137,6 +216,38 @@ function adviseEnvironment() {
       "becomes a lifestyle.");
   else
     out.push("Roads flow free, like a Sunday morning paper route.");
+  out.push(deptFundingLine("health")); // M23: Dr. Greenfield champions health
+  return out;
+}
+
+/* M23: Transportation / Public Works — Big Ray Kowalski. Every line carries a
+   live number: the roads funding %, the mean road congestion index, and the
+   road wear / decay state. */
+function adviseTransport() {
+  const out = [];
+  out.push(deptFundingLine("roads"));  // champion line — cites funding.roads %
+  const t = Math.round(advRoadTraffic());
+  if (t >= 120)
+    out.push("Congestion index " + t + " — that's GRIDLOCK, Mayor! My guys can't " +
+      "even get the cones out there. Lay more road before the horns unionize!");
+  else if (t >= 40)
+    out.push("Congestion index " + t + " on the mains. Drivers are drumming the " +
+      "wheel to Chumbawamba — add capacity before it becomes a mosh pit.");
+  else
+    out.push("Congestion index " + t + " — traffic rolls smoother than a fresh " +
+      "coat of blacktop. My crews take a little pride in that.");
+  const rs = advRoadStats();
+  if (rs.roads === 0)
+    out.push("Zero road tiles on the map. My crews are playing euchre in the " +
+      "depot — pave something and we'll be there by dawn.");
+  else if (rs.worn > 0 || rs.rubble > 0)
+    out.push(rs.worn + " of " + rs.roads + " road tiles are worn past the " +
+      "pothole line (mean wear " + Math.round(rs.meanWear) + "/255)" +
+      (rs.rubble ? ", and " + rs.rubble + " tiles of rubble need clearing" : "") +
+      ". Fund the crews or lose the pavement, Mayor!");
+  else
+    out.push("All " + rs.roads + " road tiles in good repair — mean wear " +
+      Math.round(rs.meanWear) + "/255. The pavement gods smile upon us.");
   return out;
 }
 
@@ -144,15 +255,101 @@ const ADVISOR_RULES = {
   finance: adviseFinance,
   safety: adviseSafety,
   environment: adviseEnvironment,
+  transport: adviseTransport,
 };
+
+/* --------- M23: policy-DELTA bias ---------
+   Advisors react to CHANGES, not levels. A snapshot of taxRate (+ funding)
+   is kept per city object; every refresh diffs live state against it and, on
+   a change, pushes department-biased reaction lines that persist for
+   ADV_REACT_TTL refreshes (~5s at the 500ms cadence) or until the next
+   change replaces them. A freshly created or LOADED city merely seeds the
+   snapshot — no reaction fires until the mayor actually moves the slider.
+   Reaction rules (old rate O → new rate N):
+     cut (N < O)      Transportation protests, citing the projected §/month
+                      revenue loss round(pop*O*.28 + jobs*O*.18) −
+                      round(pop*N*.28 + jobs*N*.18) — the money that pays the
+                      road crews; Finance APPROVES the cut.
+     deep cut (N ≤ 3) Safety and Environment protest too (service advisors).
+     hike to N ≥ 10   ALL four advisors — Finance included — warn of resident
+                      exodus, each citing the demand modifier the sim already
+                      applies: taxMod = (7 − N) × 0.05 (recomputeDemand's
+                      single tax→demand lever; advisors cite it, never add a
+                      second penalty).
+     mild hike        Finance alone welcomes the extra revenue. */
+const ADV_REACT_TTL = 10;
+let advSnap = null;                 // { cityRef, taxRate, funding }
+let advReact = null, advReactTTL = 0;
+
+function advTaxesAt(rate) {         // projected monthly tax take at a rate
+  return Math.round(city.pop * rate * 0.28 + city.jobs * rate * 0.18);
+}
+
+function advCheckDeltas() {
+  if (!advSnap || advSnap.cityRef !== city) {
+    // new or freshly loaded city: seed the snapshot silently — steady state
+    // (however low the rate already is) draws no reaction until a change
+    advSnap = { cityRef: city, taxRate: city.taxRate,
+                funding: Object.assign({}, city.funding) };
+    advReact = null; advReactTTL = 0;
+    return;
+  }
+  const O = advSnap.taxRate, N = city.taxRate;
+  if (N !== O) {
+    const r = { finance: [], safety: [], environment: [], transport: [] };
+    const loss = Math.abs(advTaxesAt(O) - advTaxesAt(N));
+    const taxMod = ((7 - N) * 0.05).toFixed(2);
+    if (N < O) {
+      r.transport.push("Whoa whoa WHOA — taxes cut from " + O + "% to " + N +
+        "%?! That's a projected §" + loss.toLocaleString() + " a month gone " +
+        "from the budget that pays my road crews. Potholes don't fill " +
+        "themselves, Mayor!");
+      r.finance.push("Trimming the rate from " + O + "% to " + N + "% — I " +
+        "approve, dear. A lighter tax bill juices demand, and the ledger can " +
+        "absorb a lean month or two.");
+      if (N <= 3) {
+        r.safety.push("A cut all the way to " + N + "%?! You can't run " +
+          "precincts and fire houses on §" + loss.toLocaleString() +
+          " less a month. The hoodlums read the paper too, Mayor!");
+        r.environment.push("Slashing taxes to " + N + "%? That projected §" +
+          loss.toLocaleString() + " monthly shortfall comes straight out of " +
+          "parks and clean air, man. Deeply un-groovy!");
+      }
+    } else if (N >= 10) {
+      r.finance.push("A hike to " + N + "%?! The demand model reads (7 − " + N +
+        ") × 0.05 = " + taxMod + " residential demand — that's a moving-van " +
+        "exodus, and even I love revenue less than I fear empty houses.");
+      r.safety.push("Taxes at " + N + "% now? The demand gauge shows " + taxMod +
+        " — folks are leaving town, and empty blocks are a looter's paradise!");
+      r.environment.push("A " + N + "% tax rate drags residential demand by " +
+        taxMod + ", man. People will migrate like it's a Dead tour — nobody " +
+        "wants to live here at these prices!");
+      r.transport.push("Rate jacked to " + N + "%? Demand modifier " + taxMod +
+        " says residents bail — and my roads get to carry all those one-way " +
+        "U-Hauls out of town!");
+    } else {
+      r.finance.push("Nudging the rate from " + O + "% to " + N + "% — a " +
+        "projected §" + loss.toLocaleString() + " more a month for the " +
+        "treasury. The dot-matrix purrs, dear.");
+    }
+    advReact = r; advReactTTL = ADV_REACT_TTL;
+    advSnap.taxRate = N;
+  }
+  // keep the funding snapshot current (register lines above carry that bias)
+  Object.assign(advSnap.funding, city.funding);
+}
 
 /* --------- rendering --------- */
 function advRefresh() {
   if (!city) return;
+  advCheckDeltas();
+  const reacting = advReact;
+  if (advReact && --advReactTTL <= 0) advReact = null; // reactions fade out
   for (const key in ADVISOR_RULES) {
     const ul = document.getElementById("adv-advice-" + key);
     ul.innerHTML = "";
-    for (const line of ADVISOR_RULES[key]()) {
+    const lines = (reacting ? reacting[key] : []).concat(ADVISOR_RULES[key]());
+    for (const line of lines) {
       const li = document.createElement("li");
       li.textContent = "💬 " + line;
       ul.appendChild(li);
@@ -224,5 +421,21 @@ function advDrawPortraits() {
   px(g, 33, 8, 5, 5, "#e8e050"); px(g, 35, 10, 1, 1, "#c04080");  // daisy
   px(g, 12, 36, 24, 12, "#c8a060");               // hemp poncho
   px(g, 22, 38, 4, 8, "#308030");                 // peace-sign cord
+  // Big Ray Kowalski — hard hat, five-o'clock shadow, hi-vis vest (M23)
+  g = document.getElementById("adv-face-transport").getContext("2d");
+  px(g, 0, 0, 48, 48, "#5a5148");                 // asphalt-lot backdrop
+  px(g, 0, 40, 48, 8, "#3a3530");                 // fresh blacktop strip
+  px(g, 2, 42, 8, 2, "#e8d040"); px(g, 20, 42, 8, 2, "#e8d040"); px(g, 38, 42, 8, 2, "#e8d040"); // lane paint
+  px(g, 13, 3, 22, 9, "#f0b800");                 // hard hat crown
+  px(g, 10, 11, 28, 3, "#f0b800");                // hard hat brim
+  px(g, 21, 5, 6, 6, "#d09000");                  // hat ridge
+  px(g, 14, 14, 20, 17, "#d89868");               // face
+  px(g, 16, 18, 5, 3, "#181410"); px(g, 27, 18, 5, 3, "#181410"); // heavy brows/eyes
+  px(g, 22, 22, 4, 3, "#c07850");                 // nose
+  px(g, 16, 27, 16, 4, "#4a3a2c");                // five-o'clock shadow
+  px(g, 19, 28, 10, 2, "#803838");                // grin under the stubble
+  px(g, 12, 32, 24, 16, "#f07818");               // hi-vis orange vest
+  px(g, 14, 33, 4, 15, "#e8e838"); px(g, 30, 33, 4, 15, "#e8e838"); // reflective stripes
+  px(g, 21, 33, 6, 15, "#405060");                // work shirt under the vest
 }
 advDrawPortraits();

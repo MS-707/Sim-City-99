@@ -6,13 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M7 — Time capsule events**: dated 1997→1999 in-game events that affect
-  the sim (dot-com boom C demand spike, Y2K panic mini-event on Dec 1999).
+- [ ] **M8 — Public deploy**: publish a playable build as a shareable web page
+  and link it from the README.
 
 ## Open
 
-- [ ] **M8 — Public deploy**: publish a playable build as a shareable web page
-  and link it from the README.
 - [ ] **M9 — Scenario mode**: 2-3 playable scenarios with win conditions
   (e.g. "Gridlock '97": fix congestion in a pre-built town; "Twister Season":
   survive and rebuild), selectable from the splash screen.
@@ -23,8 +21,19 @@ Queue policy: keep at least 5 open improvements at all times.
   a terrain-preview picker on the splash screen with reroll button.
 - [ ] **M12 — Seasons**: month-driven seasonal palette (snowy winters, autumn
   forests), seasonal ticker flavor, snow plows/reduced traffic in winter.
+- [ ] **M13 — Bonds & loans**: issue municipal bonds from the budget window
+  (borrow now, repay with interest monthly), credit rating that reacts to
+  treasury health; advisors comment on debt.
 
 ## Done
+
+- [x] **M7 — Time capsule events**: declarative EVENTS table (5 dated events
+  1997–1999: heat wave, Asian financial flu, dot-com boom, GoldenEye tourism
+  blip, Y2K panic with Jan-2000 resolution paper), once-only firing on month
+  rollover, measurable A/B sim effects (demand/funds/power), scheduled
+  expiry, save v3 round-trip (firedEvents/activeMods), no retro-firing on
+  late-started cities. Verified against 8 criteria (all pass; 984-tick
+  1997→2000 soak clean).
 
 - [x] **M6 — Audio & UI polish**: zoom-in ambient soundscapes (traffic hum,
   industrial clank, gulls, stadium crowd) viewport-selective and gated on

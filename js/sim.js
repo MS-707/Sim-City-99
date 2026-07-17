@@ -56,6 +56,64 @@ function tierForPop(pop) {
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+/* ---- time capsule events (M7) ----
+   One declarative timeline drives every dated event: on each month rollover
+   tick() calls eventsTick(), which compares each entry's (year, month) to the
+   sim date and fires it exactly once (tracked in city.firedEvents). Entries
+   whose date is already behind us when a city is created or loaded are marked
+   fired silently — no retro headlines. Deleting an entry from this table
+   removes that event entirely.
+   Effect specs (declarative, consumed by fireEvent / recompute*):
+     { type:'funds', amount:±n }                      one-time treasury change
+     { type:'demandR'|'demandC'|'demandI',
+       add:±x, months:n|null }                        demand shift (null = forever)
+     { type:'powerDemand', mult:x, months:n }         power-draw multiplier
+     { type:'y2k', months:n }                         grid flicker + panic wires
+   paper:true also publishes a newspaper edition through the M2 #dlg-news
+   queue; resolve:{...} is announced the month the effect's timer runs out. */
+const EVENTS = [
+  { id: "heatwave-97", year: 1997, month: 5,
+    headline: "🌡️ RECORD HEAT WAVE BAKES THE CITY — EVERY AC ON FULL BLAST",
+    effect: { type: "powerDemand", mult: 1.25, months: 3 } },
+  { id: "asian-flu-97", year: 1997, month: 10,
+    headline: "📉 ASIAN MARKET FLU BITES CITY BONDS — TREASURY TAKES A §1,500 BATH",
+    effect: { type: "funds", amount: -1500 } },
+  { id: "dotcom-boom-98", year: 1998, month: 5, paper: true,
+    headline: "🌐 DOT-COM GOLD RUSH HITS MAIN STREET!",
+    sub: "Every storefront wants a website; commercial space 'hotter than a Pentium II'",
+    body: "Venture capitalists in khakis were spotted downtown waving term sheets " +
+      "at anyone with a modem. Analysts expect the boom in commercial demand to " +
+      "last into the next millennium. \"We put an 'e' in front of the deli,\" " +
+      "said one shopkeeper. \"It's worth forty million now.\"",
+    effect: { type: "demandC", add: 0.3, months: null } },
+  { id: "euro-99", year: 1999, month: 0,
+    headline: "💶 EURO LAUNCHES ACROSS THE POND — CITY EXPORTERS EYE NEW MARKETS",
+    effect: { type: "demandI", add: 0.08, months: 3 } },
+  { id: "y2k-panic-99", year: 1999, month: 11, paper: true,
+    headline: "🖥️ MILLENNIUM BUG PANIC! WILL CITY COMPUTERS SURVIVE NEW YEAR'S?",
+    sub: "Experts split on whether the grid dies at midnight or merely civilization",
+    body: "With the odometer about to roll over to 2000, city technicians admit " +
+      "the mainframe still thinks in two digits. Lights are flickering, pagers " +
+      "are shrieking, and the hardware store is sold out of candles, beans and " +
+      "blank VHS tapes. The mayor urges calm, from a bunker.",
+    effect: { type: "y2k", months: 1 },
+    resolve: { paper: true,
+      headline: "🎉 Y2K: COMPUTERS FINE, CITY HALL'S TAMAGOTCHI UNAFFECTED",
+      sub: "Midnight passes; the only casualty is a VCR blinking 12:00 forever",
+      body: "The new millennium arrived and the city's computers greeted it with " +
+        "a cheerful beep. Power is stable, the treasury still knows what year it " +
+        "is, and the emergency bean reserves will feed the council for a decade. " +
+        "\"We were never worried,\" said officials, emerging from the bunker." } },
+];
+
+// panicked wire chatter while the Y2K effect is active (Dec 1999 only)
+const Y2K_LINES = [
+  "🖥️ Y2K watch: mainframe insists the year is 19100. Officials 'looking into it.'",
+  "📟 Y2K watch: citizens stockpile canned beans, batteries and AOL trial CDs.",
+  "💡 Y2K watch: streetlights flicker downtown. Utility blames two-digit gremlins.",
+  "🏧 Y2K watch: ATM dispenses Monopoly money. Bank calls it 'forward compatible.'",
+];
+
 // ---- deterministic-ish PRNG (so terrain can be reseeded) ----
 function mulberry32(a) {
   return function () {
@@ -103,7 +161,9 @@ class City {
     this.cityName = "Llamaville";
     this.tier = 0;                  // index into TIERS, only ever rises
     this.announcedTier = 0;         // highest tier already announced (newspaper)
-    this.newsQueue = [];            // pending newspaper editions (tier indices)
+    this.newsQueue = [];            // pending newspaper editions (tier indices or event editions)
+    this.firedEvents = [];          // time-capsule event ids already fired/passed (M7)
+    this.activeMods = [];           // live event modifiers with remaining-month timers
 
     this.generateTerrain(seed ?? ((Math.random() * 1e9) | 0));
   }
@@ -261,6 +321,11 @@ class City {
       if (this.powered[i] && t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
           && t !== OV.COAL && t !== OV.SOLAR) demand++;
     }
+    // event modifiers can inflate the draw (e.g. the '97 heat wave)
+    let pdMult = 1;
+    for (const m of this.activeMods)
+      if (m.type === "powerDemand" && m.mult) pdMult *= m.mult;
+    if (pdMult !== 1) demand = Math.round(demand * pdMult);
     this.powerSupply = supply; this.powerDemand = demand;
     if (demand > supply && supply > 0) {
       // brownout: cut power to a fraction of consumers
@@ -273,6 +338,15 @@ class City {
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
       this.powered.fill(0);
+    }
+    // Y2K bug (Dec '99): systems flicker at random, grid capacity be damned
+    if (this.y2kActive()) {
+      for (let i = 0; i < this.powered.length; i++) {
+        const t = this.over[i];
+        if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
+            t !== OV.COAL && t !== OV.SOLAR && Math.random() < 0.3)
+          this.powered[i] = 0;
+      }
     }
     this.powerDirty = false;
   }
@@ -470,10 +544,17 @@ class City {
     const stadMod = Math.min(2, stadiums) * 0.06;     // a stadium makes people move in
     // good schools & hospitals attract families (and the workers follow)
     const svcMod = Math.min(3, schools) * 0.05 + Math.min(3, hospitals) * 0.05;
+    // time-capsule event modifiers shift demand additively while active (M7)
+    let evR = 0, evC = 0, evI = 0;
+    for (const m of this.activeMods) {
+      if (m.type === "demandR") evR += m.add || 0;
+      else if (m.type === "demandC") evC += m.add || 0;
+      else if (m.type === "demandI") evI += m.add || 0;
+    }
     const jobsAvail = this.jobs + 40 - pop * 0.62;    // 40 = external commuters
-    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod);
-    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5);
-    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5);
+    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR);
+    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC);
+    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI);
     function clampD(v) { return Math.max(-1, Math.min(1, v)); }
   }
 
@@ -658,9 +739,74 @@ class City {
     if (this.history.pop.length > 240) { this.history.pop.shift(); this.history.funds.shift(); }
   }
 
+  // ---------- time capsule events (M7) ----------
+  y2kActive() { return this.activeMods.some((m) => m.type === "y2k"); }
+
+  // called on every month rollover: expire modifiers first, then fire due events
+  eventsTick() {
+    // count down temporary modifiers; announce resolutions on expiry
+    let powerChanged = false;
+    for (let k = this.activeMods.length - 1; k >= 0; k--) {
+      const m = this.activeMods[k];
+      if (m.remaining == null) continue;              // permanent modifier
+      if (--m.remaining > 0) continue;
+      this.activeMods.splice(k, 1);
+      if (m.type === "powerDemand" || m.type === "y2k") powerChanged = true;
+      const ev = EVENTS.find((e) => e.id === m.id);
+      if (ev && ev.resolve) this.announceEvent(ev.resolve);
+    }
+    if (powerChanged) { this.powerDirty = true; this.recomputePower(); }
+
+    // fire events whose date has arrived, exactly once each; anything whose
+    // date is already behind us (loaded save, jumped clock) passes silently
+    for (const ev of EVENTS) {
+      if (this.firedEvents.includes(ev.id)) continue;
+      if (ev.year > this.year || (ev.year === this.year && ev.month > this.month))
+        continue;                                     // still in the future
+      this.firedEvents.push(ev.id);
+      if (ev.year === this.year && ev.month === this.month) this.fireEvent(ev);
+    }
+  }
+
+  fireEvent(ev) {
+    this.announceEvent(ev);
+    const ef = ev.effect;
+    if (!ef) return;
+    if (ef.type === "funds") { this.funds += ef.amount; return; }
+    const mod = { id: ev.id, type: ef.type, remaining: ef.months ?? null };
+    if (ef.add != null) mod.add = ef.add;
+    if (ef.mult != null) mod.mult = ef.mult;
+    this.activeMods.push(mod);
+    if (ef.type === "powerDemand" || ef.type === "y2k") {
+      this.powerDirty = true; this.recomputePower(); // effect visible at once
+    }
+  }
+
+  // every event hits the ticker; paper:true editions also queue for #dlg-news
+  announceEvent(ed) {
+    this.pushMsg(ed.headline);
+    if (ed.paper)
+      this.newsQueue.push({ headline: ed.headline, sub: ed.sub || "", body: ed.body || "" });
+  }
+
+  // events dated before "now" (fresh or loaded city) never retro-fire
+  markPassedEvents() {
+    for (const ev of EVENTS) {
+      const past = ev.year < this.year ||
+                   (ev.year === this.year && ev.month <= this.month);
+      if (past && !this.firedEvents.includes(ev.id)) this.firedEvents.push(ev.id);
+    }
+  }
+
   // ---------- master tick ----------
   tick() {
     this.tickCount++;
+    // Y2K chaos (Dec 1999): the grid flickers and the wires hum with panic
+    if (this.y2kActive()) {
+      if (this.tickCount % 3 === 0) this.powerDirty = true; // flicker pulse
+      if (this.tickCount % 8 === 0)
+        this.pushMsg(Y2K_LINES[(Math.random() * Y2K_LINES.length) | 0]);
+    }
     if (this.powerDirty || this.tickCount % 10 === 0) {
       this.recomputePower();
       this.recomputeAccess();
@@ -693,6 +839,7 @@ class City {
     if (this.tickCount % 24 === 0) {
       this.month++;
       if (this.month >= 12) { this.month = 0; this.year++; }
+      this.eventsTick();
       this.collectBudget();
       return true; // month rolled over
     }
@@ -704,11 +851,12 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 2, seed: this.seed, cityName: this.cityName,
+      v: 3, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       month: this.month, year: this.year, tickCount: this.tickCount,
       disastersEnabled: this.disastersEnabled,
       tier: this.tier, announcedTier: this.announcedTier,
+      firedEvents: this.firedEvents, activeMods: this.activeMods,
       terr: Array.from(this.terr), over: Array.from(this.over),
       lvl: Array.from(this.lvl), varnt: Array.from(this.varnt),
       anc: Array.from(this.anc),
@@ -725,6 +873,14 @@ class City {
     c.terr.set(d.terr); c.over.set(d.over); c.lvl.set(d.lvl);
     c.varnt.set(d.varnt); c.anc.set(d.anc);
     c.history = d.history || { pop: [], funds: [] };
+    // time-capsule events (M7): restore fired ids + live modifiers with their
+    // remaining timers; a pre-M7 (v<=2) save simply has neither field, and
+    // markPassedEvents() quietly retires anything the calendar already passed
+    // so loading an old city never retro-fires 1997 headlines.
+    c.firedEvents = Array.isArray(d.firedEvents) ? d.firedEvents.slice() : [];
+    c.activeMods = Array.isArray(d.activeMods)
+      ? d.activeMods.map((m) => Object.assign({}, m)) : [];
+    c.markPassedEvents();
     c.powerDirty = true;
     c.recomputePower(); c.recomputeAccess(); c.recomputeTraffic();
     c.recomputeMaps(); c.recomputeDemand();

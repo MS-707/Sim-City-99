@@ -519,12 +519,26 @@ function showNewspaper(k) {
   Snd.fanfare();
 }
 
-// called every frame from the main loop: pop pending editions one at a time
+// M7 time-capsule events: dated editions reuse the same Bugle front page
+function showEventPaper(ed) {
+  document.getElementById("np-date").textContent =
+    `${MONTHS[city.month]} ${city.year} — Pop. ${city.pop.toLocaleString()}`;
+  document.getElementById("np-headline").textContent = ed.headline;
+  document.getElementById("np-sub").textContent = ed.sub || "";
+  document.getElementById("np-body").textContent = ed.body || "";
+  showDlg("dlg-news");
+  Snd.fanfare();
+}
+
+// called every frame from the main loop: pop pending editions one at a time.
+// queue entries are tier indices (M2 promotions) or event editions (M7).
 function newsFrame() {
   if (!city || !city.newsQueue || !city.newsQueue.length) return;
   const dlg = document.getElementById("dlg-news");
   if (!dlg.classList.contains("hidden")) return; // wait for current one to be read
-  showNewspaper(city.newsQueue.shift());
+  const ed = city.newsQueue.shift();
+  if (typeof ed === "number") showNewspaper(ed);
+  else showEventPaper(ed);
 }
 
 /* ================= ticker ================= */

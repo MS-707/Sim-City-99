@@ -63,11 +63,13 @@ function screenToTile(sx, sy) {
 
 /* ---- flat-terrain layer cache (M11) ----
    Grass / water / shore diamonds are flat and tile the plane exactly, so
-   they can be pre-composited once per (camera, water-frame, terrain-rev)
-   into an offscreen canvas and blitted in one drawImage per frame. Forest
-   sprites stay in the live pass — they rise above the diamond and must keep
-   painter-order occlusion against buildings. Big developed maps (128x128)
-   drop thousands of per-frame draw calls this way. */
+   they can be pre-composited once per (camera, water-frame, terrain-rev,
+   season) into an offscreen canvas and blitted in one drawImage per frame.
+   Forest sprites stay in the live pass — they rise above the diamond and
+   must keep painter-order occlusion against buildings. Big developed maps
+   (128x128) drop thousands of per-frame draw calls this way. The season
+   (M12) is part of the cache key, so a palette swap is a cache event on the
+   month rollover — never per-frame work — and reuses the same canvas. */
 const terrLayer = { cv: null, g: null, key: "" };
 
 function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
@@ -84,6 +86,7 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
   g.scale(cam.z, cam.z);
   g.translate(-cam.x, -cam.y);
   g.imageSmoothingEnabled = false;
+  const S = SPR.season[seasonOf(city.month)]; // seasonal terrain art (M12)
   for (let s = 0; s <= (MAP - 1) * 2; s++) {
     for (let x = Math.max(0, s - MAP + 1); x <= Math.min(MAP - 1, s); x++) {
       const y = s - x;
@@ -91,15 +94,15 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
       if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
       const i = y * MAP + x;
       if (city.terr[i] === TERR.WATER) {
-        const w = SPR.water[waterFrame];
+        const w = S.water[waterFrame];
         g.drawImage(w.c, wx - w.ox, wy - w.oy);
-        const sm = shoreMask(city, i); // sand on land-facing edges
-        if (sm) { const sh = SPR.shore[sm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        const sm = shoreMask(city, i); // sand / rime ice on land-facing edges
+        if (sm) { const sh = S.shore[sm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       } else {
-        const gs = SPR.grass[city.varnt[i] % 4];
+        const gs = S.grass[city.varnt[i] % 4];
         g.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
-        const bm = beachMask(city, i); // beach fringe on the land side of the seam
-        if (bm) { const sh = SPR.shore[bm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        const bm = beachMask(city, i); // shore fringe on the land side of the seam
+        if (bm) { const sh = S.shore[bm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       }
     }
   }
@@ -123,9 +126,10 @@ function renderFrame(city, uiState) {
   const blink = (frame / 24 | 0) % 2 === 0;
   const waterFrame = (frame / 16 | 0) % SPR.water.length; // prebuilt frame cycle
 
-  // flat terrain: one cached blit unless the camera / water / terrain moved
+  // flat terrain: one cached blit unless the camera / water / terrain moved —
+  // or the season changed (M12): the palette swap costs exactly one rebuild
   const tKey = `${cam.x},${cam.y},${cam.z},${cvs.width},${cvs.height},` +
-    `${waterFrame},${city.terrRev | 0},${city.seed},${MAP}`;
+    `${waterFrame},${city.terrRev | 0},${city.seed},${MAP},${seasonOf(city.month)}`;
   if (terrLayer.key !== tKey)
     buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, tKey);
   ctx.drawImage(terrLayer.cv, 0, 0);
@@ -296,7 +300,9 @@ function updateCars(city) {
       if (!pool.length) { cars.splice(k, 1); continue; }
       const [nx, ny] = pool[(Math.random() * pool.length) | 0];
       c.tx = nx; c.ty = ny;
-      c.spd = Math.max(0.03, 0.13 - city.traffic[i] * 0.0004); // congestion slows
+      // congestion slows; winter (M12) slows everyone further on snowy roads
+      const wMul = seasonOf(city.month) === "winter" ? 0.7 : 1;
+      c.spd = Math.max(0.03, (0.13 - city.traffic[i] * 0.0004) * wMul);
     }
     c.x = c.fx + (c.tx - c.fx) * c.p;
     c.y = c.fy + (c.ty - c.fy) * c.p;

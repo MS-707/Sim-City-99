@@ -115,13 +115,57 @@ function withNight(w, h, extraTop, draw) {
   return spr;
 }
 
-function drawTree(g, x, y, s, tint = 1) {
+/* ---- seasonal terrain palettes (M12) ----
+   Terrain-family sprites (grass, water, shore, forest, road banks) are baked
+   once per season at boot — the same draw code runs four times with a palette
+   parameter. The renderer just looks up SPR.season[seasonOf(city.month)]. */
+const SEASON_PAL = {
+  summer: {
+    grass: ["#4a9d44", "#459743", "#50a349", "#43903f"],
+    fleckA: "rgba(255,255,255,.08)", fleckB: "rgba(0,60,0,.15)",
+    floor: "#3d8a3a", leafLo: "#1d6e2a", leafHi: "#2f9c3f", snowCap: null,
+    waterTop: "#2a6fbe", waterBot: "#1c4f92",
+    wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
+    sand: "#dcc37a", sandHi: "#eeda9c", foam: "rgba(255,255,255,.55)",
+  },
+  spring: { // fresh greens, blossom flecks in the grass
+    grass: ["#55ac4b", "#4ea44b", "#5db252", "#4a9e46"],
+    fleckA: "rgba(255,215,235,.4)", fleckB: "rgba(0,70,0,.15)",
+    floor: "#46993f", leafLo: "#2a8a36", leafHi: "#4fb453", snowCap: null,
+    waterTop: "#2f77c4", waterBot: "#205598",
+    wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
+    sand: "#dcc37a", sandHi: "#eeda9c", foam: "rgba(255,255,255,.55)",
+  },
+  autumn: { // dry stubble lawns, orange/red canopies
+    grass: ["#9c9a48", "#948f3f", "#a4a04e", "#8e8a3e"],
+    fleckA: "rgba(230,180,90,.3)", fleckB: "rgba(90,60,10,.2)",
+    floor: "#7e7a38", leafLo: "#b0541e", leafHi: "#d2691e", snowCap: null,
+    waterTop: "#2a6ab2", waterBot: "#1c4a86",
+    wave: "rgba(210,235,255,.3)", glint: "rgba(220,240,255,.45)",
+    sand: "#d8bd74", sandHi: "#ead597", foam: "rgba(255,255,255,.5)",
+  },
+  winter: { // snowed-under lawns, pine canopies with snow caps, icy shores
+    grass: ["#e9edf3", "#e4e9f0", "#eef1f6", "#e0e6ee"],
+    fleckA: "rgba(255,255,255,.5)", fleckB: "rgba(165,182,210,.35)",
+    floor: "#dfe5ee", leafLo: "#2c5a34", leafHi: "#38703f", snowCap: "#eef2f7",
+    waterTop: "#a8c8de", waterBot: "#8fb4d0",
+    wave: "rgba(255,255,255,.4)", glint: "rgba(240,248,255,.7)",
+    sand: "#c9d6e4", sandHi: "#e8eef5", foam: "rgba(255,255,255,.7)",
+  },
+};
+
+function drawTree(g, x, y, s, tint = 1, pal = null) {
+  const lo = pal ? pal.leafLo : "#1d6e2a", hi = pal ? pal.leafHi : "#2f9c3f";
   g.strokeStyle = "#5d4123"; g.lineWidth = 2;
   g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - s * 0.8); g.stroke();
-  g.fillStyle = shade("#1d6e2a", tint);
+  g.fillStyle = shade(lo, tint);
   g.beginPath(); g.ellipse(x, y - s * 1.1, s * 0.55, s * 0.65, 0, 0, 7); g.fill();
-  g.fillStyle = shade("#2f9c3f", tint);
+  g.fillStyle = shade(hi, tint);
   g.beginPath(); g.ellipse(x - s * 0.15, y - s * 1.3, s * 0.4, s * 0.45, 0, 0, 7); g.fill();
+  if (pal && pal.snowCap) { // winter: fresh snow load on the crown
+    g.fillStyle = pal.snowCap;
+    g.beginPath(); g.ellipse(x - s * 0.1, y - s * 1.42, s * 0.42, s * 0.28, 0, 0, 7); g.fill();
+  }
 }
 
 function tinyHouse(g, cx, cy, s, wall, roof) {
@@ -162,103 +206,116 @@ function buildSprites() {
   const seeded = mulberry32(0x5EED);
   const R = () => seeded(); // stable art randomness
 
-  // ---- terrain ----
-  SPR.grass = [];
-  for (let v = 0; v < 4; v++) {
-    SPR.grass.push(mkSprite(1, 1, 0, (g, ox, oy) => {
-      diamondPath(g, ox, oy);
-      g.fillStyle = ["#4a9d44", "#459743", "#50a349", "#43903f"][v];
-      g.fill();
-      g.strokeStyle = "rgba(0,0,0,.18)"; g.lineWidth = 1; g.stroke();
-      g.save(); diamondPath(g, ox, oy); g.clip();
-      g.fillStyle = "rgba(255,255,255,.08)";
-      for (let k = 0; k < 14; k++) g.fillRect(ox - HW + R() * TW, oy - HH + R() * TH, 2, 1);
-      g.fillStyle = "rgba(0,60,0,.15)";
-      for (let k = 0; k < 10; k++) g.fillRect(ox - HW + R() * TW, oy - HH + R() * TH, 2, 1);
-      g.restore();
-    }));
-  }
-
-  // ---- water: a small family of frames cycled by the render frame counter.
-  // Wave/glint positions are pure arithmetic in (k, f) so every boot builds
-  // pixel-identical frames and equal frame values always render identically.
-  SPR.water = [];
-  for (let f = 0; f < 3; f++) {
-    SPR.water.push(mkSprite(1, 1, 0, (g, ox, oy) => {
-      diamondPath(g, ox, oy);
-      const gr = g.createLinearGradient(ox, oy - HH, ox, oy + HH);
-      gr.addColorStop(0, "#2a6fbe"); gr.addColorStop(1, "#1c4f92");
-      g.fillStyle = gr; g.fill();
-      g.strokeStyle = "rgba(0,0,40,.25)"; g.stroke();
-      g.save(); diamondPath(g, ox, oy); g.clip();
-      g.strokeStyle = "rgba(210,235,255,.35)"; g.lineWidth = 1;
-      for (let k = 0; k < 4; k++) {
-        const wy = oy - HH + 4 + k * 7 + ((k * 5 + f * 2) % 5);
-        const wx = ox - HW + ((k * 13 + f * 11) % 40);
-        g.beginPath(); g.moveTo(wx, wy);
-        g.bezierCurveTo(wx + 8, wy - 2, wx + 14, wy + 2, wx + 22, wy); g.stroke();
-      }
-      g.fillStyle = "rgba(220,240,255,.5)"; // shimmering glints
-      for (let k = 0; k < 3; k++) {
-        g.fillRect(ox - HW + 4 + ((k * 23 + f * 17) % 54),
-                   oy - HH + 3 + ((k * 11 + f * 7) % 26), 2, 1);
-      }
-      g.restore();
-    }));
-  }
-
-  // ---- shoreline sand bands (16 masks; bit0=N bit1=E bit2=S bit3=W) ----
-  // Drawn over a water tile on its land-facing edges AND over a land tile on
-  // its water-facing edges, so the beach straddles the seam with no hard line.
-  SPR.shore = [];
-  for (let m = 0; m < 16; m++) {
-    SPR.shore.push(mkSprite(1, 1, 4, (g, ox, oy) => {
-      if (!m) return; // open water / inland: no sand
-      const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
-      const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
-      // clip to a slightly expanded diamond so the band hugs both sides of the seam
-      g.save();
-      g.translate(ox, oy); g.scale((TW + 6) / TW, (TH + 3) / TH); g.translate(-ox, -oy);
-      diamondPath(g, ox, oy);
-      g.restore();
-      g.save(); g.clip();
-      const lerp = (P, t) => [P[0] + (ox - P[0]) * t, P[1] + (oy - P[1]) * t];
-      for (let b = 0; b < 4; b++) {
-        if (!(m & (1 << b))) continue;
-        const [P0, P1] = edges[b];
-        g.lineCap = "butt";
-        g.strokeStyle = "#dcc37a"; g.lineWidth = 7; // main sand band on the edge
-        g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
-        g.strokeStyle = "#eeda9c"; g.lineWidth = 3; // dry-sand highlight
-        g.beginPath(); g.moveTo(...lerp(P0, 0.06)); g.lineTo(...lerp(P1, 0.06)); g.stroke();
-        g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 1.4; // surf foam
-        g.beginPath(); g.moveTo(...lerp(P0, 0.22)); g.lineTo(...lerp(P1, 0.22)); g.stroke();
-      }
-      g.restore();
-    }));
-  }
-
-  // ---- forest: 3 density tiers x 3 variants (tier picked by neighbor count) ----
-  SPR.forest = [];
+  // ---- terrain families, baked once per season (M12) ----
+  // The same draw code runs for each of the four palettes; renderFrame picks
+  // SPR.season[seasonOf(city.month)]. Nothing is (re)built after boot.
+  SPR.season = {};
   const TREES_PER_TIER = [2, 4, 7];  // sparse / medium / dense
   const TREE_SIZE_TIER = [10, 12, 14];
-  for (let d = 0; d < 3; d++) {
-    const fam = [];
-    for (let v = 0; v < 3; v++) {
-      fam.push(mkSprite(1, 1, 26, (g, ox, oy) => {
+  for (const sk of ["winter", "spring", "summer", "autumn"]) {
+    const P = SEASON_PAL[sk];
+    const fam = { grass: [], water: [], shore: [], forest: [] };
+
+    // grass (or snowpack, or dry stubble)
+    for (let v = 0; v < 4; v++) {
+      fam.grass.push(mkSprite(1, 1, 0, (g, ox, oy) => {
         diamondPath(g, ox, oy);
-        g.fillStyle = "#3d8a3a"; g.fill();
-        g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
-        const n = TREES_PER_TIER[d] + (v % 2);
-        for (let k = 0; k < n; k++) {
-          drawTree(g, ox - 14 + ((k * 9 + v * 7 + d * 3) % 28) + R() * 4,
-                   oy + 7 - ((k * 5 + v * 3) % 11),
-                   TREE_SIZE_TIER[d] + R() * 4, 0.85 + R() * 0.4);
-        }
+        g.fillStyle = P.grass[v];
+        g.fill();
+        g.strokeStyle = "rgba(0,0,0,.18)"; g.lineWidth = 1; g.stroke();
+        g.save(); diamondPath(g, ox, oy); g.clip();
+        g.fillStyle = P.fleckA;
+        for (let k = 0; k < 14; k++) g.fillRect(ox - HW + R() * TW, oy - HH + R() * TH, 2, 1);
+        g.fillStyle = P.fleckB;
+        for (let k = 0; k < 10; k++) g.fillRect(ox - HW + R() * TW, oy - HH + R() * TH, 2, 1);
+        g.restore();
       }));
     }
-    SPR.forest.push(fam);
+
+    // water: a small family of frames cycled by the render frame counter.
+    // Wave/glint positions are pure arithmetic in (k, f) so every boot builds
+    // pixel-identical frames and equal frame values always render identically.
+    for (let f = 0; f < 3; f++) {
+      fam.water.push(mkSprite(1, 1, 0, (g, ox, oy) => {
+        diamondPath(g, ox, oy);
+        const gr = g.createLinearGradient(ox, oy - HH, ox, oy + HH);
+        gr.addColorStop(0, P.waterTop); gr.addColorStop(1, P.waterBot);
+        g.fillStyle = gr; g.fill();
+        g.strokeStyle = "rgba(0,0,40,.25)"; g.stroke();
+        g.save(); diamondPath(g, ox, oy); g.clip();
+        g.strokeStyle = P.wave; g.lineWidth = 1;
+        for (let k = 0; k < 4; k++) {
+          const wy = oy - HH + 4 + k * 7 + ((k * 5 + f * 2) % 5);
+          const wx = ox - HW + ((k * 13 + f * 11) % 40);
+          g.beginPath(); g.moveTo(wx, wy);
+          g.bezierCurveTo(wx + 8, wy - 2, wx + 14, wy + 2, wx + 22, wy); g.stroke();
+        }
+        g.fillStyle = P.glint; // shimmering glints (ice sparkle in winter)
+        for (let k = 0; k < 3; k++) {
+          g.fillRect(ox - HW + 4 + ((k * 23 + f * 17) % 54),
+                     oy - HH + 3 + ((k * 11 + f * 7) % 26), 2, 1);
+        }
+        g.restore();
+      }));
+    }
+
+    // shoreline bands (16 masks; bit0=N bit1=E bit2=S bit3=W) — sand in
+    // summer, rime ice in winter. Drawn over a water tile on its land-facing
+    // edges AND over a land tile on its water-facing edges, so the treatment
+    // straddles the seam with no hard line.
+    for (let m = 0; m < 16; m++) {
+      fam.shore.push(mkSprite(1, 1, 4, (g, ox, oy) => {
+        if (!m) return; // open water / inland: no band
+        const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+        const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
+        // clip to a slightly expanded diamond so the band hugs both sides of the seam
+        g.save();
+        g.translate(ox, oy); g.scale((TW + 6) / TW, (TH + 3) / TH); g.translate(-ox, -oy);
+        diamondPath(g, ox, oy);
+        g.restore();
+        g.save(); g.clip();
+        const lerp = (P0, t) => [P0[0] + (ox - P0[0]) * t, P0[1] + (oy - P0[1]) * t];
+        for (let b = 0; b < 4; b++) {
+          if (!(m & (1 << b))) continue;
+          const [P0, P1] = edges[b];
+          g.lineCap = "butt";
+          g.strokeStyle = P.sand; g.lineWidth = 7; // main band on the edge
+          g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
+          g.strokeStyle = P.sandHi; g.lineWidth = 3; // dry highlight
+          g.beginPath(); g.moveTo(...lerp(P0, 0.06)); g.lineTo(...lerp(P1, 0.06)); g.stroke();
+          g.strokeStyle = P.foam; g.lineWidth = 1.4; // surf foam / ice fringe
+          g.beginPath(); g.moveTo(...lerp(P0, 0.22)); g.lineTo(...lerp(P1, 0.22)); g.stroke();
+        }
+        g.restore();
+      }));
+    }
+
+    // forest: 3 density tiers x 3 variants (tier picked by neighbor count)
+    for (let d = 0; d < 3; d++) {
+      const tier = [];
+      for (let v = 0; v < 3; v++) {
+        tier.push(mkSprite(1, 1, 26, (g, ox, oy) => {
+          diamondPath(g, ox, oy);
+          g.fillStyle = P.floor; g.fill();
+          g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
+          const n = TREES_PER_TIER[d] + (v % 2);
+          for (let k = 0; k < n; k++) {
+            drawTree(g, ox - 14 + ((k * 9 + v * 7 + d * 3) % 28) + R() * 4,
+                     oy + 7 - ((k * 5 + v * 3) % 11),
+                     TREE_SIZE_TIER[d] + R() * 4, 0.85 + R() * 0.4, P);
+          }
+        }));
+      }
+      fam.forest.push(tier);
+    }
+
+    SPR.season[sk] = fam;
   }
+  // legacy aliases — summer is the baseline art (toolbar icons, previews)
+  SPR.grass = SPR.season.summer.grass;
+  SPR.water = SPR.season.summer.water;
+  SPR.shore = SPR.season.summer.shore;
+  SPR.forest = SPR.season.summer.forest;
 
   SPR.rubble = mkSprite(1, 1, 0, (g, ox, oy) => {
     diamondPath(g, ox, oy);
@@ -279,32 +336,42 @@ function buildSprites() {
     2: [[32, 32], [0, 16]],   // to (x, y+1): SW edge
     3: [[0, 16], [32, 0]],    // to (x-1, y): NW edge
   };
-  SPR.road = []; SPR.wire = [];
-  for (let m = 0; m < 16; m++) {
-    SPR.road.push(mkSprite(1, 1, 0, (g, ox, oy) => {
-      const C = [ox, oy];
-      const asphalt = "#55565e", line = "#d8c24a";
-      // arms
-      for (let b = 0; b < 4; b++) {
-        if (!(m & (1 << b)) && m !== 0) continue;
-        const [P0, P1] = EDGE[b];
-        const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
-        const e1 = [P0[0] + (P1[0] - P0[0]) * 0.28, P0[1] + (P1[1] - P0[1]) * 0.28];
-        const e2 = [P0[0] + (P1[0] - P0[0]) * 0.72, P0[1] + (P1[1] - P0[1]) * 0.72];
-        const c1 = [C[0] + e1[0] - mid[0], C[1] + e1[1] - mid[1]];
-        const c2 = [C[0] + e2[0] - mid[0], C[1] + e2[1] - mid[1]];
-        poly(g, [e1, e2, c2, c1], asphalt);
-        if (m & (1 << b)) { // center line dash
-          g.strokeStyle = line; g.lineWidth = 1.4;
-          g.setLineDash([4, 4]);
-          g.beginPath(); g.moveTo(C[0], C[1]); g.lineTo(mid[0], mid[1]); g.stroke();
-          g.setLineDash([]);
-        }
+  SPR.road = []; SPR.roadWinter = []; SPR.wire = [];
+  // winter roads (M12): same geometry, plowed asphalt with snow banks piled
+  // along both edges of every arm — baked here, selected by spriteFor
+  const roadSprite = (m, snow) => mkSprite(1, 1, 0, (g, ox, oy) => {
+    const C = [ox, oy];
+    const asphalt = "#55565e", line = "#d8c24a";
+    // arms
+    for (let b = 0; b < 4; b++) {
+      if (!(m & (1 << b)) && m !== 0) continue;
+      const [P0, P1] = EDGE[b];
+      const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
+      const e1 = [P0[0] + (P1[0] - P0[0]) * 0.28, P0[1] + (P1[1] - P0[1]) * 0.28];
+      const e2 = [P0[0] + (P1[0] - P0[0]) * 0.72, P0[1] + (P1[1] - P0[1]) * 0.72];
+      const c1 = [C[0] + e1[0] - mid[0], C[1] + e1[1] - mid[1]];
+      const c2 = [C[0] + e2[0] - mid[0], C[1] + e2[1] - mid[1]];
+      poly(g, [e1, e2, c2, c1], asphalt);
+      if (snow) { // plowed snow banks along both arm edges
+        g.strokeStyle = "#e8edf3"; g.lineWidth = 2.6; g.lineCap = "round";
+        g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
+        g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
+        g.lineCap = "butt";
       }
-      // center pad
-      poly(g, [[C[0] - 6.4, C[1] - 3.2], [C[0] + 6.4, C[1] - 3.2],
-               [C[0] + 6.4, C[1] + 3.2], [C[0] - 6.4, C[1] + 3.2]], asphalt);
-    }));
+      if (m & (1 << b)) { // center line dash
+        g.strokeStyle = line; g.lineWidth = 1.4;
+        g.setLineDash([4, 4]);
+        g.beginPath(); g.moveTo(C[0], C[1]); g.lineTo(mid[0], mid[1]); g.stroke();
+        g.setLineDash([]);
+      }
+    }
+    // center pad
+    poly(g, [[C[0] - 6.4, C[1] - 3.2], [C[0] + 6.4, C[1] - 3.2],
+             [C[0] + 6.4, C[1] + 3.2], [C[0] - 6.4, C[1] + 3.2]], asphalt);
+  });
+  for (let m = 0; m < 16; m++) {
+    SPR.road.push(roadSprite(m, false));
+    SPR.roadWinter.push(roadSprite(m, true));
 
     SPR.wire.push(mkSprite(1, 1, 20, (g, ox, oy) => {
       const poleTop = oy - 16;
@@ -664,7 +731,8 @@ function spriteFor(city, i) {
     return fam[city.varnt[i] % fam.length];
   };
   switch (t) {
-    case OV.ROAD:  return SPR.road[roadMask(city, i)];
+    case OV.ROAD:  // winter roads show plowed snow banks (M12)
+      return (seasonOf(city.month) === "winter" ? SPR.roadWinter : SPR.road)[roadMask(city, i)];
     case OV.WIRE:  return SPR.wire[wireMask(city, i)];
     case OV.PARK:  return SPR.park;
     case OV.RUBBLE: return SPR.rubble;
@@ -721,7 +789,7 @@ function beachMask(city, i) {
 }
 
 // cluster-aware forest sprite: denser stands draw fuller canopies. Pure
-// function of (terr neighborhood, varnt) — deterministic per frame.
+// function of (terr neighborhood, varnt, season) — deterministic per frame.
 function forestSprite(city, i) {
   const x = i % MAP, y = (i / MAP) | 0;
   let n = 0;
@@ -731,7 +799,7 @@ function forestSprite(city, i) {
   if (forest(x, y + 1)) n++;
   if (forest(x - 1, y)) n++;
   const tier = n <= 1 ? 0 : n <= 3 ? 1 : 2;
-  const fam = SPR.forest[tier];
+  const fam = SPR.season[seasonOf(city.month)].forest[tier]; // seasonal canopy (M12)
   return fam[city.varnt[i] % fam.length];
 }
 

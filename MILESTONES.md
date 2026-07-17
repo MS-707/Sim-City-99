@@ -6,14 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M12 — Seasons**: month-driven seasonal palette (snowy winters, autumn
-  forests), seasonal ticker flavor, snow plows/reduced traffic in winter.
-
-## Open
-
 - [ ] **M13 — Bonds & loans**: issue municipal bonds from the budget window
   (borrow now, repay with interest monthly), credit rating that reacts to
   treasury health; advisors comment on debt.
+
+## Open
+
 - [ ] **M14 — Postcard photo mode**: export a framed PNG "postcard from
   1997" snapshot of the current view (city name, date, retro border).
 - [ ] **M15 — Touch & small-screen support**: tap-to-build, pinch zoom,
@@ -25,8 +23,27 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M17 — City Hall records**: a stats almanac dialog (yearly population,
   budget, disasters survived), plus named citizens ticker complaints tied to
   real tile problems (click to jump the camera there).
+- [ ] **M18 — Helicopter & traffic copter reports**: a news chopper that
+  flies over congestion hotspots at random intervals; clicking it opens a
+  live "Traffic on the 5s" report naming the worst intersections.
 
 ## Done
+
+- [x] **M12 — Seasons**: seasonOf(month) — a pure function of the calendar
+  (Dec–Feb winter, then 3-month blocks), no new save state (still v4,
+  byte-identical round-trip). Terrain-family sprites (grass, water, shore,
+  forest, winter roads) baked once per season at boot from a SEASON_PAL
+  palette table: snowpack lawns + icy shores + snow-capped pines + plowed
+  snow-banked roads in winter, blossom-flecked spring, dry-stubble lawns and
+  orange/red canopies in autumn. The season is part of the M11 terrain-cache
+  key, so a palette swap is a single cache rebuild on the month rollover
+  (never per-frame work; zero canvas allocations); M10 night tint composes
+  unchanged (snow stays brighter than grass under the same midnight tint,
+  lit windows punch through). Winter gameplay: road congestion scaled x0.72
+  in recomputeTraffic (~28% measured drop), car dots 30% slower on snowy
+  roads; NEWS_WINTER/NEWS_SUMMER ticker pools gated purely by month
+  ("Blizzard of '98 buries Main Street"). Verified against 7 criteria via
+  39 headless checks (all pass; developed-128 winter median frame 3.3 ms).
 
 - [x] **M11 — Bigger maps & map picker**: MAP is now a mutable global set only
   at city creation/load (setMapSize); City(seed, size) stores its own size,

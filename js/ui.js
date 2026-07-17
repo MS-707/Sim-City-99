@@ -78,6 +78,25 @@ const NEWS_1997 = {
        "🎄 Beanie Babies shortage declared civic emergency by local collectors."],
 };
 
+/* --------- seasonal wires (M12): month-gated, same pattern as NEWS_1997 ---- */
+const NEWS_WINTER = [
+  "❄️ Blizzard of '98 buries Main Street; plows out in force by dawn.",
+  "🚜 Snow plows on double shifts — mayor praised for 'gritty' road response.",
+  "⛄ Record snowman on Elm St. sports authentic frosted-tips wig.",
+  "🏒 Pond hockey league declares itself 'the real NHL'. Zamboni pending.",
+  "🧣 Mitten sales up 900%. Pager-compatible gloves still in beta.",
+  "❄️ Salt trucks roll at 5 AM. Please move your Geo Metro, citizens.",
+];
+
+const NEWS_SUMMER = [
+  "☀️ Heat index soars; city pools declare a two-hour Macarena moratorium.",
+  "🍦 Ice cream truck gridlock downtown. Officials call it 'a good problem'.",
+  "🏖️ Beach traffic backs up to the highway. Bring a Game Boy and patience.",
+  "💦 Slip'N Slide championship ends in seventeen friendly lawsuits.",
+  "🌽 County fair opens: butter sculpture of the mayor 'uncannily accurate'.",
+  "🎆 Fireworks stand sells out; raccoons reportedly hoarding sparklers.",
+];
+
 const NEWS_GENERIC = [
   "📞 Dial-up subscriptions up 300%. Please stay off the phone, Mom.",
   "🖨️ City prints budget on dot-matrix. Perforated edges everywhere.",
@@ -602,6 +621,12 @@ const ticker = { queue: [], x: 0, current: "Welcome to 1997, Mayor. The city awa
 function tickerFeed() {
   // city messages take priority
   if (city.messages.length) return city.messages.shift();
+  // seasonal wires (M12): winter / summer color, gated purely by the month
+  const season = seasonOf(city.month);
+  if (season === "winter" && Math.random() < 0.35)
+    return NEWS_WINTER[(Math.random() * NEWS_WINTER.length) | 0];
+  if (season === "summer" && Math.random() < 0.35)
+    return NEWS_SUMMER[(Math.random() * NEWS_SUMMER.length) | 0];
   const monthNews = NEWS_1997[city.month] || [];
   const pool = city.year === 1997 && monthNews.length && Math.random() < 0.6
     ? monthNews : NEWS_GENERIC;

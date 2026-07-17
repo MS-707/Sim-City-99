@@ -61,6 +61,16 @@ function tierForPop(pop) {
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+/* ---- seasons (M12) ----
+   The season is a pure function of the calendar month — identical every year,
+   never serialized. Dec/Jan/Feb = winter, then three-month blocks. A fresh
+   city (January 1997) therefore boots straight into winter. */
+function seasonOf(month) {
+  return month === 11 || month <= 1 ? "winter"
+       : month <= 4 ? "spring"
+       : month <= 7 ? "summer" : "autumn";
+}
+
 /* ---- time capsule events (M7) ----
    One declarative timeline drives every dated event: on each month rollover
    tick() calls eventsTick(), which compares each entry's (year, month) to the
@@ -452,10 +462,15 @@ class City {
         prev = cur; cur = nxt;
       }
     }
-    // blend toward the new load so congestion is stable; roads only
+    // blend toward the new load so congestion is stable; roads only.
+    // winter (M12): snow keeps drivers home — the effective load every road
+    // carries is scaled DOWN by 0.72, so measured congestion drops ~28%
+    // through Dec–Feb and recovers by itself in March. Applied after the
+    // per-tile clamp so even saturated arterials visibly clear up.
+    const seasonMul = seasonOf(this.month) === "winter" ? 0.72 : 1;
     for (let i = 0; i < n; i++) {
       this.traffic[i] = this.over[i] === OV.ROAD
-        ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i]) * 0.5)
+        ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i]) * seasonMul * 0.5)
         : 0;
     }
   }

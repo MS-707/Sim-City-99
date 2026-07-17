@@ -37,6 +37,9 @@ folder: `python3 -m http.server` → http://localhost:8000)
   adjustable tax rate, treasury graphs
 - **Disasters** — fires that spread (build fire coverage!), tornadoes, and a
   UFO visit (it *is* the 50th anniversary of Roswell, after all)
+- **Seasons** — the map follows the calendar: snowed-under winters with icy
+  shores, plowed roads and lighter traffic; spring blossom, autumn foliage;
+  season-flavored headlines on the wire
 - **Maximum 1997** — Windows-95 chrome UI, a news ticker that follows the real
   1997 timeline month by month (Hale-Bopp, Pathfinder, Tamagotchi, that boat
   movie…), and a generative lo-fi chiptune soundtrack

@@ -47,11 +47,15 @@ function loop(now) {
     while (simAccum >= TICK_MS && safety-- > 0) {
       simAccum -= TICK_MS;
       const monthRolled = city.tick();
-      if (monthRolled) Snd.monthChime();
+      if (monthRolled) {
+        Snd.monthChime();
+        if (UI.prefs.autoBudget) openBudget(); // monthly report, if subscribed
+      }
     }
   }
 
   renderFrame(city, UI);
+  ambienceFrame(city);
   tickerFrame();
   refreshHUD();
   newsFrame();

@@ -6,13 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M6 — Audio & UI polish**: per-building ambient sounds when zoomed in,
-  budget window monthly auto-popup toggle, keyboard shortcut overlay (F1).
+- [ ] **M7 — Time capsule events**: dated 1997→1999 in-game events that affect
+  the sim (dot-com boom C demand spike, Y2K panic mini-event on Dec 1999).
 
 ## Open
 
-- [ ] **M7 — Time capsule events**: dated 1997→1999 in-game events that affect
-  the sim (dot-com boom C demand spike, Y2K panic mini-event on Dec 1999).
 - [ ] **M8 — Public deploy**: publish a playable build as a shareable web page
   and link it from the README.
 - [ ] **M9 — Scenario mode**: 2-3 playable scenarios with win conditions
@@ -23,8 +21,16 @@ Queue policy: keep at least 5 open improvements at all times.
   menu; disasters more dramatic in the dark.
 - [ ] **M11 — Bigger maps & map picker**: selectable map sizes (64/80/128) and
   a terrain-preview picker on the splash screen with reroll button.
+- [ ] **M12 — Seasons**: month-driven seasonal palette (snowy winters, autumn
+  forests), seasonal ticker flavor, snow plows/reduced traffic in winter.
 
 ## Done
+
+- [x] **M6 — Audio & UI polish**: zoom-in ambient soundscapes (traffic hum,
+  industrial clank, gulls, stadium crowd) viewport-selective and gated on
+  zoom/sfx/visibility with rate limits; "Budget report monthly" auto-popup
+  toggle persisted in localStorage; F1 shortcut overlay generated live from
+  TOOLS. Verified against 7 criteria (all pass, no SFX regressions).
 
 - [x] **M5 — Nicer terrain**: 16-mask sand shoreline transitions (roadMask
   pattern), 3-frame animated water cycled by the render frame counter (no

@@ -68,6 +68,32 @@ const Snd = {
     for (let k = 0; k < 6; k++) this.tone(900 + k * 120, 0.1, "sine", 0.1, k * 0.08, 300);
   },
   monthChime() { this.tone(1046, 0.08, "sine", 0.07); },
+
+  // ---- zoom-level ambience (scheduled by ambienceFrame in ambience.js) ----
+  ambTraffic() {   // busy-road hum: filtered rumble + engine drone
+    this.noise(1.3, 0.055, 240);
+    this.tone(65, 1.1, "sawtooth", 0.035, 0, 18);
+    this.tone(52, 1.2, "triangle", 0.03, 0.1, 10);
+  },
+  ambIndustry() {  // short metallic clanks from the mills
+    const base = 420 + Math.random() * 480;
+    this.tone(base, 0.08, "square", 0.07);
+    this.tone(base * 1.63, 0.05, "square", 0.05, 0.02);
+    this.noise(0.09, 0.06, 2600, 0.01);
+    this.tone(base * 0.57, 0.1, "square", 0.05, 0.3);
+  },
+  ambWater() {     // gull chirps over lapping water
+    const n = 2 + ((Math.random() * 2) | 0);
+    for (let k = 0; k < n; k++)
+      this.tone(1700 + Math.random() * 500, 0.16, "sine", 0.05, k * 0.22, -650);
+    this.noise(1.1, 0.03, 420, 0.05);
+  },
+  ambStadium() {   // crowd swell + a distant vuvuzela-ish drone
+    this.noise(1.5, 0.085, 1200);
+    this.noise(0.9, 0.05, 900, 0.35);
+    this.tone(311, 0.45, "sawtooth", 0.025, 0.4, 40);
+  },
+
   fanfare() { // milestone promotion — triumphant lil' bugle
     const seq = [523.3, 659.3, 784, 1046.5];
     seq.forEach((f, k) => this.tone(f, 0.16, "square", 0.16, k * 0.11));

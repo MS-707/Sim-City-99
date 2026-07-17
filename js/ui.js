@@ -11,6 +11,19 @@ const UI = {
   lastMouse: null,
 };
 
+/* --------- user preferences (localStorage, separate from the save) --------- */
+const PREFS_KEY = "simcity99.prefs";
+
+function loadPrefs() {
+  let p = {};
+  try { p = JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch (e) {}
+  return Object.assign({ autoBudget: false }, p);
+}
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(UI.prefs)); } catch (e) {}
+}
+UI.prefs = loadPrefs();
+
 const TOOLS = [
   { id: "query",    name: "Inspect",   key: "0", icon: "🔍" },
   { id: "bulldoze", name: "Bulldoze",  key: "1", icon: "🚜" },
@@ -184,14 +197,19 @@ const MENUS = {
   ],
   windows: () => [
     ["Budget…", openBudget],
+    [`${UI.prefs.autoBudget ? "✓ " : ""}Budget Report Monthly`,
+      () => { UI.prefs.autoBudget = !UI.prefs.autoBudget; savePrefs(); }],
     ["Graphs…", openGraphs],
     ["Advisors…", openAdvisors],
+    "-",
+    ["Keyboard Shortcuts… (F1)", openShortcuts],
   ],
   sound: () => [
     [`${Snd.sfxOn ? "✓ " : ""}Sound Effects`, () => Snd.toggleSfx()],
     [`${Snd.musicOn ? "✓ " : ""}Music`, () => Snd.toggleMusic()],
   ],
   help: () => [
+    ["Keyboard Shortcuts… (F1)", openShortcuts],
     ["About…", () => showDlg("dlg-about")],
   ],
 };
@@ -320,6 +338,17 @@ function applyToolAt(e) {
 function bindKeys() {
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT") return;
+    if (e.key === "F1") { // toggle the shortcuts overlay
+      e.preventDefault();
+      const d = document.getElementById("dlg-shortcuts");
+      if (d.classList.contains("hidden")) openShortcuts();
+      else hideDlg("dlg-shortcuts");
+      return;
+    }
+    if (e.key === "Escape") { // close any open dialog
+      document.querySelectorAll(".dlg").forEach(d => d.classList.add("hidden"));
+      return;
+    }
     if (e.code === "Space") { e.preventDefault(); setSpeed(UI.speed === 0 ? 1 : 0); return; }
     const t = TOOLS.find(t => t.key === e.key);
     if (t) { setTool(t.id); return; }
@@ -398,6 +427,22 @@ function fillBudgetTable() {
     <tr><td>Power plants</td><td>${f(-b.power)}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;
+}
+
+function openShortcuts() {
+  // rows are rebuilt from the live TOOLS array every time — never hand-listed
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const rows = TOOLS.map(t =>
+    `<tr><td class="kbd">${esc(t.key)}</td><td>${esc(t.name)}</td></tr>`).join("");
+  document.getElementById("shortcuts-table").innerHTML = rows + `
+    <tr class="ksep"><td colspan="2">— Controls —</td></tr>
+    <tr><td class="kbd">Space</td><td>Pause / resume the sim</td></tr>
+    <tr><td class="kbd">Arrow keys</td><td>Pan the map</td></tr>
+    <tr><td class="kbd">Mouse wheel</td><td>Zoom in / out</td></tr>
+    <tr><td class="kbd">Right / middle drag</td><td>Pan the map</td></tr>
+    <tr><td class="kbd">Esc</td><td>Close dialogs</td></tr>
+    <tr><td class="kbd">F1</td><td>Toggle this window</td></tr>`;
+  showDlg("dlg-shortcuts");
 }
 
 function openGraphs() {

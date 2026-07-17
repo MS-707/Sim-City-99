@@ -12,6 +12,17 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## Open
 
+- [ ] **M23 — Advisor bias & department funding** *(user priority — next up)*:
+  per-department funding sliders in the budget window (police, fire, roads,
+  education, health) replacing flat upkeep, with service effectiveness
+  (coverage radius/potency, road wear) scaling with funding level; advisors
+  gain departmental BIAS — each advisor champions their own budget and reacts
+  to the player's policy moves, not just city state: cut taxes and Finance
+  cheers while the Public Works/Transportation advisor flips out about the
+  starved road budget; raise taxes past ~9% and advisors warn about resident
+  exodus (wired to the existing demand penalty). Add a 4th Transportation
+  advisor tab biased toward road/transit funding. Advice lines must cite the
+  advisor's actual department numbers and escalate in tone as funding falls.
 - [ ] **M18 — Helicopter & traffic copter reports**: a news chopper that
   flies over congestion hotspots at random intervals; clicking it opens a
   live "Traffic on the 5s" report naming the worst intersections.

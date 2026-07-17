@@ -93,7 +93,8 @@ function renderFrame(city, uiState) {
       // blinking "no power" bolt on developed but unpowered zones / civics
       if (blink && !city.powered[i] &&
           ((ov >= OV.ZR && ov <= OV.ZI && city.lvl[i] > 0) ||
-           ov === OV.POLICE || ov === OV.FIRESTA)) {
+           ov === OV.POLICE || ov === OV.FIRESTA ||
+           ov === OV.SCHOOL || ov === OV.HOSPITAL)) {
         if (city.anc[i] === -1 || city.anc[i] === i)
           ctx.drawImage(SPR.zap.c, wx - SPR.zap.ox, wy - SPR.zap.oy - 4);
       }
@@ -277,6 +278,11 @@ function renderMinimap(city, mode) {
         const v = city.traffic[i]; // green -> yellow -> red as congestion rises
         col = `rgb(${Math.min(255, 60 + v * 1.6) | 0},${Math.max(0, 200 - v * 1.4) | 0},40)`;
       } else col = city.terr[i] === TERR.WATER ? "#013" : "#111";
+    } else if (mode === "svc") {
+      // education (green) + health (red) coverage
+      const e = city.eduCov[i], h = city.medCov[i];
+      if (e || h) col = `rgb(${Math.min(255, 40 + h * 0.8) | 0},${Math.min(255, 40 + e * 0.8) | 0},60)`;
+      else col = city.terr[i] === TERR.WATER ? "#013" : "#111";
     } else if (mode === "crime") {
       const v = city.crime[i];
       col = v > 6 ? `rgb(${80 + v},20,${30 + v / 2})` : (city.terr[i] === TERR.WATER ? "#013" : "#121");
@@ -292,6 +298,8 @@ function renderMinimap(city, mode) {
       else if (t === OV.POLICE) col = "#88f";
       else if (t === OV.FIRESTA) col = "#f55";
       else if (t === OV.COAL || t === OV.SOLAR) col = "#ff0";
+      else if (t === OV.SCHOOL) col = "#0cc";
+      else if (t === OV.HOSPITAL) col = "#fcf";
       else if (t === OV.MAYOR) col = "#fd6";
       else if (t === OV.STADIUM) col = "#e5e";
       else if (t === OV.RUBBLE) col = "#654";

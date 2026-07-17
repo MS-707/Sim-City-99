@@ -267,27 +267,28 @@ function buildSprites() {
     }
   });
 
-  /* ---- residential ---- */
+  /* ---- residential (5 variants per level) ---- */
+  const NV = 5; // zone sprite variants per level
   SPR.r1 = []; SPR.r2 = []; SPR.r3 = [];
-  const houseWalls = ["#e8d9b0", "#cfe0ee", "#efc8c0"];
-  const houseRoofs = ["#a03c2c", "#3c5a80", "#6b4f8a"];
-  for (let v = 0; v < 3; v++) {
+  const houseWalls = ["#e8d9b0", "#cfe0ee", "#efc8c0", "#d6e8c2", "#e6d0e8"];
+  const houseRoofs = ["#a03c2c", "#3c5a80", "#6b4f8a", "#4f7a3c", "#7a5a2c"];
+  for (let v = 0; v < NV; v++) {
     SPR.r1.push(mkSprite(1, 1, 30, (g, ox, oy) => {
       diamondPath(g, ox, oy);
       g.fillStyle = "#5aa552"; g.fill(); g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
       tinyHouse(g, ox - 10, oy + 2, 22, houseWalls[v], houseRoofs[v]);
-      tinyHouse(g, ox + 12, oy - 2, 18, houseWalls[(v + 1) % 3], houseRoofs[(v + 1) % 3]);
+      tinyHouse(g, ox + 12, oy - 2, 18, houseWalls[(v + 1) % NV], houseRoofs[(v + 1) % NV]);
       drawTree(g, ox + 22, oy + 6, 8, 1);
     }));
     SPR.r2.push(mkSprite(1, 1, 46, (g, ox, oy) => {
-      const base = ["#b06a4a", "#9c8a6e", "#7e8fa0"][v];
+      const base = ["#b06a4a", "#9c8a6e", "#7e8fa0", "#8a9a7a", "#a87888"][v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 36, base);
       windows(g, up(W, 0), up(S, 0), 36, 3, 2, 0.55);
       windows(g, up(S, 0), up(E, 0), 36, 3, 3, 0.55);
       g.fillStyle = "#4c4c52"; g.fillRect(ox - 6, oy - 36 - HH + 2, 8, 5); // roof AC
     }));
     SPR.r3.push(mkSprite(1, 1, 82, (g, ox, oy) => {
-      const base = ["#c9c1ae", "#a9b6c4", "#c7a9a1"][v];
+      const base = ["#c9c1ae", "#a9b6c4", "#c7a9a1", "#b4c4ae", "#cbb98e"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base);
       windows(g, up(W, 0), up(S, 0), 68, 6, 3, 0.6);
       windows(g, up(S, 0), up(E, 0), 68, 6, 3, 0.6);
@@ -299,12 +300,12 @@ function buildSprites() {
 
   /* ---- commercial ---- */
   SPR.c1 = []; SPR.c2 = []; SPR.c3 = [];
-  for (let v = 0; v < 3; v++) {
+  for (let v = 0; v < NV; v++) {
     SPR.c1.push(mkSprite(1, 1, 30, (g, ox, oy) => {
-      const base = "#cdbfa3";
+      const base = ["#cdbfa3", "#c3b3a8", "#b8c3ad", "#c9bdc6", "#b3bcc3"][v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 18, base);
       // storefront glass band + awning
-      const aw = ["#c0392b", "#2980b9", "#27ae60"][v];
+      const aw = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d97e12"][v];
       g.fillStyle = "#9fd8e8";
       poly(g, [up(S, 4), up(E, 4), up(E, 13), up(S, 13)], "#9fd8e8");
       poly(g, [up(W, 4), up(S, 4), up(S, 13), up(W, 13)], "#7fb8cc");
@@ -313,13 +314,13 @@ function buildSprites() {
       poly(g, [up(W, 13), up(S, 13), up(S, 17), up(W, 17)], shade(aw, 0.8));
     }));
     SPR.c2.push(mkSprite(1, 1, 56, (g, ox, oy) => {
-      const base = ["#8ba3b5", "#a39b8b", "#8b9b8f"][v];
+      const base = ["#8ba3b5", "#a39b8b", "#8b9b8f", "#9b8ba3", "#b5a08b"][v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base);
       windows(g, up(W, 0), up(S, 0), 44, 4, 3, 0.65, "#cfe8ff");
       windows(g, up(S, 0), up(E, 0), 44, 4, 4, 0.65, "#cfe8ff");
     }));
     SPR.c3.push(mkSprite(1, 1, 104, (g, ox, oy) => {
-      const glass = ["#3e6f9e", "#2e8a84", "#7a6a4e"][v];
+      const glass = ["#3e6f9e", "#2e8a84", "#7a6a4e", "#5e4e8e", "#8e4e5e"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
         { top: shade(glass, 1.5), left: shade(glass, 0.62), right: shade(glass, 0.88) });
       windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45));
@@ -332,22 +333,22 @@ function buildSprites() {
 
   /* ---- industrial ---- */
   SPR.i1 = []; SPR.i2 = []; SPR.i3 = [];
-  for (let v = 0; v < 3; v++) {
+  for (let v = 0; v < NV; v++) {
     SPR.i1.push(mkSprite(1, 1, 30, (g, ox, oy) => {
-      const base = ["#b09a72", "#a8a08a", "#9a8a80"][v];
+      const base = ["#b09a72", "#a8a08a", "#9a8a80", "#8a9a90", "#b0a060"][v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 20, base);
       g.fillStyle = "#5a5148"; // big loading door on SE face
       poly(g, [up(S, 2), up(E, 2), up(E, 14), up(S, 14)].map(p => [
         p[0] * 0.5 + (S[0] + E[0]) / 4, p[1] * 0.5 + (S[1] + E[1]) / 4]), "#5a5148");
     }));
     SPR.i2.push(mkSprite(1, 1, 56, (g, ox, oy) => {
-      const base = ["#8f7f6f", "#7f8272", "#94836a"][v];
+      const base = ["#8f7f6f", "#7f8272", "#94836a", "#6f7f8f", "#877a88"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base);
       windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f");
       stack(g, ox - 10, N[1] - 24, 22, 6);
     }));
     SPR.i3.push(mkSprite(1, 1, 74, (g, ox, oy) => {
-      const base = ["#77706a", "#6f7078", "#7c6f62"][v];
+      const base = ["#77706a", "#6f7078", "#7c6f62", "#6a7770", "#78645e"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base);
       windows(g, up(W, 0), up(S, 0), 38, 2, 2, 0.35, "#ffd27f");
       stack(g, ox - 12, N[1] - 34, 30, 7);
@@ -407,6 +408,53 @@ function buildSprites() {
       g.beginPath(); g.moveTo(N[0] + k * 10 + 40, N[1] - 10 - 20); g.lineTo(N[0] + k * 10 - 40, N[1] - 10 + 60); g.stroke();
     }
     g.restore();
+  });
+
+  // School: red-brick block with a white bell tower and a small yard
+  SPR.school = mkSprite(2, 2, 56, (g, ox, oy) => {
+    const { W, S, E, N } = prism(g, ox, oy, 2, 2, 24, "#b5533c");
+    windows(g, up(W, 0), up(S, 0), 24, 2, 3, 0.7, "#ffe9a0");
+    windows(g, up(S, 0), up(E, 0), 24, 2, 3, 0.7, "#ffe9a0");
+    // double doors on the SE face
+    const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
+    poly(g, [up(dm(0.42), 2), up(dm(0.58), 2), up(dm(0.58), 14), up(dm(0.42), 14)], "#e8e0d0");
+    g.strokeStyle = "#6b3020"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(...up(dm(0.5), 2)); g.lineTo(...up(dm(0.5), 14)); g.stroke();
+    // bell tower on the roof center
+    const tx = ox, ty = oy + HH - 24;
+    g.fillStyle = "#ece4d4"; g.fillRect(tx - 6, ty - 22, 12, 19);
+    g.fillStyle = "#d9d0bc"; g.fillRect(tx - 6, ty - 22, 5, 19);
+    g.fillStyle = "#2b2b30"; g.fillRect(tx - 4, ty - 18, 8, 7); // bell arch
+    g.fillStyle = "#e0b23c";
+    g.beginPath(); g.arc(tx, ty - 15, 2.6, 0, 7); g.fill();     // the bell
+    g.fillStyle = "#7a3a2a";
+    g.beginPath(); g.moveTo(tx - 8, ty - 22); g.lineTo(tx + 8, ty - 22);
+    g.lineTo(tx, ty - 32); g.closePath(); g.fill();             // tower roof
+    // flag by the entrance
+    g.strokeStyle = "#d8d8e0"; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(E[0] - 12, E[1] - 4); g.lineTo(E[0] - 12, E[1] - 34); g.stroke();
+    g.fillStyle = "#3555ff";
+    g.beginPath(); g.moveTo(E[0] - 12, E[1] - 34); g.lineTo(E[0] - 2, E[1] - 31);
+    g.lineTo(E[0] - 12, E[1] - 28); g.closePath(); g.fill();
+  });
+
+  // Hospital: white slab with blue window bands and a red-cross helipad roof
+  SPR.hospital = mkSprite(2, 2, 62, (g, ox, oy) => {
+    const { W, S, E, N } = prism(g, ox, oy, 2, 2, 34, "#e6e3da");
+    windows(g, up(W, 0), up(S, 0), 34, 3, 4, 0.75, "#bfe0f2");
+    windows(g, up(S, 0), up(E, 0), 34, 3, 4, 0.75, "#bfe0f2");
+    // emergency canopy on SE face
+    const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
+    poly(g, [up(dm(0.3), 12), up(dm(0.7), 12), up(dm(0.7), 15), up(dm(0.3), 15)], "#c94040");
+    poly(g, [up(dm(0.38), 2), up(dm(0.62), 2), up(dm(0.62), 12), up(dm(0.38), 12)], "#9fd8e8");
+    // helipad + red cross on the roof
+    const cx = ox, cy = oy + HH - 34;
+    g.fillStyle = "#d4d1c6";
+    g.beginPath(); g.ellipse(cx, cy, 22, 11, 0, 0, 7); g.fill();
+    g.strokeStyle = "#a8a498"; g.lineWidth = 1; g.stroke();
+    g.fillStyle = "#d02c2c";
+    g.fillRect(cx - 3, cy - 9, 6, 18);
+    g.fillRect(cx - 11, cy - 3, 22, 6);
   });
 
   /* ---- milestone rewards ---- */
@@ -473,19 +521,26 @@ function buildSprites() {
 // sprite lookup for an overlay tile (returns null when tile isn't the drawn anchor)
 function spriteFor(city, i) {
   const t = city.over[i];
-  const v = city.varnt[i] % 3;
+  // developed zones: variant is a pure function of varnt[] (mod family size)
+  const zone = (fams, marker) => {
+    if (city.lvl[i] === 0) return marker;
+    const fam = fams[city.lvl[i] - 1];
+    return fam[city.varnt[i] % fam.length];
+  };
   switch (t) {
     case OV.ROAD:  return SPR.road[roadMask(city, i)];
     case OV.WIRE:  return SPR.wire[wireMask(city, i)];
     case OV.PARK:  return SPR.park;
     case OV.RUBBLE: return SPR.rubble;
-    case OV.ZR:    return city.lvl[i] === 0 ? SPR.zoneR : [SPR.r1, SPR.r2, SPR.r3][city.lvl[i] - 1][v];
-    case OV.ZC:    return city.lvl[i] === 0 ? SPR.zoneC : [SPR.c1, SPR.c2, SPR.c3][city.lvl[i] - 1][v];
-    case OV.ZI:    return city.lvl[i] === 0 ? SPR.zoneI : [SPR.i1, SPR.i2, SPR.i3][city.lvl[i] - 1][v];
+    case OV.ZR:    return zone([SPR.r1, SPR.r2, SPR.r3], SPR.zoneR);
+    case OV.ZC:    return zone([SPR.c1, SPR.c2, SPR.c3], SPR.zoneC);
+    case OV.ZI:    return zone([SPR.i1, SPR.i2, SPR.i3], SPR.zoneI);
     case OV.POLICE:  return SPR.police;
     case OV.FIRESTA: return SPR.firesta;
     case OV.COAL:    return SPR.coal;
     case OV.SOLAR:   return SPR.solar;
+    case OV.SCHOOL:  return SPR.school;
+    case OV.HOSPITAL: return SPR.hospital;
     case OV.MAYOR:   return SPR.mayor;
     case OV.STADIUM: return SPR.stadium;
   }

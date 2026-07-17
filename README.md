@@ -23,9 +23,12 @@ Open `index.html` in a browser. That's it. (Or serve the folder:
   develop through 3 density levels driven by a live RCI demand model
 - **Power grid** — coal & solar plants, power lines, conduction through
   buildings, capacity limits, brownouts, blinking ⚡ on unpowered lots
-- **City services** — police & fire stations with powered coverage radii
-- **Living data layers** — pollution diffusion, land value, crime; all viewable
-  on the minimap (City / Power / Pollution / Value / Crime)
+- **City services** — police & fire stations, schools & hospitals with powered
+  coverage radii; education & health coverage raises land value, juices demand
+  and is required for lots to reach the top density level
+- **Living data layers** — pollution diffusion, land value, crime, service
+  coverage; all viewable on the minimap
+  (City / Power / Pollution / Value / Crime / Traffic / Services)
 - **Budget** — monthly taxes, road/wire maintenance, service & plant upkeep,
   adjustable tax rate, treasury graphs
 - **Disasters** — fires that spread (build fire coverage!), tornadoes, and a
@@ -42,7 +45,7 @@ Open `index.html` in a browser. That's it. (Or serve the folder:
 | Left click / drag | Use selected tool |
 | Right or middle drag | Pan the map |
 | Mouse wheel | Zoom |
-| `1`–`9`, `0`, `-`, `=` | Select tools |
+| `1`–`9`, `0`, `-`, `=`, `s`, `h` | Select tools |
 | `Space` | Pause / resume |
 | Arrow keys | Pan |
 

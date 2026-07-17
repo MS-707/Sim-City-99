@@ -10,13 +10,13 @@ const TERR = { GRASS: 0, WATER: 1, FOREST: 2 };
 const OV = {
   NONE: 0, ROAD: 1, WIRE: 2, ZR: 3, ZC: 4, ZI: 5, PARK: 6,
   POLICE: 7, FIRESTA: 8, COAL: 9, SOLAR: 10, RUBBLE: 11,
-  MAYOR: 12, STADIUM: 13,
+  MAYOR: 12, STADIUM: 13, SCHOOL: 14, HOSPITAL: 15,
 };
 
 // footprint (w,h) per overlay type
 const OV_SIZE = {
   [OV.POLICE]: 2, [OV.FIRESTA]: 2, [OV.COAL]: 2, [OV.SOLAR]: 2,
-  [OV.STADIUM]: 2,
+  [OV.STADIUM]: 2, [OV.SCHOOL]: 2, [OV.HOSPITAL]: 2,
 };
 const sizeOf = (t) => OV_SIZE[t] || 1;
 
@@ -30,6 +30,7 @@ const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120 };
 const COST = {
   bulldoze: 1, road: 10, wire: 5, zr: 100, zc: 100, zi: 100,
   park: 50, tree: 25, police: 500, firesta: 500, coal: 3000, solar: 5000,
+  school: 400, hospital: 600,
   mayor: 0, stadium: 500, // milestone rewards — gifts (or nearly so)
 };
 
@@ -81,6 +82,8 @@ class City {
     this.crime   = new Uint8Array(n);   // crime 0..255
     this.polCov  = new Uint8Array(n);   // police coverage
     this.fireCov = new Uint8Array(n);   // fire dept coverage
+    this.eduCov  = new Uint8Array(n);   // school (education) coverage
+    this.medCov  = new Uint8Array(n);   // hospital (health) coverage
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
 
     this.funds = 20000;
@@ -177,7 +180,7 @@ class City {
     for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
       const i = this.idx(x + dx, y + dy);
       this.over[i] = type; this.lvl[i] = 0; this.anc[i] = a;
-      this.varnt[i] = (Math.random() * 3) | 0;
+      this.varnt[i] = (Math.random() * 5) | 0;
       if (this.terr[i] === TERR.FOREST) this.terr[i] = TERR.GRASS;
     }
     this.funds -= cost;
@@ -380,14 +383,17 @@ class City {
     const trOut = new Uint8Array(n);
     this.diffuse(tr, trOut, 2, 0.35);
 
-    for (let i = 0; i < n; i++) {
-      let v = 40 + lvOut[i] - this.poll[i] * 0.7 - trOut[i] * 0.4; // traffic penalty
-      this.landv[i] = Math.max(0, Math.min(255, v));
-    }
-
-    // police / fire coverage
+    // police / fire / education / health coverage
     this.stampCoverage(OV.POLICE, this.polCov, 12);
     this.stampCoverage(OV.FIRESTA, this.fireCov, 12);
+    this.stampCoverage(OV.SCHOOL, this.eduCov, 14);
+    this.stampCoverage(OV.HOSPITAL, this.medCov, 14);
+
+    for (let i = 0; i < n; i++) {
+      let v = 40 + lvOut[i] - this.poll[i] * 0.7 - trOut[i] * 0.4  // traffic penalty
+            + this.eduCov[i] * 0.1 + this.medCov[i] * 0.1;         // good schools sell houses
+      this.landv[i] = Math.max(0, Math.min(255, v));
+    }
 
     // crime: density beats coverage
     for (let i = 0; i < n; i++) {
@@ -434,20 +440,24 @@ class City {
 
   // ---------- demand ----------
   recomputeDemand() {
-    let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0;
+    let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0, schools = 0, hospitals = 0;
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] === OV.ZR) pop += RES_POP[this.lvl[i]];
       else if (this.over[i] === OV.ZC) cJobs += COM_JOB[this.lvl[i]];
       else if (this.over[i] === OV.ZI) iJobs += IND_JOB[this.lvl[i]];
       else if (this.over[i] === OV.STADIUM && this.anc[i] === i) stadiums++;
+      else if (this.over[i] === OV.SCHOOL && this.anc[i] === i && this.powered[i]) schools++;
+      else if (this.over[i] === OV.HOSPITAL && this.anc[i] === i && this.powered[i]) hospitals++;
     }
     this.pop = pop; this.jobs = cJobs + iJobs;
     const taxMod = (7 - this.taxRate) * 0.05;         // low taxes juice demand
     const stadMod = Math.min(2, stadiums) * 0.06;     // a stadium makes people move in
+    // good schools & hospitals attract families (and the workers follow)
+    const svcMod = Math.min(3, schools) * 0.05 + Math.min(3, hospitals) * 0.05;
     const jobsAvail = this.jobs + 40 - pop * 0.62;    // 40 = external commuters
-    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod);
-    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6);
-    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4);
+    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod);
+    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5);
+    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5);
     function clampD(v) { return Math.max(-1, Math.min(1, v)); }
   }
 
@@ -475,7 +485,7 @@ class City {
 
       if (this.lvl[i] === 0) {
         if (road && dem > 0 && Math.random() < dem * 0.85 * (1 - cong * 0.7)) {
-          this.lvl[i] = 1; this.varnt[i] = (Math.random() * 3) | 0;
+          this.lvl[i] = 1; this.varnt[i] = (Math.random() * 5) | 0;
         }
       } else if (dem > 0.15 && this.lvl[i] < 3) {
         // upgrading needs decent conditions
@@ -483,8 +493,14 @@ class City {
         if (ov === OV.ZI) fit = 0.75; // industry doesn't care about views
         if (ov === OV.ZR) fit -= this.crime[i] / 400;
         fit *= 1 - cong * 0.75;       // nobody moves up on a gridlocked block
-        if (road && Math.random() < dem * fit * 0.42) {
-          this.lvl[i]++; this.varnt[i] = (Math.random() * 3) | 0;
+        // schools & hospitals raise the growth cap: coverage speeds upgrades…
+        const svc = (this.eduCov[i] + this.medCov[i]) / 510; // 0..1
+        fit *= 0.7 + svc * 1.1;
+        // …and top-tier development flat-out requires a school OR hospital in reach
+        if (this.lvl[i] === 2 && this.eduCov[i] < 8 && this.medCov[i] < 8) {
+          // capped at level 2 — nobody builds towers without services
+        } else if (road && Math.random() < dem * fit * 0.42) {
+          this.lvl[i]++; this.varnt[i] = (Math.random() * 5) | 0;
         }
       } else if (dem < -0.25 && this.lvl[i] > 0 && Math.random() < -dem * 0.3) {
         this.lvl[i]--;
@@ -609,7 +625,8 @@ class City {
       const t = this.over[i];
       if (t === OV.ROAD) roads++;
       else if (t === OV.WIRE) wires++;
-      else if ((t === OV.POLICE || t === OV.FIRESTA) && this.anc[i] === i) services++;
+      else if ((t === OV.POLICE || t === OV.FIRESTA || t === OV.SCHOOL ||
+                t === OV.HOSPITAL) && this.anc[i] === i) services++;
       else if ((t === OV.COAL || t === OV.SOLAR) && this.anc[i] === i) plants++;
     }
     const taxes = Math.round(this.pop * this.taxRate * 0.28 + this.jobs * this.taxRate * 0.18);
@@ -709,7 +726,7 @@ function toolOverlay(tool) {
   return ({
     road: OV.ROAD, wire: OV.WIRE, zr: OV.ZR, zc: OV.ZC, zi: OV.ZI,
     park: OV.PARK, police: OV.POLICE, firesta: OV.FIRESTA,
-    coal: OV.COAL, solar: OV.SOLAR,
+    coal: OV.COAL, solar: OV.SOLAR, school: OV.SCHOOL, hospital: OV.HOSPITAL,
     mayor: OV.MAYOR, stadium: OV.STADIUM,
   })[tool] ?? OV.NONE;
 }

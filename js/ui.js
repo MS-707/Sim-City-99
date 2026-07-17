@@ -23,6 +23,8 @@ const TOOLS = [
   { id: "tree",     name: "Trees",     key: "8", icon: null, spr: () => SPR.forest[0] },
   { id: "police",   name: "Police",    key: "9", icon: null, spr: () => SPR.police },
   { id: "firesta",  name: "Fire Dept", key: "-", icon: null, spr: () => SPR.firesta },
+  { id: "school",   name: "School",    key: "s", icon: null, spr: () => SPR.school },
+  { id: "hospital", name: "Hospital",  key: "h", icon: null, spr: () => SPR.hospital },
   { id: "coal",     name: "Coal Pwr",  key: "=", icon: null, spr: () => SPR.coal },
   { id: "solar",    name: "Solar Pwr", key: "+", icon: null, spr: () => SPR.solar },
   // milestone rewards — locked until the city earns its rank
@@ -426,7 +428,7 @@ function openQuery(x, y) {
   const terrName = ["Grass", "Water", "Forest"][city.terr[i]];
   const ovName = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
     "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
-    "Mayor's House", "Stadium"][city.over[i]];
+    "Mayor's House", "Stadium", "School", "Hospital"][city.over[i]];
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
@@ -436,7 +438,9 @@ function openQuery(x, y) {
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
     <tr><td>Traffic</td><td>${city.over[i] === OV.ROAD ? city.traffic[i] : "—"}</td></tr>
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
-    <tr><td>Crime</td><td>${city.crime[i]}</td></tr>`;
+    <tr><td>Crime</td><td>${city.crime[i]}</td></tr>
+    <tr><td>Education</td><td>${city.eduCov[i]}</td></tr>
+    <tr><td>Health</td><td>${city.medCov[i]}</td></tr>`;
   showDlg("dlg-query");
 }
 

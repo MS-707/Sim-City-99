@@ -347,6 +347,15 @@ function bindCanvas() {
       return;
     }
     if (e.button === 0) {
+      // news chopper (M18): a click that hits the airborne chopper opens the
+      // traffic report and is fully swallowed — no tool fires, no paint drag
+      // starts. chopperHitTest short-circuits to false with no chopper up.
+      const r = c.getBoundingClientRect();
+      if (chopperHitTest(e.clientX - r.left, e.clientY - r.top)) {
+        Snd.click();
+        openTrafficReport();
+        return;
+      }
       UI.painting = true;
       applyToolAt(e);
     }
@@ -406,8 +415,14 @@ function bindCanvas() {
     } else if (touch.mode === null) {
       const t = e.touches[0];
       const r = c.getBoundingClientRect();
-      touch.mode = "tap"; touch.sx = t.clientX; touch.sy = t.clientY;
-      UI.hover = screenToTile(t.clientX - r.left, t.clientY - r.top);
+      touch.sx = t.clientX; touch.sy = t.clientY;
+      // news chopper (M18): same screen-space hit test as the mouse path.
+      // A finger landing on the chopper claims the touch for the traffic
+      // report — it can never paint, and touchend opens the dialog.
+      touch.mode = chopperHitTest(t.clientX - r.left, t.clientY - r.top)
+        ? "choppertap" : "tap";
+      UI.hover = touch.mode === "tap"
+        ? screenToTile(t.clientX - r.left, t.clientY - r.top) : null;
     }
   }, { passive: false });
 
@@ -447,6 +462,11 @@ function bindCanvas() {
     if (e.cancelable) e.preventDefault(); // swallow the synthetic click too
     if (touch.mode === "tap" && e.type === "touchend")
       applyToolAt({ clientX: touch.sx, clientY: touch.sy }); // a clean tap builds
+    // a tap that landed on the chopper (M18) opens the report, builds nothing
+    if (touch.mode === "choppertap" && e.type === "touchend") {
+      Snd.click();
+      openTrafficReport();
+    }
     // a gesture keeps its claim until every finger lifts — no accidental builds
     if (e.touches.length === 0) { touch.mode = null; UI.hover = null; }
   };
@@ -755,6 +775,64 @@ function openQuery(x, y) {
   showDlg("dlg-query");
 }
 
+/* --------- "Traffic on the 5s" chopper report (M18) --------- */
+// Deterministic 90s intersection namer: a PURE function of tile coords —
+// two cross streets joined by " & " (e.g. "5th & Grunge Ave"). The same
+// (x, y) yields the same string on every call and every page reload; there
+// is no Math.random (and no other state) anywhere in it.
+const ST_ORD = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th",
+  "9th", "10th", "11th", "12th", "13th", "14th", "15th", "16th"];
+const ST_NAMES = ["Grunge", "Modem", "Pager", "Tamagotchi", "Frisbee", "Zima",
+  "Flannel", "Dialup", "Beanie", "Cassette", "Winsock", "Macarena",
+  "Slacker", "Discman", "Hubcap", "Pog"];
+const ST_SUFFIX = ["St", "Ave", "Blvd", "Dr", "Pkwy", "Ln"];
+function streetNameFor(x, y) {
+  const a = ST_ORD[x % ST_ORD.length];
+  const b = ST_NAMES[(y * 5 + x * 3) % ST_NAMES.length] + " " +
+            ST_SUFFIX[(x + y * 2) % ST_SUFFIX.length];
+  return a + " & " + b;
+}
+
+// Report inclusion rule (documented): every ROAD tile whose LIVE congestion
+// city.traffic[i] >= TRAFFIC_REPORT_MIN qualifies; the report lists the
+// worst TRAFFIC_REPORT_N of them, sorted non-increasing by congestion — so
+// whenever >= 3 tiles qualify at least 3 rows show, and row #1 always
+// carries the map-maximum traffic value. Rows are rebuilt from live city
+// state on every open (this full scan runs at open time only, never in the
+// frame loop), each carrying data-x/data-y plus a Jump button that centers
+// the camera on its hotspot.
+const TRAFFIC_REPORT_MIN = 80; // congestion worth reading on air
+const TRAFFIC_REPORT_N = 5;    // rows shown, at most
+
+function openTrafficReport() {
+  const cand = [];
+  for (let i = 0; i < city.over.length; i++)
+    if (city.over[i] === OV.ROAD && city.traffic[i] >= TRAFFIC_REPORT_MIN)
+      cand.push(i);
+  cand.sort((a, b) => city.traffic[b] - city.traffic[a]);
+  const top = cand.slice(0, TRAFFIC_REPORT_N);
+  const tbl = document.getElementById("traffic-table");
+  tbl.innerHTML = top.length
+    ? `<tr><th>#</th><th>Intersection</th><th>Congestion</th><th></th></tr>` +
+      top.map((i, k) => {
+        const x = i % MAP, y = (i / MAP) | 0;
+        return `<tr data-x="${x}" data-y="${y}"><td>${k + 1}</td>` +
+          `<td>${streetNameFor(x, y)}</td><td>${city.traffic[i]}</td>` +
+          `<td><button class="btn95 tiny traffic-jump" data-x="${x}" data-y="${y}">` +
+          `Jump</button></td></tr>`;
+      }).join("")
+    : `<tr><td>Light traffic citywide — Chip has nothing to report. Back to you!</td></tr>`;
+  tbl.querySelectorAll(".traffic-jump").forEach((b) =>
+    b.addEventListener("click", () => {
+      Snd.click();
+      cam.x = worldX(+b.dataset.x, +b.dataset.y);
+      cam.y = worldY(+b.dataset.x, +b.dataset.y);
+      clampCam();
+      setStatus(`🚁 Chip pans the camera to ${streetNameFor(+b.dataset.x, +b.dataset.y)}.`);
+    }));
+  showDlg("dlg-traffic");
+}
+
 /* ================= milestone newspaper ================= */
 const NP_SUBHEADS = [
   null, null,
@@ -913,6 +991,7 @@ function loadCity() {
   if (!json) { setStatus("No saved city found."); Snd.denied(); return false; }
   try {
     city = City.deserialize(json);
+    chopperClear(); // the chopper (M18) is never saved — no stale flyovers
     clampCam(); // a save may be a different map size than the last camera spot (M11)
     setStatus("City loaded. Welcome back, Mayor.");
     return true;
@@ -922,6 +1001,7 @@ function loadCity() {
 function newCity() {
   // consume exactly the seed + size the splash picker is previewing (M11)
   city = new City(PICKER.seed, PICKER.size);
+  chopperClear(); // presentation state (M18) never crosses into a new city
   const names = ["Llamaville", "Port Modem", "Beanieburg", "Dialup Falls",
     "Pixel Heights", "Cassette Creek", "Winsock City", "Grungetown"];
   city.cityName = names[(Math.random() * names.length) | 0];

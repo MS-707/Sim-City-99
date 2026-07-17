@@ -708,6 +708,62 @@ function buildSprites() {
     [0, "rgba(200,215,255,0.6)"], [0.5, "rgba(170,190,255,0.28)"],
     [1, "rgba(140,160,255,0)"]]);
 
+  /* ---- news helicopter (M18) ----
+     Built exactly once here at boot, like every other sprite: a fuselage,
+     three prebaked rotor-blur frames (cycled by the shared frame counter in
+     updateChopper — never rebuilt), and a soft ground-shadow ellipse. */
+  SPR.chop = (() => {
+    const c = document.createElement("canvas"); c.width = 48; c.height = 26;
+    const g = c.getContext("2d");
+    // tail boom
+    g.fillStyle = "#20406e";
+    g.fillRect(8, 12, 18, 4);
+    g.beginPath(); g.moveTo(8, 8); g.lineTo(12, 12); g.lineTo(8, 16); g.closePath(); g.fill();
+    // tail rotor hub
+    g.fillStyle = "#101a2c"; g.fillRect(6, 6, 2, 12);
+    // fuselage
+    g.fillStyle = "#2b57a0";
+    g.beginPath(); g.ellipse(32, 13, 12, 8, 0, 0, 7); g.fill();
+    g.fillStyle = "#1c3c72";
+    g.beginPath(); g.ellipse(32, 16, 12, 5, 0, 0, Math.PI); g.fill();
+    // cockpit glass
+    g.fillStyle = "#bfe6ff";
+    g.beginPath(); g.ellipse(38, 11, 5, 4.5, 0, -Math.PI / 2, Math.PI / 2); g.fill();
+    // "99" livery
+    g.fillStyle = "#ffe14a"; g.font = "bold 7px monospace";
+    g.fillText("99", 26, 15);
+    // skids
+    g.strokeStyle = "#101a2c"; g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(26, 21); g.lineTo(28, 24); g.moveTo(38, 21); g.lineTo(36, 24);
+    g.moveTo(24, 24.5); g.lineTo(40, 24.5);
+    g.stroke();
+    // rotor mast
+    g.fillStyle = "#101a2c"; g.fillRect(31, 3, 2, 4);
+    return { c, ox: 32, oy: 14 }; // anchor at fuselage center
+  })();
+  // 3 rotor-blur frames: sweeping ellipse widths sell the spin
+  SPR.chopRotor = [21, 13, 6].map((hw, k) => {
+    const c = document.createElement("canvas"); c.width = 46; c.height = 10;
+    const g = c.getContext("2d");
+    g.fillStyle = "rgba(210,220,235,0.65)";
+    g.beginPath(); g.ellipse(23, 5, hw, 1.6 + k * 0.4, 0, 0, 7); g.fill();
+    g.fillStyle = "#0e1626";
+    g.fillRect(21, 3, 4, 4); // hub
+    return { c, ox: 23, oy: 5 };
+  });
+  SPR.chopShadow = (() => {
+    const c = document.createElement("canvas"); c.width = 48; c.height = 22;
+    const g = c.getContext("2d");
+    g.translate(24, 11); g.scale(1, 0.45);
+    const gr = g.createRadialGradient(0, 0, 2, 0, 0, 22);
+    gr.addColorStop(0, "rgba(8,8,16,0.5)");
+    gr.addColorStop(1, "rgba(8,8,16,0)");
+    g.fillStyle = gr;
+    g.beginPath(); g.arc(0, 0, 22, 0, 7); g.fill();
+    return { c, ox: 24, oy: 11 };
+  })();
+
   // ---- "no power" bolt ----
   SPR.zap = (() => {
     const c = document.createElement("canvas"); c.width = 16; c.height = 22;

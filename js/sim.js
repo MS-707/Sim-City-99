@@ -1190,6 +1190,11 @@ class City {
       this.collectBudget();
       this.updateRecords();   // City Hall records (M17) — rollover only
       this.scanComplaints();  // citizen complaints (M17) — rollover only
+      // news chopper (M18): the spawn DECISION runs here and ONLY here —
+      // once per month rollover, alongside the other amortized scans. The
+      // per-rollover probability (CHOPPER_CHANCE) and the congestion gate
+      // are documented at chopperMonthTick / chopperTrySpawn in render.js.
+      if (typeof chopperMonthTick === "function") chopperMonthTick(this);
       // scenario win/lose check (M9) — monthly only, never per-tick
       if (this.scenarioId && typeof scenarioMonthTick === "function")
         scenarioMonthTick(this);

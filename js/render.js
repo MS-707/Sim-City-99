@@ -215,6 +215,7 @@ function renderFrame(city, uiState) {
   updateCars(city);
   updateSmoke(city);
   drawDisaster(city);
+  updateChopper(city); // news helicopter (M18) — O(1), presentation-only
   ctx.restore();
 
   // dusk tint: one screen-space fill over the whole scene — no per-tile work,
@@ -349,6 +350,151 @@ function updateSmoke(city) {
     ctx.fillStyle = `rgba(190,190,200,${a.toFixed(3)})`;
     ctx.beginPath(); ctx.arc(p.x, p.y, 3 + p.age * 0.09, 0, 7); ctx.fill();
   }
+}
+
+/* ---------------- news helicopter (M18) ---------------- */
+/* Action News 99's traffic chopper. PRESENTATION-ONLY state, exactly like
+   the cars[] / smoke[] pools: it lives here in render.js, is NEVER
+   serialized, and is cleared by newCity() / loadCity() / startScenario().
+
+   CHOPPER_TRAFFIC_T — the congestion threshold on city.traffic (ROAD tiles
+   only) that makes a hotspot newsworthy. 160 sits just under the citizen
+   complaint bar (COMPLAINT_T.traffic = 170): the chopper shows up right as
+   the faxes start. If no road tile reaches it, the chopper never launches.
+
+   CHOPPER_CHANCE — probability, per MONTH ROLLOVER, that a qualifying city
+   actually gets a flyover. Rolled only by chopperMonthTick(), which is
+   invoked from tick()'s % 24 === 0 branch in sim.js and nowhere else.
+
+   CHOPPER_LIFE — total flight time in FRAMES (rAF frames, the shared
+   `frame` counter's unit). 600 frames ≈ 10 s at 60 fps: approach, a long
+   hover over the hotspot, then automatic despawn — congestion does NOT
+   need to clear for the chopper to leave.
+
+   CHOPPER_ORBIT — the documented hover-orbit radius in TILES around the
+   target: once on station the chopper circles the hotspot, never straying
+   past this radius (it actually flies at 0.8 * CHOPPER_ORBIT).
+
+   State is exposed for tests as the global `chopper`:
+     null when grounded, else { x, y,      current position (tile coords)
+                                tx, ty,    target road tile (the hotspot)
+                                phase,     0 = approach, 1 = hover/orbit
+                                ttl,       remaining life, frames
+                                ang }      current orbit angle            */
+const CHOPPER_TRAFFIC_T = 160; // spawn gate: max road congestion must reach this
+const CHOPPER_CHANCE = 0.35;   // per-month-rollover spawn probability
+const CHOPPER_LIFE = 600;      // flight lifetime, frames (~10 s at 60 fps)
+const CHOPPER_ORBIT = 2;       // hover-orbit radius around the hotspot, tiles
+const CHOPPER_ALT = 54;        // cruising altitude, px above the ground anchor
+const CHOPPER_SPD = 0.18;      // approach speed, tiles per frame
+const CHOPPER_HIT_R = 26;      // click hit radius, px at zoom 1 (scales w/ cam.z)
+let chopper = null;
+
+// Monthly spawn DECISION — called from tick()'s month-rollover branch in
+// sim.js, and from no other sim/render/UI path. One CHOPPER_CHANCE roll per
+// rollover; the congestion gate itself lives in chopperTrySpawn.
+function chopperMonthTick(c) {
+  if (chopper) return;                          // at most one chopper airborne
+  if (Math.random() >= CHOPPER_CHANCE) return;  // no flyover this month
+  chopperTrySpawn(c);
+}
+
+// Documented, globally invokable spawner. Scans city.traffic once (spawn
+// time only — never per frame) for the maximum-congestion ROAD tile; if that
+// max is below CHOPPER_TRAFFIC_T (or the map has no roads at all) it spawns
+// nothing and returns false. Otherwise the chopper launches from just off
+// the nearest map edge, targeting the argmax tile itself — by construction
+// a road tile at/above the threshold inside the top congestion cluster.
+// Refused (false) while a chopper is already airborne.
+function chopperTrySpawn(c) {
+  c = c || city;
+  if (chopper || !c) return false;
+  let best = -1, bestV = -1;
+  for (let i = 0; i < c.over.length; i++)
+    if (c.over[i] === OV.ROAD && c.traffic[i] > bestV) { bestV = c.traffic[i]; best = i; }
+  if (best < 0 || bestV < CHOPPER_TRAFFIC_T) return false;
+  const tx = best % MAP, ty = (best / MAP) | 0;
+  // launch point: 4 tiles beyond the nearest map edge (offscreen of the map)
+  let sx = tx, sy = ty;
+  const m = Math.min(tx, MAP - 1 - tx, ty, MAP - 1 - ty);
+  if (m === tx) sx = -4;
+  else if (m === MAP - 1 - tx) sx = MAP + 3;
+  else if (m === ty) sy = -4;
+  else sy = MAP + 3;
+  chopper = { x: sx, y: sy, tx, ty, phase: 0, ttl: CHOPPER_LIFE, ang: 0 };
+  return true;
+}
+
+// Grounds the chopper instantly. Called by newCity() / loadCity() /
+// startScenario() so presentation state never outlives its city or map size.
+function chopperClear() { chopper = null; }
+
+// Screen-space hit test against the chopper's DRAWN BODY, i.e. at its
+// altitude offset, not its ground shadow. (sx, sy) are canvas-relative
+// pixels. The radius is CHOPPER_HIT_R scaled by cam.z, so the clickable
+// area tracks the sprite at every zoom. Used by BOTH the mouse path and the
+// M15 touch-tap path in bindCanvas (ui.js); with no chopper airborne it
+// short-circuits to false and legacy input is untouched.
+function chopperHitTest(sx, sy) {
+  if (!chopper) return false;
+  const px = (worldX(chopper.x, chopper.y) - cam.x) * cam.z + cvs.width / 2;
+  const py = (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + cvs.height / 2;
+  const r = CHOPPER_HIT_R * cam.z;
+  return (sx - px) * (sx - px) + (sy - py) * (sy - py) <= r * r;
+}
+
+// canvas-relative screen point of the drawn body (tests + UI, not per-frame)
+function chopperScreenXY() {
+  if (!chopper) return null;
+  return {
+    x: (worldX(chopper.x, chopper.y) - cam.x) * cam.z + cvs.width / 2,
+    y: (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + cvs.height / 2,
+  };
+}
+
+// O(1): is the chopper's body inside the viewport (small margin)? Feeds the
+// ambience scheduler's rotor thump — never used for any map scan.
+function chopperOnScreen() {
+  if (!chopper) return false;
+  const sx = (worldX(chopper.x, chopper.y) - cam.x) * cam.z + cvs.width / 2;
+  const sy = (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + cvs.height / 2;
+  return sx >= -80 && sx <= cvs.width + 80 && sy >= -80 && sy <= cvs.height + 80;
+}
+
+// Per-frame chopper update + draw. Strictly O(1) — one entity, no map scans,
+// no allocations: arithmetic on the existing state object plus drawImage of
+// sprites prebuilt once in buildSprites() (SPR.chop / chopRotor / chopShadow).
+function updateChopper(city) {
+  const ch = chopper;
+  if (!ch) return;
+  if (--ch.ttl <= 0) { chopper = null; return; } // lifetime up: despawn
+  if (ch.phase === 0) {
+    // approach: fly straight at the hotspot until the orbit ring is reached
+    const dx = ch.tx - ch.x, dy = ch.ty - ch.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= CHOPPER_ORBIT) {
+      ch.phase = 1;
+      ch.ang = Math.atan2(ch.y - ch.ty, ch.x - ch.tx);
+    } else {
+      ch.x += dx / d * CHOPPER_SPD;
+      ch.y += dy / d * CHOPPER_SPD;
+    }
+  } else {
+    // hover: circle the hotspot at 0.8 * CHOPPER_ORBIT, always moving
+    ch.ang += 0.025;
+    ch.x = ch.tx + Math.cos(ch.ang) * CHOPPER_ORBIT * 0.8;
+    ch.y = ch.ty + Math.sin(ch.ang) * CHOPPER_ORBIT * 0.8;
+  }
+  const wx = worldX(ch.x, ch.y), wy = worldY(ch.x, ch.y);
+  const bob = Math.sin(frame * 0.13) * 2;         // gentle altitude bobbing
+  const by = wy - CHOPPER_ALT + bob;
+  // soft ground shadow at the terrain anchor beneath the chopper
+  ctx.drawImage(SPR.chopShadow.c, wx - SPR.chopShadow.ox, wy - SPR.chopShadow.oy);
+  // fuselage (prebuilt once), then the rotor frame cycled by the shared
+  // `frame` counter — 3 prebaked blur frames, new one every 3 frames
+  ctx.drawImage(SPR.chop.c, wx - SPR.chop.ox, by - SPR.chop.oy);
+  const rot = SPR.chopRotor[(frame / 3 | 0) % 3];
+  ctx.drawImage(rot.c, wx - rot.ox, by - 15 - rot.oy);
 }
 
 function drawDisaster(city) {

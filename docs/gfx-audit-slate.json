@@ -1,0 +1,527 @@
+{
+  "source": "ultracode gfx-ui-audit (6 dimension reviewers, independent Fable 5 max judge)",
+  "judge": {
+    "approved": true,
+    "globalGaps": "(1) The REAL City Graphs defect goes unfixed by this slate: live testing on a clean HEAD checkout shows the plot is blank only while history has <2 entries (every fresh city and every scenario at boot \u2014 exactly what the audit screenshot captured); once 2+ months exist HEAD already draws both traces (464 green / 491 blue px at 24 months). No criterion anywhere in the slate tests the 0-1-rollover empty state, so even if G7 were implemented as written the first-impression blank plot could survive. (2) Power-line art: SPR.wire's brown poles + scribbly black catenary curves crossing roads and zones (crop-roads1 top-left, city-day-summer-z1) read as scratches over the scene; no milestone touches wires. (3) The main window titlebar's _ [] X buttons are inert decoration \u2014 an authenticity gap G6 does not cover. (4) Cars pop in/out of existence instantly mid-road (updateCars pool push/pop); G16 orients and lights them but no criterion covers spawn/despawn popping. (5) Every criterion pins zoom 1-2.5; nothing audits or protects the 0.4-0.7 zoomed-out view where the night clamp, dash rhythm and grid-stroke changes behave differently. (6) The audit screenshots predate HEAD (dlg-budget.png lacks the M23 funding sliders that exist in HEAD's DOM); implementers should re-baseline all before/after comparisons against HEAD, not the audit PNGs.",
+    "perMilestone": [
+      {
+        "id": "G1",
+        "pass": true,
+        "reasons": "Weakness verified: city-night-z1/crop-night show total whiteout; code confirms one warm color (GLOW_WARM) for all zones, ~80% pane bake regardless of day-lit state, 0.15 halo, and full-strength additive blit. Criteria are pixel/code-measurable with stated thresholds. Note: 'day sprites byte-identical to HEAD' requires controlling windows()'s raw Math.random() (e.g. patching it identically in both pages before boot) since HEAD baking is non-deterministic across boots \u2014 implementable without guessing, but the verify script must do it. Scoped to sprites.js bake + one compositing clamp; no MILESTONES.md overlap (fixes M10's defect, doesn't redo it)."
+      },
+      {
+        "id": "G2",
+        "pass": true,
+        "reasons": "Verified: drawNightLights (render.js:239, called at :231) blits all of nightQ with composite 'lighter' after the whole scene; crop-night shows glow ellipses sitting on tower roofs. Citation accurate. Criteria are concrete A/B tests (lamp behind C3 roof <10 luminance delta, edge-vs-occluded pool screenshots, open-road glow >=80% of HEAD, perf <=1.3x) plus code inspection. One caveat: ground pools are baked INSIDE spr.night canvases, so per-tile suppression implies splitting the bake \u2014 implementation detail, criteria stay testable. One iteration; no queue duplication."
+      },
+      {
+        "id": "G3",
+        "pass": true,
+        "reasons": "Verified in code and screenshots: drawFlames uses Math.random() per frame, 12-26px two-color triangles (reads as cones in disaster-fire/crop-fire), one hard 4px gray arc for smoke, fireGlow queued only when ns>0 (no day glow), and disaster-night shows the multi-tile additive blowout. All six criteria have numeric pixel or code asserts (hue-band histogram, 40px height, <=60% burning-facade luminance with recovery, puff centroids rising, largest near-white blob < one tile, R-B>=15 apron). Single render.js iteration."
+      },
+      {
+        "id": "G4",
+        "pass": true,
+        "reasons": "Weakness real: measured 68.5% of the photo region is the #0a0a12 game-background void with the city in one corner. Defect in criterion 1: the void is (10,10,18), so the specified 'R,G,B all < 8' count is 0% at HEAD \u2014 the stated ~67% baseline matches a <20 threshold, making C1 non-discriminating as written (implementers should use <20 or the void color). Criteria 2 (building pixels in the central 50% \u2014 fails at HEAD), 3 (>=25 luminance sky gradient \u2014 fails at HEAD), 4 (empty-city no-exception) and 5 (M14 blob-name/no-per-frame guard) still objectively enforce the fix. Extends done M14 rather than duplicating it."
+      },
+      {
+        "id": "G5",
+        "pass": true,
+        "reasons": "All premises verified: every grass/water/forest tile bakes a dark stroke (bathroom-floor grid plainly visible in coast-forest/crop-shore), buildTerrainLayer indexes one global waterFrame for every tile (lockstep repetition visible), divisor is 16, grass variant lightness spread ~2x the proposed 3%. Criteria are pixel scans, wrapper-instrumented rebuild counts over 600 frames, and lag-1 autocorrelation \u2014 all implementable. Conditional edge stroking fits the existing 16-mask shore pattern; one iteration. Refines done M5/M12 without duplicating them."
+      },
+      {
+        "id": "G6",
+        "pass": true,
+        "reasons": "All five defects verified: style.css:47 nth-child rule stretches the buttons container (measured HEAD close-button gaps 101-450px across the 7 dialogs), all 6 range inputs are native (HEAD DOM has tax + five M23 fund sliders), .toolbtn.active is flat #9db3c8, menu labels are plain text, and tablet-768 clips the Fire Station button mid-glyph with no visible affordance. Criteria are DOM-rect, computed-style and pixel asserts with thresholds. The 1280x800 zero-unexpected-diff criterion needs the live game canvas masked (viewport is animated and sprite bake is non-deterministic) \u2014 a reasonable reading since it targets chrome. Complements done M15/M23 without duplicating."
+      },
+      {
+        "id": "G7",
+        "pass": false,
+        "reasons": "Misdiagnosed and its fix criteria are vacuous. Live test on clean HEAD: after 24 month-rollovers the graph draws 464 green + 491 blue pixels, and a 3-month city also draws both traces \u2014 so criterion 1 ('2+ year city >=100 px each, HEAD baseline: zero') and criterion 2 ('3-month-old city renders a baseline') BOTH pass on unmodified HEAD. The blank plot exists only while history.length < 2 (fresh boot / scenario start \u2014 exactly the state the audit screenshot captured), and no criterion tests that state, so the milestone's headline deliverable ('fix the blank plot', sourced as high severity) has no discriminating acceptance test. There is also no 'y-scale/empty-history guard pushing traces off-canvas' bug to debug. The residual verifiable content (axis labels, greenbar/ledger skins, numeric regression) is cosmetic garnish that does not match the milestone's stated purpose. Needs respecification: test the 0-1-rollover state explicitly."
+      },
+      {
+        "id": "G8",
+        "pass": true,
+        "reasons": "Core weaknesses real and verified: renderMinimap draws no camera rectangle, mode buttons have no title attributes and wrap 5+2 raggedly, no overlay legend exists, and traffic mode paints non-road tiles #111 (context blackout confirmed in minimap-traffic). Two sub-asserts are pre-satisfied at HEAD and thus dead weight: the traffic ramp already goes green-to-red (render.js:431), and a 1px black midline already exists on the RCI tracks (.rci-barwrap::after \u2014 visible in my pixel probe of sidepanel.png), so 'lacks a zero line' is overstated. The remaining asserts (rect tracks pans by projected amount, per-mode legend visibility, 0.25-0.45 luminance ratio for context tiles, equal-width grid, +/- glyphs, 3px minimum bar under high tax) are objective and discriminate. Scoped to sidepanel UI; no queue overlap."
+      },
+      {
+        "id": "G9",
+        "pass": true,
+        "reasons": "Verified: every r3 AND every c3 variant bakes the identical mast + red tip (#e33/#f33) \u2014 dozens of red dots in disaster-ufo/sprites-closeup; prism tops default to shade(base,1.3) which clips #e6e3da to pure white (hospital roof confirmed white); roofs are empty flat fields except r2's one AC box. Criteria (zero red-tip px on r3, exactly 2/5 c3 masts, roof-crop stddev >=3x HEAD, non-white pale tops, phase-offset runtime blink, byte-identical double-boot bake) are all measurable. The determinism criterion forces seeding the currently-Math.random pane lighting \u2014 a small in-scope extension. One sprites.js iteration; no MILESTONES.md duplication."
+      },
+      {
+        "id": "G10",
+        "pass": true,
+        "reasons": "Weakness confirmed at zoom 1 (city-day-summer-z1): R/C/I are indistinguishable \u2014 R palettes include cool blue-grays, C includes browns/maroons. Criteria give unambiguous numeric hue bands (R 0-50deg, C 180-260deg, I sat<=0.35), a 90% 60-tile classifier test, saturation ratios vs the HEAD bake, and an >=8 color-distance adjacency jitter test \u2014 all objective. Two demerits, non-fatal: the smokestack criterion is pre-satisfied (stack() is already called only for i2/i3/coal \u2014 R/C have no stacks; the 'stacks everywhere' impression comes from zone mixing), and the description's 'minimap hue family' rationale contradicts minimap R=green while the criteria say warm 0-50deg \u2014 criteria, being the contract, are self-consistent. Scoped; no duplication."
+      },
+      {
+        "id": "G11",
+        "pass": true,
+        "reasons": "Verified: police prism ht=30 and hospital ht=34 vs r3's 68 / c3's 88 (slate's cited numbers exact); crop-hospital shows the hospital buried behind towers with a screen-axis red cross (fillRects at sprites.js:630-632, no shear). Criteria are measurable: opaque-extent >=55/50px (or landmark >=60), >=12 glyph pixels matching the minimap service color constants, blue-glyph detectability inside a projected tile quad in a dense zoom-1 capture (HEAD fails), cross-edge slope parallel to the 2:1 diamond, and apron pixel classification. One sprites.js iteration; extends done M3 civics rather than duplicating."
+      },
+      {
+        "id": "G12",
+        "pass": true,
+        "reasons": "Verified: roadSprite arms span exactly 0.28-0.72 (the cited ~44%), no curbs, dashes stroked per-arm from the tile center with setLineDash([4,4]) so junctions get converging knots (visible in crop-intersect) and phase resets every tile (crop-roads1). Criteria are concrete pixel measurements (55-75% asphalt fraction, grass/curb/asphalt three-tone sequence, zero dash-yellow px in the 12x6 junction center, <=1px run-length variance over 5 tiles) plus a 16-mask summer/winter bake soak that guards M12's plowed-road variant. Single roadSprite() iteration; no duplication."
+      },
+      {
+        "id": "G13",
+        "pass": true,
+        "reasons": "Verified: uniform 7px sand band with a bright 3px sandHi lip reads as a rampart, edge-stroke-only masks produce bowties at diagonal water contacts (clearly visible in crop-shore), forest floor (#3d8a3a + black stroke, ~17 luminance below grass) forms hard dark diamonds of identical lollipop trees, and winter's sandHi (#e8eef5) is within ~1 luminance of snowpack (#e9edf3) at the seam. Criteria are pixel measurements with thresholds; the winter one is the weakest wording (HEAD's band profile does contain a ~24 step at the sandHi/sand seam) but its discriminating half \u2014 presence of a distinctly darker ~#7fa0bf crack line along the shore mask \u2014 is unambiguous. Adjacent-forest non-identity is achievable via position-hashed variants. One iteration; refines M5/M12."
+      },
+      {
+        "id": "G14",
+        "pass": true,
+        "reasons": "Verified: buildings are byte-identical across seasons (crop-winter shows summer facades/roofs on snow), only terrain-family sprites are season-baked, and park/mayor/stadium trees call drawTree without a palette so they stay summer-green year-round \u2014 exactly the 'standalone trees' gap. Autumn canopy is one leafLo/leafHi pair (crop-autumn confirms near-uniform orange). Criteria: snowCap classification per winter variant, >=1.3x roof luminance, season-masked screenshot diff (HEAD building region unchanged), 3-mode autumn hue histogram, byte-identical save round-trip, single rebuild per rollover, perf within 15% \u2014 all measurable with the existing M12 harness patterns. Scope is the largest in the slate but mechanical (reuses the existing per-season bake loop); comparable to done M12, extending not duplicating it."
+      },
+      {
+        "id": "G15",
+        "pass": true,
+        "reasons": "Verified: splash sits on a navy radial gradient (not the #008080 desktop), logo is gradient text with a 40px-blur text-shadow glow (style.css:27), map-size radios are native inputs (Chromium blue dot visible), scenario cards are stock gray, and the hard 1px shadow to match is exactly style.css:39. Criteria are computed-style string comparisons, background-pixel equality with in-game constants, a >=2000-chromatic-pixel live SPR skyline canvas, and a full functional flow test (reroll hash change, size radios drive MAP, scenario launch, trophies, zero page errors). The 'edge-sharpness measurement' sub-assert is fuzzy but supplementary to the objective zero-blur-radius check. One iteration; guards M11/M16 splash features rather than duplicating them."
+      },
+      {
+        "id": "G16",
+        "pass": true,
+        "reasons": "All four premises verified in code: cars are axis-aligned 7x4/5x3 fillRects with a hard Math.min(70,...) cap and contribute nothing to nightQ; updateSmoke scans ascending indices with a break at 160 (starves high-index lower-right industry) and starts puffs at alpha 0.32; the tornado is 7 faint gray ellipses (near-invisible in disaster-tornado); the UFO hovers at ~64-69px (below 88px c3 roofs, confirmed in disaster-ufo) with frame%8 1.8px lights. Criteria: orientation/aspect checks on car blobs, cap >=200 on 128x128, headlight/taillight A/B counts vs a traffic-disabled control, lower-right plume pixels where HEAD is 0, >=40 funnel luminance delta + debris clustering + 2-frame rim rotation, saucer-above-roofline and beam-to-ground pixel asserts, and a 20% perf envelope \u2014 all objective. Four small effects in one render.js pass; borderline broad but each piece is tiny and there is no queue overlap (M18's helicopter is unrelated)."
+      }
+    ]
+  },
+  "milestones": [
+    {
+      "id": "G1",
+      "title": "Night city legibility \u2014 per-zone window bake & tamed glow",
+      "description": "Rework the boot-baked night window layer in js/sprites.js windows(): per-zone lighting character (cool blue-white panes for C, sparse ~30-40% warm panes for R, sodium-orange for I), skip panes dark in the day sprite, cut halo alpha to ~0.08, and composite the night layer clamped (~0.7 alpha) while lerping facade base hue ~60% toward the tint instead of covering it \u2014 so roof diamonds, colored silhouettes and block structure survive at zoom 1. Day sprites untouched.",
+      "sourceFindings": "Building art: 'Night city whites out' (high); Readability: 'Night view collapses into unreadable white bloom' (high); Palette: 'Night view collapses to monochrome white' (high)",
+      "criteria": [
+        {
+          "statement": "Night pane color and density differ by zone: R night sprites light no more than 40% of their day-sprite pane count in warm amber, C panes read cool blue-white, I panes sodium orange; no pane lit at night that was dark in the day sprite.",
+          "verification": "Headless Chromium against the clean-checkout server (http://localhost:8903): rasterize SPR r1-r3/c1-c3/i1-i3 day and night layers to an offscreen canvas, count lit-pane pixels per family (assert R ratio <= 0.40) and assert mean lit-pane hue falls in blue range (200-250 deg) for C and orange range (20-45 deg) for R/I."
+        },
+        {
+          "statement": "Dense-district night whiteout is at least halved: the fraction of near-white pixels (R,G,B all > 235) in a 400x300 crop of a dense district at zoom 1 midnight drops to less than 50% of the HEAD baseline captured with the identical script.",
+          "verification": "Playwright script builds/loads a deterministic dense city, forces midnight phase, screenshots the same crop on HEAD (/tmp/sc99-audit) and on the branch, and compares near-white pixel counts programmatically."
+        },
+        {
+          "statement": "Roof diamonds stay visible between windows at night: sampled roof-center pixels of level-3 towers keep measurable chroma (max channel minus min channel >= 10) and are at least 25% darker than adjacent lit-pane pixels.",
+          "verification": "Pixel sampling in the night screenshot at projected roof-center coordinates of 6 known tall towers (tile positions fixed by test-city seed), asserting chroma and luminance deltas."
+        },
+        {
+          "statement": "Window halo alpha in the bake is <= 0.08 and the night layer is drawn clamped (not full-alpha additive stacking) per the suggestion.",
+          "verification": "Code inspection of js/sprites.js windows() night bake (halo globalAlpha constant) and js/render.js night compositing (globalAlpha ~0.7 or equivalent clamp on spr.night draws)."
+        },
+        {
+          "statement": "Daytime rendering is unchanged: baked day sprites are byte-identical to HEAD.",
+          "verification": "Hash each baked day sprite canvas (toDataURL) on HEAD and branch with the same seed and assert equality; plus full-viewport noon screenshot diff == 0 changed pixels."
+        }
+      ]
+    },
+    {
+      "id": "G2",
+      "title": "Depth-correct night light pass",
+      "description": "Fix the painter-order violation where drawNightLights() (js/render.js:229) blits the whole nightQ additively after the full scene, letting street-lamp halos, C3 lobby spill and I2/I3 floodlight pools render on top of occluding towers as floating white discs. Split nightQ into per-diagonal (x+y) buckets interleaved with the building painter loop (or clip lamp pools to road diamonds), and suppress baked ground-pool ellipses when the tile in front (x+1,y+1) is a developed zone.",
+      "sourceFindings": "Building art: 'Additive night glow pools render on top of occluding buildings' (high); Animation: 'Night light pass ignores depth' (high)",
+      "criteria": [
+        {
+          "statement": "A lamp or ground pool behind an 88px C3 tower never brightens the tower's roof: roof pixels differ by < 10 luminance whether or not the occluded lamp exists.",
+          "verification": "Playwright test city places a C3 tower with a road+lamp tile immediately north-behind it; capture midnight screenshots with and without the lamp tile and assert per-pixel luminance delta < 10 across the tower's projected roof diamond."
+        },
+        {
+          "statement": "Night sprites are drawn in depth order: nightQ is bucketed by (x+y) diagonal rank and flushed interleaved with the tile painter loop (or lamp pools are clipped to road-tile diamonds), replacing the single post-scene 'lighter' blit.",
+          "verification": "Code inspection of js/render.js renderFrame/drawNightLights confirming per-diagonal buckets or per-tile immediate draws with composite-op switches."
+        },
+        {
+          "statement": "C3 lobby-spill and I-yard floodlight ellipses are suppressed when the tile at (x+1,y+1) is a developed zone; edge/low-density tiles keep their pools.",
+          "verification": "Two targeted screenshots: pool tile with developed tile in front shows no bright ellipse at the occluder's base/roof; the same building on a district edge shows the pool (pixel-count of bright ellipse pixels in each crop)."
+        },
+        {
+          "statement": "Unoccluded streets still glow: mean luminance over an open lit road tile at night is >= 80% of the HEAD baseline.",
+          "verification": "Pixel sampling of the same open-road crop in HEAD vs branch midnight screenshots."
+        },
+        {
+          "statement": "No performance regression: developed-128 night median frame time <= 1.3x the HEAD night median.",
+          "verification": "Existing headless perf-harness pattern: render 300 midnight frames on a developed 128x128 city, compare median performance.now() frame times HEAD vs branch."
+        }
+      ]
+    },
+    {
+      "id": "G3",
+      "title": "Fire that reads as fire \u2014 layered flames, char state, capped night bloom",
+      "description": "Overhaul drawFlames()/fire glow in js/render.js: replace per-frame Math.random() strobing with smooth sin-phase animation, layer each flame (dark red-orange base, brighter inner, yellow core) 2-3x taller, spawn rising soft-edged smoke puffs into the existing smoke[] pool instead of the static 4px gray dot, darken/char the burning building with a multiply tint while city.fire[i] is set, draw fireGlow at low alpha in daytime, and scale per-glow night alpha by 1/sqrt(cluster size) with a ~0.35 core cap so multi-tile fires stop saturating to a solid white blob.",
+      "sourceFindings": "Building art: 'Fire reads as traffic cones' (medium); Animation: 'Additive fire glow saturates to a solid white blob at night' (high), 'Daytime fire reads as birthday candles with per-frame random strobing' (high); Readability: 'Daytime fire reads as street clutter' (medium)",
+      "criteria": [
+        {
+          "statement": "Flames animate smoothly, not randomly: no Math.random() call in the per-frame flame draw path, and two consecutive frames of a burning tile differ in fewer than 15% of flame-region pixels by more than 30 luminance.",
+          "verification": "Code inspection of drawFlames() in js/render.js plus a Playwright capture of two consecutive frames of one burning tile and a programmatic per-pixel diff of the flame crop."
+        },
+        {
+          "statement": "Flames are layered and taller: a flame crop contains all three hue bands (dark red base R 150-200/G<90, mid orange, yellow core R>220/G>180/B<120) and flame height exceeds 40px on a 64px tile.",
+          "verification": "Pixel histogram of the flame crop (classify pixels into the three color ranges, assert each >= 20 pixels) and measure topmost-flame-pixel to tile-base distance."
+        },
+        {
+          "statement": "Burning buildings show damage: while city.fire[i] is set on a developed tile, its facade renders at <= 60% of its pristine luminance (char/multiply overlay), reverting when the fire ends.",
+          "verification": "Screenshot the same tile before ignition, during fire, and after extinguish; sample identical facade coordinates and assert the luminance ratio, then recovery."
+        },
+        {
+          "statement": "Smoke rises as 2-3 soft-edged puffs above each burning tile instead of one hard 4px dot: gray pixels with radial alpha falloff appear in the 30-60px band above the tile and drift upward across frames.",
+          "verification": "Code inspection of puff spawning into the smoke[] particle pool + two screenshots 30 frames apart asserting gray puff centroids present and risen."
+        },
+        {
+          "statement": "Night fires no longer blow out: with 8 contiguous burning tiles at midnight, no contiguous region of pixels with R,G,B all > 250 exceeds one tile's projected area, and per-glow alpha is scaled by 1/sqrt(burning-tile count) with core alpha <= 0.35.",
+          "verification": "Connected-component scan of near-white pixels in a night 8-tile-fire screenshot (largest blob area < 64*32*zoom px) plus code inspection of the glow alpha scaling."
+        },
+        {
+          "statement": "Daytime fires carry a visible warm ground glow: pixels under a burning tile at noon are measurably warm-tinted vs the same tile unburnt (R-B delta >= 15).",
+          "verification": "Pixel sampling of the tile apron in noon screenshots with and without fire."
+        }
+      ]
+    },
+    {
+      "id": "G4",
+      "title": "Postcard auto-framing \u2014 no more black void",
+      "description": "Before rendering the M14 postcard snapshot, compute the bounding box of developed (fallback: terrain) tiles and center+scale the postcard camera so the city fills the photo mount; fill any offscreen area with a season-matched banded sunset-sky gradient instead of flat black. The envelope chrome (stamp, postmark, caption) stays untouched.",
+      "sourceFindings": "Chrome: 'Postcard dialog frames the city into one corner, leaving a two-thirds black void' (medium); Palette: 'Postcard centerpiece is 60% black void' (high)",
+      "criteria": [
+        {
+          "statement": "The photo area is no longer mostly void: pure-black pixels occupy < 5% of the photo region on a mid-size developed city (HEAD baseline ~67%).",
+          "verification": "Playwright opens File > Send Postcard on a deterministic developed city, crops the photo-mount region from the dialog canvas, and counts pixels with R,G,B all < 8."
+        },
+        {
+          "statement": "The camera auto-centers on the developed area: building pixels (non-terrain colors) are present inside the central 50% of the photo region.",
+          "verification": "Code inspection of the bounding-box/centroid computation in the postcard composer + pixel classification of the central crop asserting >= 5% building-family pixels."
+        },
+        {
+          "statement": "Offscreen fill is a sky gradient, not black: the top band of the photo shows a smooth vertical luminance gradient (top row differs from the horizon row by >= 25 luminance, no pure-black rows).",
+          "verification": "Sample 5 evenly spaced rows in the sky band of the postcard photo and assert monotonic-ish luminance change with zero rows averaging < 10 luminance."
+        },
+        {
+          "statement": "A brand-new empty city still produces a valid postcard (terrain-centered, no exceptions).",
+          "verification": "Headless run: fresh city, invoke postcard, assert zero page errors and photo region < 5% pure black."
+        },
+        {
+          "statement": "M14 behavior is otherwise intact: Save PNG still downloads a blob named simcity99-<city>-<mon><year>.png with zero per-frame cost.",
+          "verification": "Existing M14-style DOM assertion on the download anchor name/blob plus confirming the composer only runs on dialog open (code inspection: no per-frame hook)."
+        }
+      ]
+    },
+    {
+      "id": "G5",
+      "title": "Terrain seam & water repetition fix",
+      "description": "Kill the 'tiled bathroom floor' look: stroke tile edges only where terrain type changes (land/water, grass/forest) and fade same-type interior strokes to <= 0.05 alpha so lakes and meadows read as continuous surfaces; de-sync water by indexing SPR.water[(waterFrame + x + y) % frames] in buildTerrainLayer (or baking positional variants picked by tile hash), lengthen the cycle divisor to ~24 to cut terrain-layer rebuilds, and pick grass variants by a scrambled (x,y) hash with the 4 variant colors tightened to within ~3% lightness so open grass mottles instead of checkerboarding.",
+      "sourceFindings": "Terrain: 'Dark grid stroke on every terrain tile' (high), 'Every water tile is pixel-identical' (high), 'Strong two-tone checkerboard on open grass' (low); Animation: 'Water shimmer loops 3 identical frames in lockstep' (medium)",
+      "criteria": [
+        {
+          "statement": "Interior water-water edges are seamless: along a shared edge between two open-lake tiles, no pixel run is darker than its neighbors by more than 12 luminance; grass-grass interior strokes are <= 0.05 alpha.",
+          "verification": "Pixel scan perpendicular to a known water-water edge in a lake screenshot (assert max luminance dip < 12) + code inspection of the conditional stroke in js/sprites.js/buildTerrainLayer."
+        },
+        {
+          "statement": "Type-change boundaries keep a visible edge: the land/water and grass/forest boundary still shows a >= 20 luminance step.",
+          "verification": "Pixel scan across a shoreline edge and a forest edge in the same screenshot asserting the step survives."
+        },
+        {
+          "statement": "Adjacent water tiles are no longer pixel-identical: two neighboring water tiles in the same frame differ in >= 5% of their diamond pixels.",
+          "verification": "Crop two adjacent water-tile diamonds from one screenshot and programmatically diff them; plus code inspection of the per-tile frame/variant offset."
+        },
+        {
+          "statement": "Terrain-layer rebuild frequency drops: the water-driven rebuild happens no more than ~2.5x/second (divisor >= 24) and total buildTerrainLayer calls over 600 idle frames fall vs HEAD.",
+          "verification": "Instrument buildTerrainLayer via a page-context wrapper counter over 600 rAF frames on HEAD and branch; assert branch count <= HEAD/1.5."
+        },
+        {
+          "statement": "Open grass reads as organic mottling: variant chosen by a scrambled hash (code) and the 4 grass variant fill colors sit within 3% CIE-ish lightness of each other.",
+          "verification": "Code inspection of the variant hash + parse the 4 grass palette hexes from js/sprites.js and compute lightness spread; visual screenshot diff of a meadow crop vs HEAD showing no regular alternation (autocorrelation at lag-1 tile reduced by half)."
+        }
+      ]
+    },
+    {
+      "id": "G6",
+      "title": "Win95 chrome authenticity fixes",
+      "description": "Fix the broken/anachronistic chrome: replace the css/style.css:47 nth-child flex rule so every dialog close button docks flush right (or add .title-btns { margin-left: auto }); style range inputs as Win95 rectangular beveled thumbs on sunken tracks; give .toolbtn.active the pressed-toggle white/gray checkerboard dither with a 1px icon nudge instead of the flat #9db3c8 fill; underline menu-bar mnemonic letters; and make the <=900px toolbar overflow discoverable (two-row wrap or chevron/visible scrollbar) so no tool is clipped invisibly.",
+      "sourceFindings": "Chrome: 'Dialog close buttons dock next to the title text' (high), 'Budget tax slider is an unstyled modern range input' (medium), 'Selected tool uses a flat steel-blue fill' (medium), 'Tablet toolbar overflow clips tools' (medium), 'Menu bar lacks Win95 keyboard mnemonics' (low); Readability: 'Tablet layout drops the side panel and clips the toolbar' (medium, toolbar half)",
+      "criteria": [
+        {
+          "statement": "Every dialog close button is flush right: for #dlg-budget, graphs, query, trophies, almanac, news and postcard, the close button's right edge sits within 8px of its titlebar's right edge.",
+          "verification": "Playwright DOM assertion opening each dialog and comparing closeBtn.getBoundingClientRect().right to titlebar.getBoundingClientRect().right."
+        },
+        {
+          "statement": "All range inputs (tax + five M23 funding sliders) render Win95-style: appearance:none with an ~11x21px #c0c0c0 rectangular thumb bearing the 2px outset bevel on a sunken groove track.",
+          "verification": "Computed-style assertion (appearance/none, ::-webkit-slider-thumb rules present in stylesheet) + pixel sampling of a slider screenshot crop: thumb body #c0c0c0 with #fff top/left and #404040 bottom/right edge pixels, no default blue."
+        },
+        {
+          "statement": "The active tool button uses the pressed-toggle treatment: checkerboard #fff/#c0c0c0 background-image, no solid #9db3c8 fill, icon/label nudged 1px down-right.",
+          "verification": "Computed-style assertion on .toolbtn.active (background-image set, background-color not #9db3c8; padding/transform nudge) + pixel sample of a 4x4 crop showing the 2px alternation."
+        },
+        {
+          "statement": "Menu labels carry underlined mnemonics: File, Speed, Disasters, Windows, Sound, Help each render their first letter underlined.",
+          "verification": "DOM assertion that each menu label contains a <u> (or underline-styled span) wrapping its accelerator letter."
+        },
+        {
+          "statement": "At 768x1024 every tool is reachable and none is half-clipped: either the strip wraps to rows fitting the viewport or explicit chevron/scroll affordances are visible, and after using them the last tool button's rect lies fully within the viewport.",
+          "verification": "Playwright at 768x1024: assert an affordance element is visible (chevron button or styled scrollbar with nonzero height), then scroll/expand and assert the final toolbar button's boundingClientRect fits the viewport; screenshot confirms no button is cut mid-glyph."
+        },
+        {
+          "statement": "Desktop chrome regression-free at 1280x800: only the intended regions (active tool button, sliders, menu labels) differ from HEAD.",
+          "verification": "Screenshot diff of the main window vs HEAD with masks over the intended regions; assert zero unexpected changed pixels."
+        }
+      ]
+    },
+    {
+      "id": "G8",
+      "title": "Minimap camera rect, overlay legends & demand-meter zero line",
+      "description": "Make the map's information layer trustworthy: stroke the projected camera-viewport rectangle on the minimap every frame in renderMinimap() (js/render.js ~399); show a one-line legend strip under the minimap for non-City modes with full-name tooltips (rename 'Pol'\u2192'Pollu'); render traffic-overlay non-road tiles as 30-40%-brightness City colors instead of flat #111 and ramp road heat green\u2192yellow\u2192red to match the red 'Jams' language; lay the seven mode buttons in an equal-width 4-per-row grid with a sunken pressed state on the active mode; and mark the RCI meter's 50% midline with a tick, +/- glyphs and a 3px minimum bar.",
+      "sourceFindings": "Readability: 'Minimap has no camera-viewport rectangle' (high), 'RCI demand meter lacks a zero line' (medium), 'Minimap overlay modes have no legend' (medium), 'Traffic overlay blacks out all context' (medium); Chrome: 'Minimap mode buttons form a ragged two-row cluster' (low); Palette: 'Minimap and overlay palettes clash' (medium, traffic ramp)",
+      "criteria": [
+        {
+          "statement": "A 1px white/inverted camera rectangle is drawn on the minimap and tracks the camera: it exists in City mode and moves when the camera pans.",
+          "verification": "Playwright reads minimap canvas pixels to locate the bright 1px rect, pans the camera a known delta, re-reads, and asserts the rect moved by the projected amount."
+        },
+        {
+          "statement": "Non-City modes show a legend: a legend strip appears under the minimap with mode-appropriate labels (e.g. 'free / jammed' gradient for Trf, 'edu / health' swatches for Svc) and is hidden in City mode; every mode button has a full-name tooltip.",
+          "verification": "DOM assertions per mode: legend element visible with expected text after clicking each mode button, hidden for City; title attributes present on all seven buttons."
+        },
+        {
+          "statement": "Traffic overlay keeps district context: a known zoned tile renders at 30-40% of its City-mode brightness (not #111), and congested roads ramp green\u2192yellow\u2192red.",
+          "verification": "Pixel sampling of the same minimap coordinates in City vs Trf modes (luminance ratio 0.25-0.45) and of a max-congestion road pixel (red family) on a gridlocked test city."
+        },
+        {
+          "statement": "Mode buttons form an equal-width grid with a readable active state: 4-per-row grid, all widths equal within 1px, active mode visually sunken/dithered vs inactive.",
+          "verification": "DOM assertion of computed grid-template-columns and per-button offsetWidth equality; computed-style/class difference between active and inactive buttons plus a screenshot crop diff."
+        },
+        {
+          "statement": "The RCI meter has a legible zero line: a contrasting tick crosses each track at 50%, +/- glyphs mark the poles, and any nonzero demand renders at least a 3px bar on the correct side of the midline.",
+          "verification": "DOM/pixel assertion of the midline tick elements; drive demand to a small negative value via the sim (high tax) and assert the bar's rect is >= 3px tall and positioned below the midline."
+        }
+      ]
+    },
+    {
+      "id": "G9",
+      "title": "Roofscape variety \u2014 beacon discipline, roof clutter, shade() fix",
+      "description": "Break the identical-red-beacon monotony and the empty-roof problem in js/sprites.js: make the mast+red-tip a C3-only signature on 2 of 5 variants; give R3 variants residential roof furniture (water tank, penthouse box, clothesline); add a 1px parapet inset plus 2-3 seeded-RNG clutter pieces (AC, vents, hatch, skylight) to r2/r3/c2/c3/police/firesta roofs; replace shade(base,1.3) multiplication with a 35% lerp-toward-white for top faces so pale bases keep hue (hospital gets a distinct #d8d5ca helipad slab, school roof drops to 1.1 with a gravel field); and draw beacons live with phase-offset blinking ((frame+i*7)%48<24) instead of a baked static red pixel.",
+      "sourceFindings": "Building art: 'Same red-beacon antenna on every R3 and C3 tower' (high), 'Roof tops are large empty flat-color fields' (medium), 'shade(base,1.3) clips pale buildings to pure white' (medium); Animation: 'Rooftop mast beacons are static red pixels' (low); Readability: 'Red rooftop beacons mimic alert indicators' (low)",
+      "criteria": [
+        {
+          "statement": "Beacons are C3-only and rare: rasterized r3 variants contain zero red-tip mast pixels; exactly 2 of 5 c3 variants carry the mast.",
+          "verification": "Rasterize all 10 r3/c3 variant sprites in page context and count pixels in the red-tip color range per variant; assert 0 for all r3 and nonzero for exactly 2 c3 variants; code inspection of the variant gate."
+        },
+        {
+          "statement": "Roofs are no longer flat fields: every r2/r3/c2/c3/police/firesta variant's roof-diamond crop shows a parapet inset line plus clutter (pixel standard deviation of the roof crop at least 3x the HEAD flat-roof baseline).",
+          "verification": "Automated crop of each baked sprite's roof diamond, compute per-crop pixel stddev vs the same crops on HEAD."
+        },
+        {
+          "statement": "Pale tops keep hue: the lightened top of a #e6e3da base is not pure white (max channel < 255 or chroma > 0) and the hospital roof samples in the #d8d5ca family, visually separable from adjacent pale R3 roofs.",
+          "verification": "Unit-style page-context check of the new lighten function on #e6e3da + pixel sampling of the hospital and a neighboring pale roof in a composed screenshot asserting a >= 12 color distance."
+        },
+        {
+          "statement": "Beacons blink asynchronously at runtime: a given C3 beacon toggles between two screenshots 24 frames apart, and two different towers are out of phase in the same frame.",
+          "verification": "Playwright captures frames N and N+24 of a scene with two mast-bearing C3 towers; pixel-sample both mast tips in both frames and assert toggle + phase difference; code inspection that the beacon is drawn in the tile loop, not baked."
+        },
+        {
+          "statement": "Sprite baking stays deterministic: two boots with the same seed produce byte-identical sprite sheets.",
+          "verification": "Hash all baked sprite canvases (toDataURL) across two independent page loads with the same seed and assert equality."
+        }
+      ]
+    },
+    {
+      "id": "G10",
+      "title": "Zone color identity \u2014 R/C/I readable from the main view",
+      "description": "End the hue lottery: constrain each zone's procedural palette to its minimap hue family (R warm brick/cream/terracotta, C cool glass blues/teals/grays, I desaturated ochre/rust/concrete), drop facade saturation ~20% reserving punch for roofs/trim, make smokestacks industrial-only, and bake per-variant \u00b16% value jitter (or 10 variants/level) so identical adjacent towers never share exact colors \u2014 giving viewport, minimap and RCI meter one color language.",
+      "sourceFindings": "Readability: 'R/C/I zones are indistinguishable in the main city view' (high); Palette: 'Building facades are an unconstrained hue lottery' (medium); Building art: 'Only 5 variants per level with no color jitter' (low)",
+      "criteria": [
+        {
+          "statement": "Facade hues cluster by zone family: mean facade hue of every R variant falls in the warm 0-50 deg band, every C variant in 180-260 deg, and every I variant has saturation <= 0.35 in ochre/rust/gray ranges.",
+          "verification": "Rasterize all developed-zone sprites in page context, compute mean facade HSL per variant, and assert family membership for 100% of variants."
+        },
+        {
+          "statement": "Zones classify correctly from a screenshot: sampling 20 known R, 20 C and 20 I developed tiles in a dense-city capture, a nearest-hue-family classifier assigns >= 90% to the correct zone.",
+          "verification": "Playwright screenshot of a deterministic mixed-zone city; per-tile facade pixel sampling at projected coordinates fed to a small hue classifier in the test script."
+        },
+        {
+          "statement": "Facade saturation drops ~20% overall while roofs/trim keep punch: mean facade saturation across all variants is <= 0.8x HEAD; mean roof-trim saturation is >= facade saturation.",
+          "verification": "Sprite-raster HSL statistics compared between HEAD (/tmp/sc99-audit bake) and branch bake."
+        },
+        {
+          "statement": "Smokestacks appear only on industrial sprites: zero stack-gray chimney pixels above the roofline of any R or C variant.",
+          "verification": "Code inspection of stack draw calls (i-family only) + rasterized-sprite pixel scan of the above-roof region for all R/C variants."
+        },
+        {
+          "statement": "Adjacent same-variant towers never render identically: two tiles forced to the same level/variant show a measurable facade color difference (>= 8 color distance) from per-tile value jitter or the doubled variant pool.",
+          "verification": "Test city places two same-variant towers side by side; sample both facades in one screenshot and assert the color delta; code inspection of the jitter/extra-variant bake."
+        }
+      ]
+    },
+    {
+      "id": "G11",
+      "title": "Civic buildings that players can find",
+      "description": "Give the 2x2 civics skyline presence and identity: raise police/hospital massing to ~50-60px (or add landmark elements clearing the 68px skyline \u2014 police comms mast cluster, hospital tower wing behind the helipad, taller school bell tower); add a strong roof glyph in each service's minimap color (blue shield for police, red garage door for fire, cyan book/bell for school) plus a distinct paved apron; and redraw the hospital cross (and an H marking) as parallelograms sheared to the 2:1 iso roof plane instead of screen-axis fillRects.",
+      "sourceFindings": "Building art: '2x2 civic buildings are shorter than 1x1 level-3 towers' (medium), 'Hospital cross is screen-axis-aligned' (low); Readability: 'Civic buildings are indistinguishable from zoned towers' (medium)",
+      "criteria": [
+        {
+          "statement": "Civic massing scales with footprint: the opaque bounding-box height of the baked hospital sprite is >= 55px and police >= 50px (or their landmark element tops >= 60px), vs HEAD's 34/30.",
+          "verification": "Rasterize each civic sprite offscreen and measure the topmost-to-baseline opaque pixel extent programmatically."
+        },
+        {
+          "statement": "Each civic carries a color-coded roof glyph: >= 12 pixels in the police-blue, fire-red, and school-cyan glyph ranges on the respective roofs, matching the minimap service colors.",
+          "verification": "Pixel classification of each baked civic sprite's roof region against the minimap color constants."
+        },
+        {
+          "statement": "Civics are locatable in a dense district at zoom 1: with a police station placed among level-3 towers at a known tile, its blue glyph pixels are detectable within the tile's projected screen area.",
+          "verification": "Playwright dense-city screenshot; count blue-glyph-range pixels inside the projected tile quad (assert > 0; HEAD baseline fails)."
+        },
+        {
+          "statement": "The hospital cross and helipad H lie in the roof plane: marking edges run parallel to the tile diamond with 2:1 foreshortening (pixel-row widths of the cross vary consistently with the shear), no upright screen-axis rectangles remain.",
+          "verification": "Code inspection of SPR.hospital (sheared parallelogram transform replacing upright fillRect) + pixel-slope measurement of the cross edges in the rasterized sprite."
+        },
+        {
+          "statement": "Each civic sits on a distinct paved apron: base-tile pixels around the building sample as pavement, not grass, and differ from zoned-tile aprons.",
+          "verification": "Pixel sampling of the apron ring in each civic's rasterized sprite/composed tile vs a grass tile and a zoned tile."
+        }
+      ]
+    },
+    {
+      "id": "G12",
+      "title": "Road art upgrade \u2014 width, curbs, junctions, dash continuity",
+      "description": "Rework roadSprite() in js/sprites.js: widen asphalt from the 0.28-0.72 arm quad to ~0.6-0.7 of the edge with a 1px lighter curb line each side; stop center-line dashes at ~60% of the way to center on tiles with 3+ connections so junction boxes stay unmarked (optionally a crosswalk tick per arm); and carry dash phase across tiles via world-space lineDashOffset (or one edge-to-edge stroke) so straight roads keep an even 4-4 rhythm. Seasonal (winter plowed) road bakes must survive.",
+      "sourceFindings": "Terrain: 'Center-line dashes plough straight through intersections' (medium), 'Roads are too narrow with wide grass verges' (medium), 'Dash phase resets every tile' (low)",
+      "criteria": [
+        {
+          "statement": "Asphalt covers 55-75% of the tile width on a straight road (HEAD ~44%), with grass verges correspondingly reduced.",
+          "verification": "Pixel scan along the perpendicular axis of a straight-road tile crop counting asphalt-gray pixels as a fraction of the edge span."
+        },
+        {
+          "statement": "A visible curb line runs along both asphalt edges: a 1px band lighter than the asphalt and distinct from grass on each side.",
+          "verification": "Pixel sampling of the transition columns in the same road crop asserting the three-tone sequence grass/curb/asphalt."
+        },
+        {
+          "statement": "Junction centers are clean: on 4-way and T tiles, the central 12x6 projected region contains zero yellow center-line pixels (HEAD shows converging knots).",
+          "verification": "Screenshot crop of a known 4-way and T junction; count pixels in the dash-yellow color range within the center region."
+        },
+        {
+          "statement": "Dash rhythm is continuous across tiles: along a 5-tile straight road the yellow dash runs and gaps have <= 1px length variance with no mirror/reset at tile seams.",
+          "verification": "Extract the centerline pixel run-length sequence from a 5-tile road screenshot and assert uniform periodicity; code inspection of the lineDashOffset/world-phase computation."
+        },
+        {
+          "statement": "All 16 road masks and the winter road bake still render without artifacts: every mask combination bakes, winter roads keep plowed snow banks, zero console errors.",
+          "verification": "Headless page places all 16 mask configurations, screenshots each in summer and winter, asserts no page errors and winter crops retain the snow-bank color band."
+        }
+      ]
+    },
+    {
+      "id": "G13",
+      "title": "Shoreline & forest naturalization",
+      "description": "Soften the coast and the forests: flatten the beach band (drop/dim the sandHi outer-lip highlight), jitter band width per edge with seeded noise, and add corner wedge fills so the coast curves instead of stair-stepping with bowties at diagonal water contacts; match the forest floor to the grass palette (or feather its edge), add a dark shadow ellipse at each trunk base, and add 2-3 canopy silhouette variants (conifer, wide oak) with hue jitter to break the repeating cluster arrangements. Also restore a legible winter coastline with a darker ice-edge crack line along the shore mask.",
+      "sourceFindings": "Terrain: 'Shoreline sand renders as a raised uniform rampart' (medium), 'Forest tiles are dark hard-edged diamonds full of identical lollipop trees' (medium), 'Winter erases the land/water boundary' (medium)",
+      "criteria": [
+        {
+          "statement": "The beach no longer reads as a levee: the bright sandHi ridge is dimmed/removed (outer-lip pixels within 10% luminance of the band body) and band width varies by >= 2px across 10 sampled shoreline edges.",
+          "verification": "Pixel measurements of band-lip luminance and per-edge band widths in a coast screenshot; code inspection of the seeded width jitter."
+        },
+        {
+          "statement": "Coast corners curve: convex/concave corners show wedge fills, and diagonally-touching water bodies no longer produce sand bowties.",
+          "verification": "Targeted screenshot crops of a stair-step coastline and a diagonal water contact, diffed against HEAD crops with an explicit assertion that the 90-degree notch/bowtie pixel signatures are gone."
+        },
+        {
+          "statement": "Forest floor blends with grass: the luminance delta between a forest tile's floor and adjacent grass is <= 8 (HEAD shows a hard dark diamond), with the edge feathered or unstroked.",
+          "verification": "Pixel sampling either side of a grass/forest boundary in a summer screenshot."
+        },
+        {
+          "statement": "Trees are grounded and varied: every trunk base has a dark shadow ellipse (darker pixels beneath each trunk bottom), and >= 3 distinct canopy silhouettes with hue jitter appear so no two adjacent forest tiles share an identical tree arrangement.",
+          "verification": "Pixel check below sampled trunk positions + crop-diff of adjacent same-density forest tiles asserting non-identical pixels; code inspection of the canopy variant array."
+        },
+        {
+          "statement": "Winter coastline stays legible: a darker ice-edge line (~#7fa0bf family) or exposed shelf band separates frozen water from snowpack with a >= 20 luminance/color step.",
+          "verification": "Winter screenshot pixel scan across the shore mask asserting the boundary step (HEAD baseline fails at ~equal values)."
+        }
+      ]
+    },
+    {
+      "id": "G14",
+      "title": "Seasons reach the buildings and every tree",
+      "description": "Stop the city floating on the snow: bake a winter variant per zone/civic sprite overpainting top faces (and tinyHouse roof planes) with pal.snowCap plus an eave drip line \u2014 the seasonal bake loop and spriteFor season switch already exist for roads; add a mild global seasonal grade in the composite (winter: slight cool desaturation; autumn: warm tint); give autumn 3 canopy hue pairs (yellow-gold, orange, deep red) picked per tree by the existing seeded RNG; and run all tree sprites through seasonal recolor, not just terrain-adjacent clusters.",
+      "sourceFindings": "Building art: 'Buildings ignore winter' (low); Palette: 'Seasons repaint only the ground plane' (medium); Terrain: 'Autumn foliage is one flat orange' (low)",
+      "criteria": [
+        {
+          "statement": "Winter roofs carry snow: rasterized winter variants of every zone level and civic show snowCap-family pixels covering the top-face diamond, and a winter city screenshot's roof pixels average >= 1.3x their summer luminance.",
+          "verification": "Sprite-raster pixel classification per winter variant + paired summer/winter screenshots of the same fixed-seed city with roof-region luminance comparison."
+        },
+        {
+          "statement": "Buildings visibly participate in the seasonal grade: diffing summer vs winter screenshots of the same city, building-region pixels change (HEAD: byte-identical), with winter mean building saturation reduced by 10-30%.",
+          "verification": "Region-masked screenshot diff (building band above the terrain plane) between seasons plus HSL statistics on the changed region."
+        },
+        {
+          "statement": "Autumn shows mixed fall color: the autumn canopy hue histogram has >= 3 distinct peaks (yellow-gold ~45 deg, orange ~25 deg, deep red ~10 deg) chosen deterministically per tree.",
+          "verification": "Autumn screenshot of a forest area; histogram canopy-classified pixels by hue and assert three modes; code inspection of the 3-palette-pair selection via the seeded RNG."
+        },
+        {
+          "statement": "No save/perf regressions: season stays a pure function of month (save format untouched, byte-identical round-trip), the palette swap remains a single cache rebuild on rollover, and winter developed-128 median frame is within 15% of HEAD.",
+          "verification": "Save/load byte comparison; instrumented buildTerrainLayer/sprite-bake call count across a season rollover == 1 rebuild; existing perf-harness median-frame measurement."
+        },
+        {
+          "statement": "Every tree everywhere recolors: standalone trees far from forest clusters (parks, scattered tiles) show winter snow caps and autumn hues, not summer green.",
+          "verification": "Screenshot pixel sampling of isolated tree positions in winter and autumn asserting seasonal palette membership."
+        }
+      ]
+    },
+    {
+      "id": "G15",
+      "title": "Splash screen joins the 1997 identity",
+      "description": "Rebuild the splash as the same game: stage it on the teal Win95 desktop (or inside a maximized Win95 window), render a procedural isometric skyline strip from the actual sprite set beneath the logo, remake the logo as beveled pixel lettering (chrome/gold 90s box-art) with no soft CSS glow, restyle the map-size radios as Win95 punched circles (appearance:none, sunken 12px circle + black dot), replace soft drop shadows with the hard 1px offset shadow from css/style.css:39, and pull the scenario-card cream from the newspaper palette.",
+      "sourceFindings": "Palette: 'Splash screen is a different game visually' (high); Chrome: 'Splash mixes native modern form controls and soft shadows' (medium); Palette: 'Two rendering fidelities coexist' (low, splash aspect)",
+      "criteria": [
+        {
+          "statement": "The splash sits on the in-game desktop: the page background samples as the same teal used behind the game window, with Win95 window/panel chrome framing the content.",
+          "verification": "Playwright loads the splash, samples background pixels, and compares to the in-game desktop teal constant; DOM assertion of titlebar/bevel panel structure."
+        },
+        {
+          "statement": "A live procedural iso skyline strip renders from the real sprite set beneath the logo: a canvas element containing >= 2000 chromatic (non-background) pixels drawn via SPR sprites.",
+          "verification": "DOM assertion of the canvas + getImageData chromatic-pixel count; code inspection that it draws from the shared sprite bake, not a static image."
+        },
+        {
+          "statement": "The logo is hard-edged beveled pixel lettering: no CSS blur/soft glow (no text-shadow/box-shadow with blur radius > 0 on logo elements).",
+          "verification": "Computed-style audit of the logo element(s) asserting zero blur radii, plus a screenshot crop showing stepped (non-anti-aliased-gradient) letter edges via edge-sharpness measurement."
+        },
+        {
+          "statement": "Terrain-picker radios are Win95 punched circles: appearance:none with a sunken ~12px circle and a black center dot when checked; no Chromium default blue-dot rendering.",
+          "verification": "Computed-style assertion (appearance none, custom background) + pixel sample of a checked and unchecked radio crop."
+        },
+        {
+          "statement": "Shadows and card colors match the game: NEW CITY / LOAD CITY / TROPHY SHELF buttons use the hard 1px offset black shadow (box-shadow string matches the css/style.css:39 pattern) and scenario cards use the newspaper cream background.",
+          "verification": "Computed-style string comparison of box-shadow against the in-game dialog rule and background-color equality with the #dlg-news paper color."
+        },
+        {
+          "statement": "Splash functionality is regression-free: terrain preview + seed reroll, size radios, scenario launch and trophy shelf all still work.",
+          "verification": "Playwright flow test: reroll changes the preview canvas hash, each size radio launches a matching MAP size, a scenario card boots its scenario, trophy dialog opens \u2014 zero page errors."
+        }
+      ]
+    },
+    {
+      "id": "G16",
+      "title": "Living-city motion pass \u2014 cars, smoke, tornado, UFO",
+      "description": "One js/render.js effects iteration: orient car bodies along their travel axis (two iso-direction shapes), scale the 70-car pool cap with map size, and queue warm headlight cones + red taillight pixels into nightQ so streets sparkle after dark; make industrial smoke visible (start alpha ~0.5 warm-gray, faster growth, 2-puff plumes, randomized start offset replacing the ascending-index early break that starves the map's lower-right); give the tornado a dark two-tone rotating core, 6-10 orbiting debris specks, a base dust skirt and larger sway; and raise the UFO above the skyline (~130px+), extend its beam gradient to the ground with a moving ground-shadow ellipse, and slow/enlarge its blink lights (frame%32, ~3px).",
+      "sourceFindings": "Animation: 'Cars are unreadable, unoriented specks that vanish at night' (medium), 'Industrial smoke is so faint the stacks look cold' (low), 'Tornado funnel is nearly invisible' (medium), 'UFO hovers below the rooflines' (medium); Readability: 'Tornado funnel is very low contrast' (low); Palette: 'Disaster effects use three clashing visual languages' (medium, tornado/UFO share)",
+      "criteria": [
+        {
+          "statement": "Cars align with their roads and scale with the map: car pixels form elongated shapes along the two iso road axes (no axis-aligned 7x5 rects on diagonal streets), and the pool cap scales with map area (>= 200 on 128x128).",
+          "verification": "Screenshot crop of cars on both road directions with an aspect/orientation check on the car-colored blobs; code inspection of the orientation branch and the cap formula."
+        },
+        {
+          "statement": "Streets sparkle at night: cars contribute headlight + taillight light \u2014 a trafficked road at midnight contains warm-white cone pixels and paired red pixels absent in a car-free control shot (HEAD: zero).",
+          "verification": "Two midnight screenshots (traffic vs traffic-disabled) of the same road; classify and count headlight-warm and taillight-red pixels; code inspection of the nightQ car entries."
+        },
+        {
+          "statement": "Industry visibly smokes across the whole map: plume pixels appear above stacks in the map's lower-right industrial cluster (HEAD-starved region), puffs start near alpha 0.5 and form connected 2-puff plumes.",
+          "verification": "Screenshot of a lower-right industrial district counting smoke-gray pixels above stack positions (assert > 0 where HEAD baseline is 0); code inspection of updateSmoke alpha, growth and the randomized-start budget sharing."
+        },
+        {
+          "statement": "The tornado reads at zoom 1: funnel core contrasts with mid-green grass by >= 40 luminance, 6-10 dark debris specks orbit it, a wide low-alpha dust ellipse sits at its base, and consecutive frames show the two-tone rim rotating.",
+          "verification": "Tornado-over-grass screenshots: luminance delta of funnel core vs surrounding grass, debris-speck count via dark-pixel clustering at the orbit radius, and a 2-frame diff asserting rim rotation."
+        },
+        {
+          "statement": "The UFO clears the skyline and its beam reaches the ground: the saucer's screen position is above the tallest tower roofline in a dense district, the green beam gradient is sampleable from saucer to the ground tile, a shadow ellipse tracks it, and the marker lights blink on a frame%32 cycle at ~3px.",
+          "verification": "Dense-city UFO screenshot: assert saucer bounding pixels sit above the highest building pixels in its column, beam-green pixels present at the ground-tile quad, shadow pixels darker than surrounding terrain; code inspection of altitude, blink cycle and light size."
+        },
+        {
+          "statement": "Effects stay cheap: median frame time on a developed 128x128 city with max traffic and an active tornado is within 20% of the HEAD equivalent scene.",
+          "verification": "Headless perf run (300 frames, performance.now medians) on both trees using the same scripted scene."
+        }
+      ]
+    }
+  ]
+}

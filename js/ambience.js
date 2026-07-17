@@ -4,9 +4,10 @@
 // off the render loop, so the city keeps making noise while paused.
 "use strict";
 
-const AMB_KINDS = ["traffic", "industry", "water", "stadium"];
+const AMB_KINDS = ["traffic", "industry", "water", "stadium", "chopper"];
 const AMB_FN = { traffic: "ambTraffic", industry: "ambIndustry",
-                 water: "ambWater", stadium: "ambStadium" };
+                 water: "ambWater", stadium: "ambStadium",
+                 chopper: "ambChopper" }; // news chopper thump (M18)
 const AMB_INTERVAL = 1900;    // ms between ambient triggers (one per interval)
 const AMB_GAP = 500;          // min ms between same-category triggers
 const AMB_MIN_ZOOM = 1.3;     // only when zoomed in close
@@ -51,6 +52,9 @@ function ambienceFrame(city) {
   if (now - amb.last < AMB_INTERVAL) return;
   amb.last = now;
   const found = ambScanViewport(city);
+  // news chopper (M18): rotor thump while airborne AND on screen — reuses
+  // this scheduler's zoom gate + per-category spacing; O(1), no map scan
+  found.chopper = chopperOnScreen();
   // at most one ambient per interval, round-robin through the kinds in view
   for (let k = 0; k < AMB_KINDS.length; k++) {
     const kind = AMB_KINDS[(amb.idx + k) % AMB_KINDS.length];

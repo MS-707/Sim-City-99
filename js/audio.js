@@ -88,6 +88,11 @@ const Snd = {
       this.tone(1700 + Math.random() * 500, 0.16, "sine", 0.05, k * 0.22, -650);
     this.noise(1.1, 0.03, 420, 0.05);
   },
+  ambChopper() {   // news chopper overhead (M18): rotor thump-thump + wash
+    for (let k = 0; k < 5; k++)
+      this.tone(62, 0.07, "triangle", 0.11, k * 0.15, -16);
+    this.noise(0.85, 0.04, 320);
+  },
   ambStadium() {   // crowd swell + a distant vuvuzela-ish drone
     this.noise(1.5, 0.085, 1200);
     this.noise(0.9, 0.05, 900, 0.35);

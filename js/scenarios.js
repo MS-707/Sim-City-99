@@ -333,6 +333,7 @@ function startScenario(id) {
   const sc = SCENARIOS.find(s => s.id === id);
   if (!sc) return false;
   city = sc.build();
+  chopperClear(); // news chopper (M18) never carries over into a scenario
   city.scenarioId = sc.id;
   city.scnWon = false; city.scnLost = false; city.scnBest = 9999;
   city.funds = sc.funds;

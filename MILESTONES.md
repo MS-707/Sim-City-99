@@ -6,10 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G2 — Depth-correct night light pass** (graphics audit): night glow
-  drawn in painter order (per-diagonal buckets or road-clipped pools) so
-  lamps behind towers stop rendering on top of them; occluded ground pools
-  suppressed; open streets keep >=80% glow; <=1.3x night frame budget.
+- [ ] **G3 — Fire that reads as fire** (graphics audit): layered smooth-phase
+  flames (no per-frame random strobing), 2-3x taller with three hue bands,
+  char/darken burning facades, rising smoke puffs, capped night fire bloom.
   Criteria: docs/gfx-audit-slate.json.
 - [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
   and lose capacity after ~30 years with rebuild prompts, coal smog scales
@@ -63,6 +62,14 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G2 — Depth-correct night light pass**: nightQ replaced by
+  per-diagonal punch/add buckets replayed onto a cached screen-space light
+  layer (occluders punch silhouettes via destination-out, lights add
+  clamped); ground pools suppressed when the front tile is developed
+  (byte-proven); open-street glow 99.98% preserved; developed-128 night
+  median frame 0.65x the old cost; G1 whiteout guard improved to 0%.
+  Verified against 6 checks incl. G1 regression guard (all pass).
 
 - [x] **G1 — Night city legibility**: per-zone night window bake (cool
   #a8ccf8 commercial, sparse warm #f0b85c residential capped at 40% of day

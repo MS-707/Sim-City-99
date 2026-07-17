@@ -35,8 +35,104 @@ const NIGHT_MAX_ALPHA = 0.6;      // G1: lerp facades ~60% toward the tint at de
                                   // roof diamonds and zone colors stay readable
 const NIGHT_LIGHT_ALPHA = 0.7;    // G1: clamp on the additive night-light pass —
                                   // baked glows never blit at full alpha
-const NIGHT_MAX_Q = 3 * 700;      // draw cap on queued (sprite,x,y) triples
-const nightQ = [];                // reused every frame — never reallocated
+const NIGHT_MAX_DRAWS = 700;      // per-frame cap on night-light sprite draws
+
+/* ---- depth-correct night lights (G2) ----
+   Night glow used to be queued during the tile loop and blitted in one
+   additive pass AFTER the whole scene — so lamp halos, C3 lobby spill and
+   I-yard floodlight pools floated on top of the towers that occlude them.
+   Now the lights are drawn in depth order onto a screen-space light layer:
+   the painter loop buckets, per (x + y) diagonal, the occluder silhouettes
+   and the light sprites it meets — punches first (destination-out erases
+   glow accumulated by the diagonals behind), then that diagonal's own
+   lights (lighter). The bucketed ops replay onto the layer in ONE burst
+   right after the loop (same depth order, but the canvas never ping-pongs
+   between two render targets mid-scene), and the finished layer is
+   composited once, additively, over the dusk tint — open streets keep
+   their full glow while anything behind a building stays behind it.
+   The layer is also CACHED like terrLayer: every light and every occluder
+   silhouette is a pure function of (camera, sim state, night phase), never
+   of the animation frame — so the punched layer is rebuilt only when its
+   key moves (pan/zoom, sim tick, build/doze/ignite via city.devRev, dusk
+   ramp) and every other frame reuses it in a single composite. */
+const nightLayer = { cv: null, g: null, key: "" };
+const punchQ = [], addQ = [];     // current diagonal's buckets — reused
+const nightOps = [];              // whole-frame (mode, spr, wx, wy) replay list
+let nightDrawn = 0;               // resets each rebuild, capped at NIGHT_MAX_DRAWS
+
+function nightLayerCtx() {
+  const L = nightLayer;
+  if (!L.cv || L.cv.width !== cvs.width || L.cv.height !== cvs.height) {
+    L.cv = document.createElement("canvas");
+    L.cv.width = cvs.width; L.cv.height = cvs.height;
+    L.g = L.cv.getContext("2d");
+  }
+  const g = L.g;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = "source-over";
+  g.globalAlpha = 1;
+  g.clearRect(0, 0, L.cv.width, L.cv.height);
+  g.translate(cvs.width / 2, cvs.height / 2);
+  g.scale(cam.z, cam.z);
+  g.translate(-cam.x, -cam.y);
+  g.imageSmoothingEnabled = false;
+  punchQ.length = 0; addQ.length = 0; nightOps.length = 0; nightDrawn = 0;
+  return g;
+}
+
+// queue an occluder silhouette for this diagonal — a lamp or ground pool
+// behind a tower can never brighten its walls or roof
+function nightPunch(spr, wx, wy) {
+  punchQ.push(spr, wx, wy);
+}
+
+// queue one light sprite at this diagonal's depth, capped like the old queue
+function nightAdd(spr, wx, wy) {
+  if (nightDrawn >= NIGHT_MAX_DRAWS) return;
+  nightDrawn++;
+  addQ.push(spr, wx, wy);
+}
+
+// close one diagonal's buckets: its punches (erasing glow from the
+// diagonals behind) come before its own lights on the replay list
+function flushNightDiag() {
+  for (let k = 0; k < punchQ.length; k += 3)
+    nightOps.push(0, punchQ[k], punchQ[k + 1], punchQ[k + 2]);
+  for (let k = 0; k < addQ.length; k += 3)
+    nightOps.push(1, addQ[k], addQ[k + 1], addQ[k + 2]);
+  punchQ.length = 0; addQ.length = 0;
+}
+
+// replay the whole frame's bucketed ops onto the light layer in depth
+// order: destination-out for occluder silhouettes, lighter for lights —
+// clamped (G1), never full alpha. Composite op switches only when the op
+// kind changes between consecutive runs.
+function drawNightLayer(g, ns) {
+  let mode = -1;
+  for (let k = 0; k < nightOps.length; k += 4) {
+    if (nightOps[k] !== mode) {
+      mode = nightOps[k];
+      g.globalCompositeOperation = mode ? "lighter" : "destination-out";
+      g.globalAlpha = mode ? ns * NIGHT_LIGHT_ALPHA : 1;
+    }
+    const s = nightOps[k + 1];
+    g.drawImage(s.c, nightOps[k + 2] - s.ox, nightOps[k + 3] - s.oy);
+  }
+}
+
+// G2: a baked ground-pool ellipse (C3 lobby spill, I-yard floodlight) is
+// skipped when the tile in front — (x+1, y+1), the screen-nearer neighbor —
+// carries a developed building that would physically block the spill.
+// District-edge and low-density-neighbor tiles keep their pools.
+function poolBlocked(city, x, y) {
+  if (x + 1 >= MAP || y + 1 >= MAP) return false;
+  const i = (y + 1) * MAP + x + 1;
+  const ov = city.over[i];
+  if (ov >= OV.ZR && ov <= OV.ZI) return city.lvl[i] > 0;
+  return ov === OV.POLICE || ov === OV.FIRESTA || ov === OV.SCHOOL ||
+         ov === OV.HOSPITAL || ov === OV.COAL || ov === OV.SOLAR ||
+         ov === OV.MAYOR || ov === OV.STADIUM;
+}
 
 function dayPhase(tickCount) {    // 0 = midnight … 0.5 = noon … → 1
   return (((tickCount % 24) + 24) % 24) / 24;
@@ -116,7 +212,7 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
 function renderFrame(city, uiState) {
   frame++;
   const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
-  nightQ.length = 0;
+  nightDrawn = 0;
   ctx.fillStyle = "#0a0a12";
   ctx.fillRect(0, 0, cvs.width, cvs.height);
 
@@ -142,6 +238,13 @@ function renderFrame(city, uiState) {
   worldTransform();
   ctx.imageSmoothingEnabled = false;
 
+  // G2: night lights accumulate on the punched layer during the loop, in
+  // depth order — but only when the cache key moved; a static night frame
+  // reuses the finished layer and pays one composite
+  const nKey = ns > 0 ? `${cam.x},${cam.y},${cam.z},${cvs.width},${cvs.height},` +
+    `${ns},${city.tickCount},${city.terrRev},${city.devRev},${city.seed},${MAP}` : "";
+  const ng = ns > 0 && nightLayer.key !== nKey ? nightLayerCtx() : null;
+
   // painter's order: by (x + y), then x
   for (let s = 0; s <= (MAP - 1) * 2; s++) {
     for (let x = Math.max(0, s - MAP + 1); x <= Math.min(MAP - 1, s); x++) {
@@ -157,6 +260,7 @@ function renderFrame(city, uiState) {
       if (t === TERR.FOREST && ov === OV.NONE) {
         const fs = forestSprite(city, i); // cluster-aware density
         ctx.drawImage(fs.c, wx - fs.ox, wy - fs.oy);
+        if (ng) nightPunch(fs, wx, wy); // trees shadow glow behind them
       }
 
       // overlay
@@ -164,7 +268,12 @@ function renderFrame(city, uiState) {
         const size = sizeOf(ov);
         if (size === 1) {
           const spr = spriteFor(city, i);
-          if (spr) ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+          if (spr) {
+            ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+            // G2: buildings occlude glow behind them; flat roads/wires don't
+            if (ng && ov !== OV.ROAD && ov !== OV.WIRE)
+              nightPunch(spr, wx, wy);
+          }
           // pothole tint (M23): unmaintained roads visibly darken with wear
           if (ov === OV.ROAD && city.roadWear[i] > 96) {
             ctx.globalAlpha = Math.min(0.38, (city.roadWear[i] - 96) / 400);
@@ -175,13 +284,16 @@ function renderFrame(city, uiState) {
             ctx.closePath(); ctx.fill();
             ctx.globalAlpha = 1;
           }
-          if (ns > 0 && nightQ.length < NIGHT_MAX_Q) {
-            // queue night lights (drawn after the dusk tint): street lamps on
-            // road tiles, prebaked lit-window glow on powered zones
+          if (ng) {
+            // night lights at this tile's own depth (G2): street lamps on
+            // road tiles, prebaked lit-window glow on powered zones, plus
+            // the ground pool — unless the tile in front blocks the spill
             if (ov === OV.ROAD) {
-              nightQ.push(SPR.lamp, wx, wy);
+              nightAdd(SPR.lamp, wx, wy);
             } else if (spr && spr.night && city.powered[i]) {
-              nightQ.push(spr.night, wx, wy);
+              nightAdd(spr.night, wx, wy);
+              if (spr.pool && !poolBlocked(city, x, y))
+                nightAdd(spr.pool, wx, wy);
             }
           }
         } else {
@@ -192,8 +304,11 @@ function renderFrame(city, uiState) {
             const awx = worldX(ax, ay), awy = worldY(ax, ay);
             if (spr) {
               ctx.drawImage(spr.c, awx - spr.ox, awy - spr.oy);
-              if (ns > 0 && spr.night && city.powered[a] && nightQ.length < NIGHT_MAX_Q)
-                nightQ.push(spr.night, awx, awy);
+              if (ng) {
+                nightPunch(spr, awx, awy); // G2: civics occlude glow too
+                if (spr.night && city.powered[a])
+                  nightAdd(spr.night, awx, awy);
+              }
             }
           }
         }
@@ -202,7 +317,7 @@ function renderFrame(city, uiState) {
       // fire on this tile
       if (city.fire[i]) {
         drawFlames(wx, wy);
-        if (ns > 0 && nightQ.length < NIGHT_MAX_Q) nightQ.push(SPR.fireGlow, wx, wy);
+        if (ng) nightAdd(SPR.fireGlow, wx, wy);
       }
 
       // blinking "no power" bolt on developed but unpowered zones / civics
@@ -214,6 +329,12 @@ function renderFrame(city, uiState) {
           ctx.drawImage(SPR.zap.c, wx - SPR.zap.ox, wy - SPR.zap.oy - 4);
       }
     }
+    // G2: this diagonal is done — its night buckets join the replay list
+    if (ng) flushNightDiag();
+  }
+  if (ng) { // one contiguous burst, depth order intact
+    drawNightLayer(ng, ns);
+    nightLayer.key = nKey;
   }
 
   updateCars(city);
@@ -231,25 +352,28 @@ function renderFrame(city, uiState) {
     ctx.globalAlpha = 1;
   }
 
+  if (ns > 0) drawNightLights(city, ns);
+
   ctx.save();
   worldTransform();
-  if (ns > 0) drawNightLights(city, ns);
   if (uiState.hover && uiState.tool !== "query") drawCursor(city, uiState);
   ctx.restore();
 }
 
-// additive light pass over the dusk tint: prebaked lamp / window / halo
-// sprites queued during the tile loop. Lookups + drawImage only — nothing is
-// allocated here, no gradients built, no getImageData.
+// additive light pass over the dusk tint (G2): the per-tile light draws
+// already happened in depth order inside the painter loop — here the
+// finished, occlusion-punched layer is composited in ONE screen-space
+// drawImage (replacing the old whole-queue post-scene blit), then the
+// sky-borne disaster glows go on top: they hang above the skyline, so
+// depth punching doesn't apply to them.
 function drawNightLights(city, ns) {
   ctx.globalCompositeOperation = "lighter";
-  ctx.globalAlpha = ns * NIGHT_LIGHT_ALPHA; // clamped (G1) — no full-alpha stacking
-  for (let k = 0; k < nightQ.length; k += 3) {
-    const s = nightQ[k];
-    ctx.drawImage(s.c, nightQ[k + 1] - s.ox, nightQ[k + 2] - s.oy);
-  }
+  ctx.drawImage(nightLayer.cv, 0, 0); // per-sprite alpha was clamped at draw
   const d = city.disaster;
   if (d) {
+    ctx.save();
+    worldTransform();
+    ctx.globalAlpha = ns * NIGHT_LIGHT_ALPHA; // clamped (G1)
     const wx = worldX(d.x, d.y), wy = worldY(d.x, d.y);
     if (d.kind === "ufo") {
       // the abduction beam washes the ground green at night
@@ -259,6 +383,7 @@ function drawNightLights(city, ns) {
       ctx.globalAlpha = ns * (0.35 + 0.65 * Math.abs(Math.sin(frame * 0.31)));
       ctx.drawImage(SPR.stormGlow.c, wx - SPR.stormGlow.ox, wy - SPR.stormGlow.oy - 24);
     }
+    ctx.restore();
   }
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";

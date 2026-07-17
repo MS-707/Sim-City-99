@@ -61,6 +61,10 @@ function prism(g, ox, oy, w, h, ht, base, opts = {}) {
 // While GLOWG is set (the boot-time night bake in withNight), day-lit panes
 // are also stamped onto the glow layer in the zone's own light color (G1).
 let GLOWG = null;
+// G2: ground-spill pools (C3 lobby light, I-yard floodlights) bake onto their
+// OWN layer, separate from the window glow, so the renderer can suppress a
+// pool per tile when the tile in front carries a developed building.
+let POOLG = null, poolBaked = false;
 // per-zone night lighting character (G1): each zone family lights up in its
 // own color so districts stay readable after dark
 const GLOW_WARM = "#f0b85c";   // warm amber — residential evening light
@@ -104,27 +108,46 @@ function windows(g, p0, p1, ht, rows, cols, lit = 0.5, color = "#ffe9a0", dark =
   }
 }
 
+// G2: pool-ellipse stamp for the boot-time night bake — draws on the pool
+// layer (not the window-glow layer) so it stays individually suppressible.
+function groundPool(x, y, rx, ry, color) {
+  if (!POOLG) return;
+  POOLG.fillStyle = color;
+  POOLG.beginPath(); POOLG.ellipse(x, y, rx, ry, 0, 0, 7); POOLG.fill();
+  poolBaked = true;
+}
+
 // build a sprite plus a prebaked night variant (M10/G1): the draw callback
 // runs once with GLOWG set, so windows() bakes its day-lit panes, in the
 // zone's light color, into a glow layer; a cheap 8-tap stamp adds a faint
-// halo. All of this happens at boot inside buildSprites — renderFrame only
-// ever *looks up* spr.night.
+// halo. Ground pools land on a second layer (G2) that becomes spr.pool —
+// queued separately so an occluded pool can be skipped per tile. All of
+// this happens at boot inside buildSprites — renderFrame only ever *looks
+// up* spr.night / spr.pool.
 function withNight(w, h, extraTop, draw) {
   const cw = (w + h) * HW, ch = extraTop + (w + h) * HH;
   const glow = document.createElement("canvas");
   glow.width = cw; glow.height = ch;
+  const pool = document.createElement("canvas");
+  pool.width = cw; pool.height = ch;
   GLOWG = glow.getContext("2d");
+  POOLG = pool.getContext("2d");
+  poolBaked = false;
   const spr = mkSprite(w, h, extraTop, draw);
-  GLOWG = null;
-  const night = document.createElement("canvas");
-  night.width = cw; night.height = ch;
-  const g = night.getContext("2d");
-  g.globalAlpha = 0.08; // faint halo around every lit pane (G1: tamed bloom)
-  for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, -1], [-1, 1], [1, 1]])
-    g.drawImage(glow, dx, dy);
-  g.globalAlpha = 1;
-  g.drawImage(glow, 0, 0);
-  spr.night = { c: night, ox: spr.ox, oy: spr.oy };
+  GLOWG = null; POOLG = null;
+  const haloed = (src) => {
+    const c = document.createElement("canvas");
+    c.width = cw; c.height = ch;
+    const g = c.getContext("2d");
+    g.globalAlpha = 0.08; // faint halo around every lit pane (G1: tamed bloom)
+    for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, -1], [-1, 1], [1, 1]])
+      g.drawImage(src, dx, dy);
+    g.globalAlpha = 1;
+    g.drawImage(src, 0, 0);
+    return { c, ox: spr.ox, oy: spr.oy };
+  };
+  spr.night = haloed(glow);
+  if (poolBaked) spr.pool = haloed(pool);
   return spr;
 }
 
@@ -499,10 +522,8 @@ function buildSprites() {
       g.strokeStyle = "#222"; g.lineWidth = 2;
       g.beginPath(); g.moveTo(ox, N[1] - 88); g.lineTo(ox, N[1] - 102); g.stroke();
       g.fillStyle = "#f33"; g.fillRect(ox - 1.5, N[1] - 104, 3, 3);
-      if (GLOWG) { // lit lobby spilling onto the plaza
-        GLOWG.fillStyle = GLOW_COOL;
-        GLOWG.beginPath(); GLOWG.ellipse(S[0], S[1] - 2, 12, 5, 0, 0, 7); GLOWG.fill();
-      }
+      // lit lobby spilling onto the plaza (G2: own layer, suppressible)
+      groundPool(S[0], S[1] - 2, 12, 5, GLOW_COOL);
     }));
   }
 
@@ -521,9 +542,8 @@ function buildSprites() {
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base);
       windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
       stack(g, ox - 10, N[1] - 24, 22, 6);
-      if (GLOWG) { // night shift: yard floodlight pool + stack beacon
-        GLOWG.fillStyle = GLOW_SODIUM;
-        GLOWG.beginPath(); GLOWG.ellipse(ox + 8, oy + 4, 15, 6, 0, 0, 7); GLOWG.fill();
+      groundPool(ox + 8, oy + 4, 15, 6, GLOW_SODIUM); // night-shift yard flood
+      if (GLOWG) { // stack beacon stays with the window glow
         GLOWG.fillStyle = "#ff6a4a";
         GLOWG.fillRect(ox - 11, N[1] - 49, 3, 3);
       }
@@ -538,9 +558,8 @@ function buildSprites() {
       g.beginPath(); g.ellipse(ox + 16, N[1] - 30, 7, 4, 0, 0, 7); g.fill();
       g.fillRect(ox + 9, N[1] - 30, 14, 8);
       g.beginPath(); g.ellipse(ox + 16, N[1] - 22, 7, 4, 0, 0, 7); g.fill();
-      if (GLOWG) { // night shift: yard floodlight pool + stack beacons
-        GLOWG.fillStyle = GLOW_SODIUM;
-        GLOWG.beginPath(); GLOWG.ellipse(ox - 2, oy + 6, 17, 7, 0, 0, 7); GLOWG.fill();
+      groundPool(ox - 2, oy + 6, 17, 7, GLOW_SODIUM); // night-shift yard flood
+      if (GLOWG) { // stack beacons stay with the window glow
         GLOWG.fillStyle = "#ff6a4a";
         GLOWG.fillRect(ox - 13, N[1] - 67, 3, 3);
         GLOWG.fillRect(ox + 1, N[1] - 57, 3, 3);

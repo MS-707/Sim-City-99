@@ -260,6 +260,7 @@ class City {
     this.disaster = null;           // {kind:'tornado'|'ufo', x, y, ticks}
     this.powerDirty = true;
     this.terrRev = 0;               // bumped whenever terrain pixels change (render cache key)
+    this.devRev = 0;                // bumped on build/doze/ignite (night-layer cache key, G2)
     this.messages = [];             // ticker event queue
     this.cityName = "Llamaville";
     this.tier = 0;                  // index into TIERS, only ever rises
@@ -377,6 +378,7 @@ class City {
     }
     this.funds -= cost;
     this.powerDirty = true;
+    this.devRev++;
     return { ok: true, cost };
   }
 
@@ -403,6 +405,7 @@ class City {
     }
     this.funds -= COST.bulldoze;
     this.powerDirty = true;
+    this.devRev++;
     return { ok: true, cost: COST.bulldoze };
   }
 
@@ -833,7 +836,7 @@ class City {
     const i = this.idx(x, y);
     const flammable = (this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD &&
                        this.over[i] !== OV.RUBBLE) || this.terr[i] === TERR.FOREST;
-    if (flammable) this.fire[i] = 10 + ((Math.random() * 8) | 0);
+    if (flammable) { this.fire[i] = 10 + ((Math.random() * 8) | 0); this.devRev++; }
   }
 
   startDisaster(kind) {

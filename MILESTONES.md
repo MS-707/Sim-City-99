@@ -6,11 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-## Open
-
 - [ ] **M10 — Day/night cycle**: gradual day-night tint over the city, lit
   building windows at night, street lamps along roads, toggleable in Speed
   menu; disasters more dramatic in the dark.
+
+## Open
+
 - [ ] **M11 — Bigger maps & map picker**: selectable map sizes (64/80/128) and
   a terrain-preview picker on the splash screen with reroll button.
 - [ ] **M12 — Seasons**: month-driven seasonal palette (snowy winters, autumn
@@ -18,7 +19,11 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M13 — Bonds & loans**: issue municipal bonds from the budget window
   (borrow now, repay with interest monthly), credit rating that reacts to
   treasury health; advisors comment on debt.
-- [ ] **M14 — More scenarios & medals**: extend the M9 SCENARIOS table with
+- [ ] **M14 — Postcard photo mode**: export a framed PNG "postcard from
+  1997" snapshot of the current view (city name, date, retro border).
+- [ ] **M15 — Touch & small-screen support**: tap-to-build, pinch zoom,
+  responsive toolbar/side panel so the game plays on tablets.
+- [ ] **M16 — More scenarios & medals**: extend the M9 SCENARIOS table with
   2-3 more scripted challenges (e.g. "Blackout Summer": rebuild a grid after
   the '97 heat wave; "Y2K Ready": bunker the city before Dec 1999), plus
   bronze/silver/gold results by finish date and a trophy shelf dialog.

@@ -9,6 +9,7 @@ function boot() {
   buildSprites();
   renderInit(document.getElementById("game"));
   uiInit();
+  buildScenarioCards(); // scenario select on the splash (M9)
 
   document.getElementById("btn-new-city").addEventListener("click", () => {
     Snd.ensure(); Snd.cash();

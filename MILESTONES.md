@@ -6,10 +6,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M9 — Scenario mode**: 2-3 playable scenarios with win conditions
-  (e.g. "Gridlock '97": fix congestion in a pre-built town; "Twister Season":
-  survive and rebuild), selectable from the splash screen.
-
 ## Open
 
 - [ ] **M10 — Day/night cycle**: gradual day-night tint over the city, lit
@@ -22,8 +18,23 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M13 — Bonds & loans**: issue municipal bonds from the budget window
   (borrow now, repay with interest monthly), credit rating that reacts to
   treasury health; advisors comment on debt.
+- [ ] **M14 — More scenarios & medals**: extend the M9 SCENARIOS table with
+  2-3 more scripted challenges (e.g. "Blackout Summer": rebuild a grid after
+  the '97 heat wave; "Y2K Ready": bunker the city before Dec 1999), plus
+  bronze/silver/gold results by finish date and a trophy shelf dialog.
 
 ## Done
+
+- [x] **M9 — Scenario mode**: declarative SCENARIOS table (js/scenarios.js)
+  with two playable scenarios — "Gridlock '97" (deterministic pre-built
+  945-zone metropolis, win by cutting jammed road tiles to ≤8 before Jan
+  1999) and "Twister Season" (scripted bimonthly tornadoes for a year, grow
+  to pop 4000 by Jan 2000) — Win95 scenario cards on the splash, goal
+  presented via the Bugle at start, live progress + months-left in a status
+  bar cell, once-only win/lose front pages (latched, checked only on month
+  rollover), sandbox continue after either outcome, scenario state in save
+  round-trip, free play untouched. Verified against 7 criteria (58 checks,
+  all pass; mean tick 0.62ms in the heaviest scenario).
 
 - [x] **M8 — Public deploy**: single-file bundle (all CSS/JS inlined, zero
   external requests) published as a Claude Artifact and linked from the

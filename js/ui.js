@@ -595,6 +595,9 @@ function refreshHUD() {
   setBar("rci-r", city.demand.r);
   setBar("rci-c", city.demand.c);
   setBar("rci-i", city.demand.i);
+
+  // scenario progress cell (M9) — hidden & empty in free play
+  if (typeof scenarioHUD === "function") scenarioHUD();
 }
 
 /* ================= save / load / new ================= */

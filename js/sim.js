@@ -164,6 +164,10 @@ class City {
     this.newsQueue = [];            // pending newspaper editions (tier indices or event editions)
     this.firedEvents = [];          // time-capsule event ids already fired/passed (M7)
     this.activeMods = [];           // live event modifiers with remaining-month timers
+    // scenario mode (M9): active scenario id, result latches, best metric sample
+    this.scenarioId = null;
+    this.scnWon = false; this.scnLost = false;
+    this.scnBest = 9999;            // running best (lowest) scenario metric
 
     this.generateTerrain(seed ?? ((Math.random() * 1e9) | 0));
   }
@@ -841,6 +845,9 @@ class City {
       if (this.month >= 12) { this.month = 0; this.year++; }
       this.eventsTick();
       this.collectBudget();
+      // scenario win/lose check (M9) — monthly only, never per-tick
+      if (this.scenarioId && typeof scenarioMonthTick === "function")
+        scenarioMonthTick(this);
       return true; // month rolled over
     }
     return false;
@@ -857,6 +864,8 @@ class City {
       disastersEnabled: this.disastersEnabled,
       tier: this.tier, announcedTier: this.announcedTier,
       firedEvents: this.firedEvents, activeMods: this.activeMods,
+      scenarioId: this.scenarioId, scnWon: this.scnWon,
+      scnLost: this.scnLost, scnBest: this.scnBest,
       terr: Array.from(this.terr), over: Array.from(this.over),
       lvl: Array.from(this.lvl), varnt: Array.from(this.varnt),
       anc: Array.from(this.anc),
@@ -889,6 +898,13 @@ class City {
     c.tier = typeof d.tier === "number" ? d.tier : tierForPop(c.pop);
     c.announcedTier = typeof d.announcedTier === "number" ? d.announcedTier : c.tier;
     c.newsQueue = [];
+    // scenario mode (M9): restore the id, progress and latches so a loaded
+    // winner never re-celebrates (the newsQueue reset above can't defeat the
+    // latch — scenarioMonthTick only fires on a false→true transition).
+    // Saves without these fields (free play / pre-M9) load as plain free play.
+    c.scenarioId = d.scenarioId || null;
+    c.scnWon = !!d.scnWon; c.scnLost = !!d.scnLost;
+    c.scnBest = typeof d.scnBest === "number" ? d.scnBest : 9999;
     return c;
   }
 }

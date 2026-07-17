@@ -329,6 +329,31 @@ body {
 .trophy-table tr.unwon td { color: #666; font-style: italic; font-weight: normal; }
 .trophy-note { margin-top: 8px; font-size: 10px; color: #555; text-align: center; }
 
+/* ---------- City Hall records almanac (M17) ---------- */
+.almanac-scroll {
+  max-height: 46vh; overflow-y: auto;
+  border: 1px inset #fff; background: #fff;
+}
+.almanac-table { width: 100%; border-collapse: collapse; min-width: 360px; }
+.almanac-table th {
+  background: #c0c0c0; border: 1px solid; border-color: #fff #404040 #404040 #fff;
+  padding: 2px 8px; font-size: 11px; white-space: nowrap;
+  position: sticky; top: 0;
+}
+.almanac-table td { padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+.almanac-table td:not(:first-child) {
+  text-align: right; font-family: "Courier New", monospace;
+}
+.almanac-table tr.alm-ytd td {
+  font-style: italic; color: #000080; border-top: 1px solid #808080;
+}
+.almanac-note { margin-top: 6px; font-size: 10px; color: #555; text-align: center; }
+
+/* clickable citizen-complaint crawl (M17): the affordance class the ticker
+   host wears while a complaint is the active item */
+#ticker.complaint { cursor: pointer; }
+#ticker.complaint #ticker-text { color: #ff5; text-decoration: underline; }
+
 /* ---------- postcard photo mode (M14) ---------- */
 #dlg-postcard .dlg-body { text-align: center; }
 #postcard-canvas {

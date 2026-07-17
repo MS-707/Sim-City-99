@@ -159,6 +159,47 @@ const EVENTS = [
         "\"We were never worried,\" said officials, emerging from the bunker." } },
 ];
 
+/* ---- City Hall records & citizen complaints (M17) ----
+   Yearly records: city.records = [{year, pop, taxes, net, disasters}], one
+   entry per COMPLETED calendar year, finalized on the Dec→Jan rollover; the
+   in-progress year lives in city.recCur (same shape minus pop, which is
+   sampled live). Both are maintained by the sim itself — updateRecords() on
+   each month rollover plus a disaster counter bump in startDisaster() — and
+   both are serialized (save v6; older saves load with an empty almanac).
+
+   Citizen complaints: scanComplaints() runs on month rollovers only and emits
+   at most one structured complaint ({complaint:true, kind, name, x, y, text})
+   into the ticker queue. Documented qualifying thresholds (COMPLAINT_T):
+     crime      city.crime[i]   >= COMPLAINT_T.crime
+     poll       city.poll[i]    >= COMPLAINT_T.poll
+     traffic    over[i]===OV.ROAD && city.traffic[i] >= COMPLAINT_T.traffic
+     unpowered  over[i] in {ZR,ZC,ZI} && lvl[i] > 0 && !powered[i]
+     rubble     over[i]===OV.RUBBLE
+   Deterministic backstop: while any qualifying tile persists, a complaint is
+   guaranteed within COMPLAINT_EVERY (= 3, well under 8) consecutive rollovers
+   — the scan is one bounded pass over the map, no retry loops. */
+const COMPLAINT_T = { crime: 100, poll: 100, traffic: 170 };
+const COMPLAINT_EVERY = 3; // guaranteed-complaint window, in month rollovers
+
+// 90s-flavored citizen name pool: 16 x 12 combinations, all distinct
+const CITIZEN_FIRST = [
+  "Todd", "Brandi", "Chad", "Tiffany", "Dylan", "Misty", "Kurt", "Shania",
+  "Corey", "Tanya", "Lance", "Daria", "Skeeter", "Roberta", "Biff", "Winona",
+];
+const CITIZEN_LAST = [
+  "Grunge", "McDial", "Pagerman", "Van Winkle", "Modemski", "Bublitz",
+  "Frisbee", "Tamagucci", "Rollerblad", "Winslow", "Zima", "Flannelli",
+];
+
+// problem-specific complaint copy — every line carries the citizen's name
+const COMPLAINT_TEXT = {
+  crime: (n) => `📠 Angry fax from ${n}: hoodlums swiped the hubcaps off the Geo AND the garden gnome. Crime is out of control!`,
+  poll: (n) => `📠 Angry fax from ${n}: the smog on this block could chew through a Discman. Do something about the pollution!`,
+  traffic: (n) => `📠 Angry fax from ${n}: gridlock so bad the Macarena played twice before the light changed. Fix this road!`,
+  unpowered: (n) => `📠 Angry fax from ${n}: still no power — the Tamagotchi is dead and the VCR won't even blink 12:00!`,
+  rubble: (n) => `📠 Angry fax from ${n}: the rubble next door is still there! Clean it up before property values go full Titanic.`,
+};
+
 // panicked wire chatter while the Y2K effect is active (Dec 1999 only)
 const Y2K_LINES = [
   "🖥️ Y2K watch: mainframe insists the year is 19100. Officials 'looking into it.'",
@@ -225,6 +266,10 @@ class City {
     this.scenarioId = null;
     this.scnWon = false; this.scnLost = false;
     this.scnBest = 9999;            // running best (lowest) scenario metric
+    // City Hall records (M17): completed years + in-progress accumulator
+    this.records = [];              // [{year, pop, taxes, net, disasters}]
+    this.recCur = { year: this.year, taxes: 0, net: 0, disasters: 0 };
+    this.sinceComplaint = 0;        // rollovers since the last citizen complaint
 
     this.generateTerrain(seed ?? ((Math.random() * 1e9) | 0));
   }
@@ -727,6 +772,12 @@ class City {
   }
 
   startDisaster(kind) {
+    // City Hall records (M17): every disaster — menu, random misfortune or
+    // scenario script — funnels through here, so count it against the year
+    // in progress. recCur.year === this.year at every call site (the only
+    // window where they differ is inside the rollover tick itself, before
+    // updateRecords() runs, and nothing starts disasters there).
+    this.recCur.disasters++;
     if (kind === "fire") {
       // torch a random developed tile
       const cand = [];
@@ -876,6 +927,64 @@ class City {
     if (this.history.pop.length > 240) { this.history.pop.shift(); this.history.funds.shift(); }
   }
 
+  // ---------- City Hall records (M17) ----------
+  // Called exactly once per month rollover, right after collectBudget(): the
+  // budget just collected belongs to the month that just COMPLETED, i.e. to
+  // year Y = (month === 0 ? year - 1 : year) — which is always recCur.year.
+  // On the Dec→Jan rollover the accumulator is finalized into records[] with
+  // the end-of-year population sampled right here, and a fresh one opens.
+  updateRecords() {
+    this.recCur.taxes += this.lastBudget.taxes;
+    this.recCur.net += this.lastBudget.net;
+    if (this.month === 0) {
+      this.records.push({
+        year: this.recCur.year, pop: this.pop,
+        taxes: this.recCur.taxes, net: this.recCur.net,
+        disasters: this.recCur.disasters,
+      });
+      this.recCur = { year: this.year, taxes: 0, net: 0, disasters: 0 };
+    }
+  }
+
+  // ---------- citizen complaints (M17) ----------
+  // Month-rollover only, never per tick/frame. One bounded pass over the map
+  // picks the most severe qualifying tile (thresholds: COMPLAINT_T, see the
+  // block comment up top); if anything qualifies and it has been at least
+  // COMPLAINT_EVERY rollovers since the last complaint, a structured item
+  // {complaint:true, kind, name, x, y, text} joins the ticker queue. A city
+  // with zero qualifying tiles never complains at all.
+  scanComplaints() {
+    if (++this.sinceComplaint < COMPLAINT_EVERY) return;
+    let best = -1, bestKind = null, bestScore = 0;
+    for (let i = 0; i < this.over.length; i++) {
+      const t = this.over[i];
+      let kind = null, score = 0;
+      if (t === OV.RUBBLE) { kind = "rubble"; score = 130; }
+      else if (t === OV.ROAD && this.traffic[i] >= COMPLAINT_T.traffic) {
+        kind = "traffic"; score = 60 + this.traffic[i] - COMPLAINT_T.traffic;
+      } else if ((t === OV.ZR || t === OV.ZC || t === OV.ZI) &&
+                 this.lvl[i] > 0 && !this.powered[i]) {
+        kind = "unpowered"; score = 150;
+      }
+      if (this.crime[i] >= COMPLAINT_T.crime && 40 + this.crime[i] - COMPLAINT_T.crime > score) {
+        kind = "crime"; score = 40 + this.crime[i] - COMPLAINT_T.crime;
+      }
+      if (this.poll[i] >= COMPLAINT_T.poll && 40 + this.poll[i] - COMPLAINT_T.poll > score) {
+        kind = "poll"; score = 40 + this.poll[i] - COMPLAINT_T.poll;
+      }
+      if (kind && score > bestScore) { best = i; bestKind = kind; bestScore = score; }
+    }
+    if (best < 0) return;
+    this.sinceComplaint = 0;
+    const name = CITIZEN_FIRST[(Math.random() * CITIZEN_FIRST.length) | 0] + " " +
+                 CITIZEN_LAST[(Math.random() * CITIZEN_LAST.length) | 0];
+    this.pushMsg({
+      complaint: true, kind: bestKind, name,
+      x: best % MAP, y: (best / MAP) | 0,
+      text: COMPLAINT_TEXT[bestKind](name),
+    });
+  }
+
   // ---------- time capsule events (M7) ----------
   y2kActive() { return this.activeMods.some((m) => m.type === "y2k"); }
 
@@ -978,6 +1087,8 @@ class City {
       if (this.month >= 12) { this.month = 0; this.year++; }
       this.eventsTick();
       this.collectBudget();
+      this.updateRecords();   // City Hall records (M17) — rollover only
+      this.scanComplaints();  // citizen complaints (M17) — rollover only
       // scenario win/lose check (M9) — monthly only, never per-tick
       if (this.scenarioId && typeof scenarioMonthTick === "function")
         scenarioMonthTick(this);
@@ -991,7 +1102,7 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 5, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 6, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       bonds: this.bonds,
       month: this.month, year: this.year, tickCount: this.tickCount,
@@ -1000,6 +1111,8 @@ class City {
       firedEvents: this.firedEvents, activeMods: this.activeMods,
       scenarioId: this.scenarioId, scnWon: this.scnWon,
       scnLost: this.scnLost, scnBest: this.scnBest,
+      // City Hall records (M17, save v6): completed years + live YTD accum
+      records: this.records, recCur: this.recCur,
       terr: Array.from(this.terr), over: Array.from(this.over),
       lvl: Array.from(this.lvl), varnt: Array.from(this.varnt),
       anc: Array.from(this.anc),
@@ -1049,6 +1162,15 @@ class City {
     c.scenarioId = d.scenarioId || null;
     c.scnWon = !!d.scnWon; c.scnLost = !!d.scnLost;
     c.scnBest = typeof d.scnBest === "number" ? d.scnBest : 9999;
+    // City Hall records (M17, save v6): restore completed years plus the
+    // in-progress year-to-date accumulator. A v5-or-earlier save has neither
+    // field: it loads with an empty almanac and a fresh accumulator opened at
+    // the loaded date, so recording simply resumes from the moment of load.
+    c.records = Array.isArray(d.records)
+      ? d.records.map((r) => Object.assign({}, r)) : [];
+    c.recCur = d.recCur && typeof d.recCur === "object"
+      ? Object.assign({}, d.recCur)
+      : { year: c.year, taxes: 0, net: 0, disasters: 0 };
     return c;
   }
 }

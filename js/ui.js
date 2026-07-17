@@ -115,6 +115,7 @@ function uiInit() {
   bindKeys();
   bindDialogs();
   bindMinimap();
+  bindTicker();
   pickerInit();
   setTool("road");
 }
@@ -276,6 +277,7 @@ const MENUS = {
     [`${UI.prefs.autoBudget ? "✓ " : ""}Budget Report Monthly`,
       () => { UI.prefs.autoBudget = !UI.prefs.autoBudget; savePrefs(); }],
     ["Graphs…", openGraphs],
+    ["City Hall Records… 📜", openAlmanac],
     ["Advisors…", openAdvisors],
     ["Trophy Shelf… 🏆", openTrophies],
     "-",
@@ -641,6 +643,29 @@ function fillBondPanel() {
     : `Issue §${BOND_PRINCIPAL.toLocaleString()} Bond @ ${pct(r.rateOffered)}`;
 }
 
+/* --------- City Hall records almanac (M17) --------- */
+// Rows are rebuilt from live city state each time the dialog opens — never
+// in the frame loop. One row per completed year (city.records) plus the
+// current year-to-date row from the live accumulator (city.recCur), whose
+// population cell is the live city.pop.
+function buildAlmanacRows() {
+  const f = (n) => (n < 0 ? "-§" : "§") + Math.abs(n).toLocaleString();
+  const row = (r, ytd) =>
+    `<tr${ytd ? ' class="alm-ytd"' : ""}><td>${r.year}${ytd ? "* (to date)" : ""}</td>` +
+    `<td>${r.pop.toLocaleString()}</td><td>${f(r.taxes)}</td>` +
+    `<td>${f(r.net)}</td><td>${r.disasters}</td></tr>`;
+  document.getElementById("almanac-table").innerHTML =
+    `<tr><th>Year</th><th>Population</th><th>Tax Income</th>` +
+    `<th>Net Budget</th><th>Disasters Survived</th></tr>` +
+    city.records.map((r) => row(r, false)).join("") +
+    row(Object.assign({ pop: city.pop }, city.recCur), true);
+}
+
+function openAlmanac() {
+  buildAlmanacRows();
+  showDlg("dlg-almanac");
+}
+
 function openShortcuts() {
   // rows are rebuilt from the live TOOLS array every time — never hand-listed
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -654,6 +679,7 @@ function openShortcuts() {
     <tr><td class="kbd">Right / middle drag</td><td>Pan the map</td></tr>
     <tr><td class="kbd">Esc</td><td>Close dialogs</td></tr>
     <tr><td class="kbd">F1</td><td>Toggle this window</td></tr>
+    <tr><td class="kbd">Click ticker</td><td>Jump to a citizen complaint's trouble spot</td></tr>
     <tr class="ksep"><td colspan="2">— Touch —</td></tr>
     <tr><td class="kbd">Tap / one-finger drag</td><td>Build with the selected tool</td></tr>
     <tr><td class="kbd">Two-finger drag</td><td>Pan the map</td></tr>
@@ -758,7 +784,28 @@ function newsFrame() {
 }
 
 /* ================= ticker ================= */
+// A crawl item is either a plain string (news wires, civic notices) or a
+// structured citizen complaint {complaint:true, kind, name, x, y, text} from
+// scanComplaints() (M17). Complaints crawl with a pointer cursor + underline
+// (the #ticker.complaint class) and clicking the ticker while one is active
+// jumps the camera to the offending tile; plain items are never clickable.
 const ticker = { queue: [], x: 0, current: "Welcome to 1997, Mayor. The city awaits." };
+
+function tickerText(item) { return typeof item === "string" ? item : item.text; }
+function tickerIsComplaint(item) {
+  return !!(item && typeof item === "object" && item.complaint);
+}
+
+function bindTicker() {
+  document.getElementById("ticker").addEventListener("click", () => {
+    const c = ticker.current;
+    if (!tickerIsComplaint(c)) return;   // plain wires aren't clickable
+    cam.x = worldX(c.x, c.y);
+    cam.y = worldY(c.x, c.y);
+    clampCam();
+    setStatus(`📠 Jumped to ${c.name}'s trouble spot (${c.x}, ${c.y}).`);
+  });
+}
 
 function tickerFeed() {
   // while paused the crawl keeps moving but never consumes city.messages —
@@ -787,7 +834,8 @@ function tickerFrame() {
     ticker.current = tickerFeed();
     ticker.x = host.offsetWidth + 10;
   }
-  el.textContent = ticker.current;
+  host.classList.toggle("complaint", tickerIsComplaint(ticker.current));
+  el.textContent = tickerText(ticker.current);
   el.style.transform = `translateX(${ticker.x}px)`;
 }
 

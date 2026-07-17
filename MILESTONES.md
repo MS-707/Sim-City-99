@@ -6,13 +6,7 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M17 — City Hall records**: a stats almanac dialog (yearly population,
-  budget, disasters survived), plus named citizens ticker complaints tied to
-  real tile problems (click to jump the camera there).
-
-## Open
-
-- [ ] **M23 — Advisor bias & department funding** *(user priority — next up)*:
+- [ ] **M23 — Advisor bias & department funding** *(user priority)*:
   per-department funding sliders in the budget window (police, fire, roads,
   education, health) replacing flat upkeep, with service effectiveness
   (coverage radius/potency, road wear) scaling with funding level; advisors
@@ -40,6 +34,16 @@ Queue policy: keep at least 5 open improvements at all times.
   sim, unlocked by tier; advisors recommend relevant ordinances.
 
 ## Done
+
+- [x] **M17 — City Hall records**: #dlg-almanac (Windows menu) with one row
+  per completed year + a YTD row — end-of-year population, total tax income,
+  net budget, disasters survived — accumulated in the sim on month rollover /
+  startDisaster (save v6: records + recCur; v5 saves load clean and backfill
+  going forward). Named citizen complaints (12+ 90s names) generated only on
+  rollovers when a real qualifying tile exists (crime, smog, gridlock,
+  unpowered zone, rubble), truth-checked at generation, clickable in the
+  ticker to jump the camera to the offending tile; clean cities stay quiet.
+  Verified against 7 criteria (all pass).
 
 - [x] **M16 — More scenarios & medals**: SCENARIOS grows to four with
   "Blackout Summer '97" (rebuild Ampereville's scrapped grid to 300 powered

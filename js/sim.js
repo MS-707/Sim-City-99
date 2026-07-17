@@ -59,6 +59,7 @@ class City {
     this.crime   = new Uint8Array(n);   // crime 0..255
     this.polCov  = new Uint8Array(n);   // police coverage
     this.fireCov = new Uint8Array(n);   // fire dept coverage
+    this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
 
     this.funds = 20000;
     this.taxRate = 7;               // percent
@@ -254,6 +255,74 @@ class City {
     }
   }
 
+  // ---------- traffic ----------
+  // nearest road tile within manhattan distance 3 (matches access BFS reach)
+  nearestRoad(i) {
+    const x = i % MAP, y = (i / MAP) | 0;
+    for (let r = 1; r <= 3; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        const dx = r - Math.abs(dy);
+        for (const sx of dx === 0 ? [0] : [-dx, dx]) {
+          const X = x + sx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const j = Y * MAP + X;
+          if (this.over[j] === OV.ROAD) return j;
+        }
+      }
+    }
+    return -1;
+  }
+
+  // max congestion on any road within 2 tiles — what a zone "feels"
+  trafficNear(i) {
+    const x = i % MAP, y = (i / MAP) | 0;
+    let m = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const X = x + dx, Y = y + dy;
+      if (!this.inMap(X, Y)) continue;
+      const j = Y * MAP + X;
+      if (this.over[j] === OV.ROAD && this.traffic[j] > m) m = this.traffic[j];
+    }
+    return m;
+  }
+
+  // each developed zone emits trips onto its serving road, then the trips
+  // random-walk a short way along the road network (commutes / deliveries).
+  recomputeTraffic() {
+    const n = MAP * MAP;
+    const load = this._trafficLoad || (this._trafficLoad = new Float32Array(n));
+    load.fill(0);
+    for (let i = 0; i < n; i++) {
+      const t = this.over[i];
+      if ((t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0) continue;
+      const trips = 4 + this.lvl[i] * 9;      // busier at higher development
+      let cur = this.nearestRoad(i);
+      if (cur < 0) continue;
+      let prev = -1;
+      for (let step = 0; step < 10; step++) {
+        load[cur] += trips;
+        const x = cur % MAP, y = (cur / MAP) | 0;
+        let nxt = -1, cnt = 0;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const j = Y * MAP + X;
+          if (this.over[j] !== OV.ROAD || j === prev) continue;
+          cnt++;
+          if (Math.random() * cnt < 1) nxt = j;  // reservoir pick
+        }
+        if (nxt < 0) break;
+        prev = cur; cur = nxt;
+      }
+    }
+    // blend toward the new load so congestion is stable; roads only
+    for (let i = 0; i < n; i++) {
+      this.traffic[i] = this.over[i] === OV.ROAD
+        ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i]) * 0.5)
+        : 0;
+    }
+  }
+
   // ---------- pollution / land value / crime / coverage ----------
   recomputeMaps() {
     const n = MAP * MAP;
@@ -276,8 +345,15 @@ class City {
     }
     const lvOut = new Uint8Array(n);
     this.diffuse(lv, lvOut, 4, 0.3);
+
+    // congested roads drag down nearby land value (noise, fumes, gridlock)
+    const tr = new Float32Array(n);
+    for (let i = 0; i < n; i++) if (this.traffic[i]) tr[i] = this.traffic[i];
+    const trOut = new Uint8Array(n);
+    this.diffuse(tr, trOut, 2, 0.35);
+
     for (let i = 0; i < n; i++) {
-      let v = 40 + lvOut[i] - this.poll[i] * 0.7;
+      let v = 40 + lvOut[i] - this.poll[i] * 0.7 - trOut[i] * 0.4; // traffic penalty
       this.landv[i] = Math.max(0, Math.min(255, v));
     }
 
@@ -364,8 +440,11 @@ class City {
       }
       this.unpow[i] = 0;
 
+      // congestion on the serving roads (city.traffic) dampens growth
+      const cong = this.trafficNear(i) / 255;
+
       if (this.lvl[i] === 0) {
-        if (road && dem > 0 && Math.random() < dem * 0.85) {
+        if (road && dem > 0 && Math.random() < dem * 0.85 * (1 - cong * 0.7)) {
           this.lvl[i] = 1; this.varnt[i] = (Math.random() * 3) | 0;
         }
       } else if (dem > 0.15 && this.lvl[i] < 3) {
@@ -373,12 +452,16 @@ class City {
         let fit = this.landv[i] / 255;
         if (ov === OV.ZI) fit = 0.75; // industry doesn't care about views
         if (ov === OV.ZR) fit -= this.crime[i] / 400;
+        fit *= 1 - cong * 0.75;       // nobody moves up on a gridlocked block
         if (road && Math.random() < dem * fit * 0.42) {
           this.lvl[i]++; this.varnt[i] = (Math.random() * 3) | 0;
         }
       } else if (dem < -0.25 && this.lvl[i] > 0 && Math.random() < -dem * 0.3) {
         this.lvl[i]--;
       }
+
+      // gridlock actively drives tenants away
+      if (this.lvl[i] > 1 && cong > 0.8 && Math.random() < 0.07) this.lvl[i]--;
     }
   }
 
@@ -519,6 +602,7 @@ class City {
       this.recomputePower();
       this.recomputeAccess();
     }
+    if (this.tickCount % 5 === 0) this.recomputeTraffic();
     if (this.tickCount % 14 === 0) this.recomputeMaps();
     this.recomputeDemand();
     this.growthPass();
@@ -566,7 +650,8 @@ class City {
     c.varnt.set(d.varnt); c.anc.set(d.anc);
     c.history = d.history || { pop: [], funds: [] };
     c.powerDirty = true;
-    c.recomputePower(); c.recomputeAccess(); c.recomputeMaps(); c.recomputeDemand();
+    c.recomputePower(); c.recomputeAccess(); c.recomputeTraffic();
+    c.recomputeMaps(); c.recomputeDemand();
     return c;
   }
 }

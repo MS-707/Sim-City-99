@@ -399,6 +399,7 @@ function openQuery(x, y) {
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
+    <tr><td>Traffic</td><td>${city.over[i] === OV.ROAD ? city.traffic[i] : "—"}</td></tr>
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
     <tr><td>Crime</td><td>${city.crime[i]}</td></tr>`;
   showDlg("dlg-query");

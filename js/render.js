@@ -4,6 +4,9 @@
 const cam = { x: 0, y: 0, z: 1 };   // world-space center + zoom
 let cvs, ctx, frame = 0;
 const smoke = [];                    // {x, y, age, drift}
+const cars = [];                     // {id, x, y, fx, fy, tx, ty, p, spd, col}
+let carSeq = 0;
+const CAR_COLS = ["#e34a4a", "#4a8fe3", "#e8e8ee", "#f2c53a", "#57c957", "#b06fe0"];
 
 function renderInit(canvas) {
   cvs = canvas;
@@ -97,6 +100,7 @@ function renderFrame(city, uiState) {
     }
   }
 
+  updateCars(city);
   updateSmoke(city);
   drawDisaster(city);
   if (uiState.hover && uiState.tool !== "query") drawCursor(city, uiState);
@@ -115,6 +119,58 @@ function drawFlames(wx, wy) {
   }
   ctx.fillStyle = "rgba(40,40,40,.5)";
   ctx.beginPath(); ctx.arc(wx + Math.random() * 8 - 4, wy - 22 - Math.random() * 8, 4, 0, 7); ctx.fill();
+}
+
+/* ---------------- cars ---------------- */
+// a cheap pool of cars that drive tile-to-tile along connected roads.
+// pool size scales with total congestion so busy cities look busy.
+function updateCars(city) {
+  const roads = [];
+  let total = 0;
+  for (let i = 0; i < city.over.length; i++)
+    if (city.over[i] === OV.ROAD) { roads.push(i); total += city.traffic[i]; }
+
+  const want = roads.length >= 8 ? Math.min(70, 6 + (total / 45 | 0)) : 0;
+  while (cars.length > want) cars.pop();
+  for (let tries = 0; tries < 8 && cars.length < want && roads.length; tries++) {
+    const i = roads[(Math.random() * roads.length) | 0];
+    if (Math.random() * 160 > city.traffic[i] + 25) continue; // favor busy roads
+    const x = i % MAP, y = (i / MAP) | 0;
+    cars.push({ id: carSeq++, fx: x, fy: y, tx: x, ty: y, x, y, p: 1,
+                spd: 0.1, col: CAR_COLS[carSeq % CAR_COLS.length] });
+  }
+
+  for (let k = cars.length - 1; k >= 0; k--) {
+    const c = cars[k];
+    c.p += c.spd;
+    if (c.p >= 1) {
+      const px = c.fx, py = c.fy;
+      c.fx = c.tx; c.fy = c.ty; c.p = 0;
+      const i = c.fy * MAP + c.fx;
+      if (city.over[i] !== OV.ROAD) { cars.splice(k, 1); continue; } // road got dozed
+      const opts = [], back = [];
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const X = c.fx + dx, Y = c.fy + dy;
+        if (X < 0 || Y < 0 || X >= MAP || Y >= MAP) continue;
+        if (city.over[Y * MAP + X] !== OV.ROAD) continue;
+        (X === px && Y === py ? back : opts).push([X, Y]);
+      }
+      const pool = opts.length ? opts : back; // dead end -> U-turn
+      if (!pool.length) { cars.splice(k, 1); continue; }
+      const [nx, ny] = pool[(Math.random() * pool.length) | 0];
+      c.tx = nx; c.ty = ny;
+      c.spd = Math.max(0.03, 0.13 - city.traffic[i] * 0.0004); // congestion slows
+    }
+    c.x = c.fx + (c.tx - c.fx) * c.p;
+    c.y = c.fy + (c.ty - c.fy) * c.p;
+    const wx = worldX(c.x, c.y), wy = worldY(c.x, c.y);
+    ctx.fillStyle = "#101018";
+    ctx.fillRect(wx - 3, wy - 3, 7, 4);            // shadow / chassis
+    ctx.fillStyle = c.col;
+    ctx.fillRect(wx - 2, wy - 5, 5, 3);            // body
+    ctx.fillStyle = "rgba(255,255,255,.75)";
+    ctx.fillRect(wx - 1, wy - 4, 2, 1);            // windshield glint
+  }
 }
 
 function updateSmoke(city) {
@@ -216,6 +272,11 @@ function renderMinimap(city, mode) {
     } else if (mode === "value") {
       const v = city.landv[i];
       col = `rgb(${30 + v * 0.3 | 0},${40 + v * 0.7 | 0},${60 + v * 0.5 | 0})`;
+    } else if (mode === "traffic") {
+      if (city.over[i] === OV.ROAD) {
+        const v = city.traffic[i]; // green -> yellow -> red as congestion rises
+        col = `rgb(${Math.min(255, 60 + v * 1.6) | 0},${Math.max(0, 200 - v * 1.4) | 0},40)`;
+      } else col = city.terr[i] === TERR.WATER ? "#013" : "#111";
     } else if (mode === "crime") {
       const v = city.crime[i];
       col = v > 6 ? `rgb(${80 + v},20,${30 + v / 2})` : (city.terr[i] === TERR.WATER ? "#013" : "#121");

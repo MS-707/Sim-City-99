@@ -165,6 +165,40 @@ function withNight(w, h, extraTop, draw) {
   return spr;
 }
 
+/* ---- per-tile value jitter (G10) ----
+   So identical adjacent towers never render as pixel-twins, every developed
+   building sprite carries a small pool of value-shifted day copies. The
+   renderer (spriteFor -> zone) picks one per tile by a 4-colouring of (x, y)
+   that guarantees orthogonal neighbours land on different shifts. Only the
+   DAY canvas is recoloured; the night-glow/pool layers are shared by
+   reference so the per-zone glow colours (G1) are untouched. */
+const JIT_DELTAS = [-11, -4, 4, 11]; // additive; min pairwise gap 7 -> >= 12 colour distance
+function valueJitterCopy(src, delta) {
+  const c = document.createElement("canvas");
+  c.width = src.width; c.height = src.height;
+  const g = c.getContext("2d");
+  g.drawImage(src, 0, 0);
+  const im = g.getImageData(0, 0, c.width, c.height), d = im.data;
+  for (let p = 0; p < d.length; p += 4) {
+    if (d[p + 3] === 0) continue; // leave transparent pixels alone
+    d[p]     = Math.max(0, Math.min(255, d[p]     + delta));
+    d[p + 1] = Math.max(0, Math.min(255, d[p + 1] + delta));
+    d[p + 2] = Math.max(0, Math.min(255, d[p + 2] + delta));
+  }
+  g.putImageData(im, 0, 0);
+  return c;
+}
+function withJitter(base) {
+  base.jit = JIT_DELTAS.map((delta) => {
+    const copy = { c: valueJitterCopy(base.c, delta), ox: base.ox, oy: base.oy };
+    if (base.night) copy.night = base.night; // share glow/pool/beacon by ref
+    if (base.pool) copy.pool = base.pool;
+    if (base.beacon) copy.beacon = base.beacon;
+    return copy;
+  });
+  return base;
+}
+
 /* ---- seasonal terrain palettes (M12) ----
    Terrain-family sprites (grass, water, shore, forest, road banks) are baked
    once per season at boot — the same draw code runs four times with a palette
@@ -620,25 +654,34 @@ function buildSprites() {
   /* ---- residential (5 variants per level) ---- */
   const NV = 5; // zone sprite variants per level
   SPR.r1 = []; SPR.r2 = []; SPR.r3 = [];
-  const houseWalls = ["#e8d9b0", "#cfe0ee", "#efc8c0", "#d6e8c2", "#e6d0e8"];
-  const houseRoofs = ["#a03c2c", "#3c5a80", "#6b4f8a", "#4f7a3c", "#7a5a2c"];
+  // G10: residential = warm brick/cream/terracotta. Facades are muted warm
+  // greige/clay (hue 0-50, low saturation); the punch is reserved for the
+  // terracotta roofs and warm trim. R_ROOF are the saturated roof caps.
+  const houseWalls = ["#bdb2a4", "#b8aa9a", "#c0b6a6", "#b1a594", "#c3b8a8"];
+  const houseRoofs = ["#8b4b3f", "#9a5d4e", "#855242", "#996750", "#7a4b3a"];
+  const r2Base = ["#977c6d", "#927662", "#9b806e", "#8e7263", "#9e8573"];
+  const r3Base = ["#bea997", "#c2b19c", "#b8a08e", "#c5af9b", "#b39986"];
+  const R_ROOF = ["#b0563c", "#a94f38", "#b5603f", "#a24a34", "#b56945"];
   for (let v = 0; v < NV; v++) {
-    SPR.r1.push(mkSprite(1, 1, 30, (g, ox, oy) => {
+    SPR.r1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
       diamondPath(g, ox, oy);
       g.fillStyle = "#5aa552"; g.fill(); g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
       tinyHouse(g, ox - 10, oy + 2, 22, houseWalls[v], houseRoofs[v]);
       tinyHouse(g, ox + 12, oy - 2, 18, houseWalls[(v + 1) % NV], houseRoofs[(v + 1) % NV]);
       drawTree(g, ox + 22, oy + 6, 8, 1);
-    }));
-    SPR.r2.push(withNight(1, 1, 46, (g, ox, oy) => {
-      const base = ["#b06a4a", "#9c8a6e", "#7e8fa0", "#8a9a7a", "#a87888"][v];
+    })));
+    SPR.r2.push(withJitter(withNight(1, 1, 46, (g, ox, oy) => {
+      const base = r2Base[v];
+      // G10: pale mid-rise deck top (keeps G9's roof luminance variety); the
+      // warm identity comes from the terracotta coping cap below.
       const { W, S, E } = prism(g, ox, oy, 1, 1, 36, base);
       windows(g, up(W, 0), up(S, 0), 36, 3, 2, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       windows(g, up(S, 0), up(E, 0), 36, 3, 3, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       // G9: tar deck behind a 1px parapet, dressed with seeded service gear
       const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 36, "#26282d", "rgba(14,12,10,.9)");
-      // sun-catching coping cap along the two back parapet edges
-      g.strokeStyle = lighten(base, 0.75); g.lineWidth = 1.6;
+      // sun-catching coping cap along the two back parapet edges (G9 kept —
+      // its bright pale pixels carry the roof's luminance variety)
+      g.strokeStyle = lighten(base, 0.85); g.lineWidth = 2.2;
       g.beginPath();
       g.moveTo(cx - HW * 0.82, cy); g.lineTo(cx, cy - HH * 0.82);
       g.lineTo(cx + HW * 0.82, cy); g.stroke();
@@ -647,54 +690,67 @@ function buildSprites() {
       g.fillStyle = "#1c2733"; g.fillRect(cx + 5, cy + 4, 9, 5); // skylight
       g.fillStyle = "#9fd3ef"; g.fillRect(cx + 6, cy + 5, 7, 3);
       roofClutter(g, cx + 2, cy - 2, 2, R);
-    }));
-    SPR.r3.push(withNight(1, 1, 82, (g, ox, oy) => {
-      const base = ["#c9c1ae", "#a9b6c4", "#c7a9a1", "#b4c4ae", "#cbb98e"][v];
-      // softer top lerp than the default: keeps the pale parapet rims a
-      // clear >= 12 color distance from the hospital's #d8d5ca helipad (G9)
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base, { top: lighten(base, 0.16) });
+    })));
+    SPR.r3.push(withJitter(withNight(1, 1, 82, (g, ox, oy) => {
+      const base = r3Base[v];
+      // G10: pale-cream brick tower under a saturated terracotta roof cap —
+      // the hospital's #d8d5ca helipad stays a clear >= 12 distance from these
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base, { top: R_ROOF[v] });
       windows(g, up(W, 0), up(S, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       windows(g, up(S, 0), up(E, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       // G9: no mast here — the beacon is a C3-only signature now. R3 roofs
       // get residential furniture on a tar deck behind the parapet.
       const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 68, shade(base, 0.55), "rgba(24,20,16,.9)");
+      // G10: warm coping cap along the two back parapet edges
+      g.strokeStyle = shade(R_ROOF[v], 1.15); g.lineWidth = 1.8;
+      g.beginPath();
+      g.moveTo(cx - HW * 0.82, cy); g.lineTo(cx, cy - HH * 0.82);
+      g.lineTo(cx + HW * 0.82, cy); g.stroke();
       waterTank(g, cx - 9 + (R() * 4 | 0), cy + 2);
       bulkhead(g, cx + 8, cy + 1 + (R() * 3 | 0), base);
       if (v % 2) clothesline(g, cx - 2, cy + 9, R);
       else { planter(g, cx - 15, cy + 3); planter(g, cx + 2, cy + 9); }
-    }));
+    })));
   }
 
   /* ---- commercial ---- */
+  // G10: commercial = cool glass blues / teals / grays. Facades are muted
+  // cool blue-grays (hue 180-260); the punch lives in the bright glass crowns
+  // and the saturated cool storefront awnings.
   SPR.c1 = []; SPR.c2 = []; SPR.c3 = [];
+  const c1Base = ["#a9b3bc", "#b0bbc4", "#a7b3bc", "#acb7c0", "#b4bdc5"];
+  const c2Base = ["#91a2b0", "#96a8b7", "#8c9fa7", "#92a4b7", "#9daebc"];
+  const c3Glass = ["#546d84", "#4b6d7b", "#5a6e83", "#4d727d", "#606e84"];
+  const C_ROOF = ["#79b0c8", "#7ec0c4", "#88b8cc", "#7ab4c6", "#8cbcce"];
   for (let v = 0; v < NV; v++) {
-    SPR.c1.push(mkSprite(1, 1, 30, (g, ox, oy) => {
-      const base = ["#cdbfa3", "#c3b3a8", "#b8c3ad", "#c9bdc6", "#b3bcc3"][v];
+    SPR.c1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
+      const base = c1Base[v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 18, base);
-      // storefront glass band + awning
-      const aw = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d97e12"][v];
-      g.fillStyle = "#9fd8e8";
-      poly(g, [up(S, 4), up(E, 4), up(E, 13), up(S, 13)], "#9fd8e8");
-      poly(g, [up(W, 4), up(S, 4), up(S, 13), up(W, 13)], "#7fb8cc");
+      // storefront glass band + cool jewel-tone awning (trim punch). G10:
+      // the glass is a muted cool gray-blue so the facade stays low-saturation.
+      const aw = ["#3d6b95", "#3a8489", "#3f5f99", "#447894", "#495e89"][v];
+      poly(g, [up(S, 4), up(E, 4), up(E, 13), up(S, 13)], "#aebfc6");
+      poly(g, [up(W, 4), up(S, 4), up(S, 13), up(W, 13)], "#93a9b2");
       g.fillStyle = aw;
       poly(g, [up(S, 13), up(E, 13), up(E, 17), up(S, 17)], aw);
       poly(g, [up(W, 13), up(S, 13), up(S, 17), up(W, 17)], shade(aw, 0.8));
-    }));
-    SPR.c2.push(withNight(1, 1, 56, (g, ox, oy) => {
-      const base = ["#8ba3b5", "#a39b8b", "#8b9b8f", "#9b8ba3", "#b5a08b"][v];
-      const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base);
+    })));
+    SPR.c2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
+      const base = c2Base[v];
+      // G10: bright cool crown for roof-line punch over the muted facade
+      const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base, { top: C_ROOF[v] });
       windows(g, up(W, 0), up(S, 0), 44, 4, 3, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
       windows(g, up(S, 0), up(E, 0), 44, 4, 4, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
       // G9: gravel deck behind a 1px parapet plus seeded service gear
       const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 44, shade(base, 0.55), "rgba(16,16,20,.85)");
       roofClutter(g, cx, cy, 3, R);
-    }));
+    })));
     // G9: the mast + red beacon is a C3-only signature carried by exactly
     // 2 of the 5 variants; the tip bakes in its lit state and the renderer
     // blinks it live via spr.beacon (phase-offset per tower)
     const c3mast = v === 1 || v === 3;
     const c3spr = withNight(1, 1, 104, (g, ox, oy) => {
-      const glass = ["#3e6f9e", "#2e8a84", "#7a6a4e", "#5e4e8e", "#8e4e5e"][v];
+      const glass = c3Glass[v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
         { top: shade(glass, 1.5), left: shade(glass, 0.62), right: shade(glass, 0.88) });
       windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
@@ -710,24 +766,34 @@ function buildSprites() {
       // lit lobby spilling onto the plaza (G2: own layer, suppressible)
       groundPool(S[0], S[1] - 2, 12, 5, GLOW_COOL);
     });
-    // beacon tip offset from the anchor center, for the live blink pass
+    // beacon tip offset from the anchor center, for the live blink pass —
+    // set BEFORE withJitter so every value-jittered copy inherits it (G10)
     if (c3mast) c3spr.beacon = { x: -1.5, y: -(HH + 104) };
-    SPR.c3.push(c3spr);
+    SPR.c3.push(withJitter(c3spr));
   }
 
   /* ---- industrial ---- */
+  // G10: industrial = desaturated ochre / rust / concrete (saturation <= 0.35,
+  // warm-neutral hue) — clearly grayer than the warm-brick residential so the
+  // two never trade places, and the smokestacks stay an industrial-only mark.
   SPR.i1 = []; SPR.i2 = []; SPR.i3 = [];
+  const i1Base = ["#a39c90", "#9b968e", "#a79e8f", "#959089", "#a79e8d"];
+  const i2Base = ["#88837b", "#847f79", "#8b847c", "#7f7d78", "#888176"];
+  const i3Base = ["#757068", "#716f6c", "#79726a", "#6f6d69", "#77706c"];
+  // G10: rust/ochre roof caps — the industrial "punch" that keeps the roof
+  // family saturated while the concrete facades stay grey (roofs/trim rule).
+  const I_ROOF = ["#9a6a3c", "#8f6236", "#a06e3e", "#8a5e34", "#9c6a3a"];
   for (let v = 0; v < NV; v++) {
-    SPR.i1.push(mkSprite(1, 1, 30, (g, ox, oy) => {
-      const base = ["#b09a72", "#a8a08a", "#9a8a80", "#8a9a90", "#b0a060"][v];
+    SPR.i1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
+      const base = i1Base[v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 20, base);
       g.fillStyle = "#5a5148"; // big loading door on SE face
       poly(g, [up(S, 2), up(E, 2), up(E, 14), up(S, 14)].map(p => [
         p[0] * 0.5 + (S[0] + E[0]) / 4, p[1] * 0.5 + (S[1] + E[1]) / 4]), "#5a5148");
-    }));
-    SPR.i2.push(withNight(1, 1, 56, (g, ox, oy) => {
-      const base = ["#8f7f6f", "#7f8272", "#94836a", "#6f7f8f", "#877a88"][v];
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base);
+    })));
+    SPR.i2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
+      const base = i2Base[v];
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base, { top: I_ROOF[v] });
       windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
       stack(g, ox - 10, N[1] - 24, 22, 6);
       groundPool(ox + 8, oy + 4, 15, 6, GLOW_SODIUM); // night-shift yard flood
@@ -735,10 +801,10 @@ function buildSprites() {
         GLOWG.fillStyle = "#ff6a4a";
         GLOWG.fillRect(ox - 11, N[1] - 49, 3, 3);
       }
-    }));
-    SPR.i3.push(withNight(1, 1, 74, (g, ox, oy) => {
-      const base = ["#77706a", "#6f7078", "#7c6f62", "#6a7770", "#78645e"][v];
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base);
+    })));
+    SPR.i3.push(withJitter(withNight(1, 1, 74, (g, ox, oy) => {
+      const base = i3Base[v];
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, { top: I_ROOF[v] });
       windows(g, up(W, 0), up(S, 0), 38, 2, 2, 0.35, "#ffd27f", "#20242c", GLOW_SODIUM);
       stack(g, ox - 12, N[1] - 34, 30, 7);
       stack(g, ox + 2, N[1] - 30, 24, 6);
@@ -752,7 +818,7 @@ function buildSprites() {
         GLOWG.fillRect(ox - 13, N[1] - 67, 3, 3);
         GLOWG.fillRect(ox + 1, N[1] - 57, 3, 3);
       }
-    }));
+    })));
   }
 
   /* ---- civic 2x2 buildings ---- */
@@ -1032,11 +1098,18 @@ function buildSprites() {
 // sprite lookup for an overlay tile (returns null when tile isn't the drawn anchor)
 function spriteFor(city, i) {
   const t = city.over[i];
-  // developed zones: variant is a pure function of varnt[] (mod family size)
+  // developed zones: variant is a pure function of varnt[] (mod family size).
+  // G10: pick a value-jittered day copy by a 4-colouring of (x, y) so two
+  // orthogonally adjacent same-variant towers never render pixel-identical.
   const zone = (fams, marker) => {
     if (city.lvl[i] === 0) return marker;
     const fam = fams[city.lvl[i] - 1];
-    return fam[city.varnt[i] % fam.length];
+    const base = fam[city.varnt[i] % fam.length];
+    if (base.jit) {
+      const x = i % MAP, y = (i / MAP) | 0;
+      return base.jit[(x + 2 * y) & 3];
+    }
+    return base;
   };
   switch (t) {
     case OV.ROAD:  // winter roads show plowed snow banks (M12)

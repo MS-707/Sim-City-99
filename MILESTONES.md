@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G10 — Zone color identity** (graphics audit): constrain R/C/I facade
-  palettes to their minimap hue families, saturation rebalance, per-tile
-  jitter. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G11 — Civic buildings that players can find** (graphics audit): raise
+  police/hospital massing or add landmark elements clearing the skyline, plus
+  civic identity cues. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G11 — Civic buildings that players can find**: Give the 2x2 civics skyline presence and identity: raise police/hospital massing to ~50-60px (or add landmark elements clearing the 68px skyline — police comms mast cluster, hospital tower wing behind…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G12 — Road art upgrade — width, curbs, junctions, dash continuity**: Rework roadSprite() in js/sprites.js: widen asphalt from the 0.28-0.72 arm quad to ~0.6-0.7 of the edge with a 1px lighter curb line each side; stop center-line dashes at ~60% of the way to center on…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G13 — Shoreline & forest naturalization**: Soften the coast and the forests: flatten the beach band (drop/dim the sandHi outer-lip highlight), jitter band width per edge with seeded noise, and add corner wedge fills so the coast curves instead…
@@ -46,6 +44,18 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G10 — Zone color identity**: all nine developed-zone facade palettes
+  constrained to their minimap hue family — R warm greige/clay/cream (hue
+  0-50), C cool blue-gray/teal glass (180-260), I desaturated concrete
+  (sat <=0.13); facades desaturated ~25% with the punch moved to
+  terracotta/cool/rust roof caps. A zoom-1 nearest-hue classifier over
+  20R/20C/20I tiles rose from 0.60 to 1.00. Per-tile value jitter (4 day
+  copies picked by an (x+2y)&3 4-colouring) gives adjacent same-variant
+  tiles >=10 colour distance. Night glow/pool/beacon layers shared by
+  reference — byte-identical to HEAD; G9 beacon gate, roof clutter,
+  dims/anchors and double-boot determinism all preserved. Verified against
+  the 5 archived criteria + G1/G9 guard (all pass).
 
 - [x] **G9 — Roofscape variety — beacon discipline, roof clutter, shade()
   fix**: the mast + red beacon is now a C3-only signature on exactly 2 of 5

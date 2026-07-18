@@ -12,12 +12,13 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## Open
 
-- [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
-  and lose capacity after ~30 years with rebuild prompts, coal smog scales
-  with load; power mix pie in the budget window.
-- [ ] **M20 — Soundtrack expansion**: 3-4 distinct generative music moods
-  (calm building, bustling metropolis, disaster tension, night jazz) that
-  crossfade based on sim state; music credits easter egg in About.
+- [ ] **M26 — Power lines cross roads** *(user request — next up)*: let a
+  power line and a road share a tile. Placing a wire across a road (or a road
+  across a wire) makes a combined crossing tile that BOTH conducts power and
+  carries road/traffic; it renders as the road with an overhead power line;
+  recomputePower conducts through it while recomputeAccess/traffic still treat
+  it as road; bulldoze clears the whole crossing. Removes the need to route
+  power around the street grid.
 - [ ] **M21 — Land value visualization & districts**: named districts painted
   by the player, per-district stats in a dialog, district names on the map at
   low zoom (SC2K-style neighborhood labels).

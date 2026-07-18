@@ -434,6 +434,17 @@ function renderFrame(city, uiState, clearBG) {
   updateChopper(city); // news helicopter (M18) — O(1), presentation-only
   ctx.restore();
 
+  // G14: mild seasonal daylight grade — winter cools/desaturates the scene,
+  // autumn warms it, so buildings and terrain share one seasonal light. One
+  // screen-space fill (O(1)); summer/spring are no-ops. Faded by (1 - ns) so
+  // it vanishes at deep night, leaving the G1/G2 night path byte-identical.
+  // Skipped in the postcard pass (clearBG), which lays its own season sky (G4).
+  if (!clearBG && ns < 1) {
+    const gA = 1 - ns, sea = seasonOf(city.month);
+    if (sea === "winter") { ctx.globalAlpha = 0.05 * gA; ctx.fillStyle = "#ccd8e2"; ctx.fillRect(0, 0, cvs.width, cvs.height); ctx.globalAlpha = 1; }
+    else if (sea === "autumn") { ctx.globalAlpha = 0.035 * gA; ctx.fillStyle = "#cf9038"; ctx.fillRect(0, 0, cvs.width, cvs.height); ctx.globalAlpha = 1; }
+  }
+
   // dusk tint: one screen-space fill over the whole scene — no per-tile work,
   // no pixel reads. Skipped entirely by day / with the cycle pref off.
   if (ns > 0) {

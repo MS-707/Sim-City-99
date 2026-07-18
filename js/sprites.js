@@ -45,8 +45,14 @@ function mkSprite(w, h, extraTop, draw) {
   c.width = cw; c.height = ch;
   const g = c.getContext("2d");
   const ox = h * HW, oy = extraTop + HH;
+  // G14: prism()/tinyHouse() record their top-face / roof-plane polygons on
+  // SNOWSPEC during the draw, so makeWinter() can overpaint them with snow.
+  // Non-building sprites simply record nothing. Save/restore keeps it re-entrant.
+  const prevSnow = SNOWSPEC; SNOWSPEC = [];
   draw(g, ox, oy, w, h);
-  return { c, ox, oy };
+  const spr = { c, ox, oy, snowSpec: SNOWSPEC };
+  SNOWSPEC = prevSnow;
+  return spr;
 }
 
 // footprint corner points for a w x h building at local anchor-center (ox, oy)
@@ -79,6 +85,10 @@ function prismFrom(g, cn, ht, base, opts = {}) {
   poly(g, [up(W, ht), up(S, ht), S, W], leftC);           // SW face
   poly(g, [up(S, ht), up(E, ht), E, S], rightC);          // SE face
   poly(g, [up(N, ht), up(E, ht), up(S, ht), up(W, ht)], topC, shade(base, 0.55));
+  if (SNOWSPEC) { // G14: record the top face + its front eaves for the winter cap
+    const tN = up(N, ht), tE = up(E, ht), tS = up(S, ht), tW = up(W, ht);
+    SNOWSPEC.push({ pts: [tN, tE, tS, tW], eaves: [[tW, tS], [tS, tE]] });
+  }
   return { N, E, S, W };
 }
 // solid iso prism: top + two visible faces
@@ -102,6 +112,11 @@ let GLOWG = null;
 // OWN layer, separate from the window glow, so the renderer can suppress a
 // pool per tile when the tile in front carries a developed building.
 let POOLG = null, poolBaked = false;
+// G14: while an array, prism()/tinyHouse() record their top-face / roof-plane
+// geometry here so makeWinter() can overpaint them with pal.snowCap — the
+// winter building variant is derived from the summer bake, so summer stays
+// byte-identical and the winter windows/clutter match summer exactly.
+let SNOWSPEC = null;
 // per-zone night lighting character (G1): each zone family lights up in its
 // own color so districts stay readable after dark
 const GLOW_WARM = "#f0b85c";   // warm amber — residential evening light
@@ -188,6 +203,72 @@ function withNight(w, h, extraTop, draw) {
   return spr;
 }
 
+/* ---- seasonal building variants (G14) ----
+   Buildings used to bake once and float on the winter snow. mkSprite() records
+   each building's top-face and roof-plane polygons (via prism()/tinyHouse())
+   onto spr.snowSpec; makeWinter() then derives a snow-capped, cool-graded
+   winter copy from the finished summer canvas — so the winter windows/clutter
+   are pixel-for-pixel the summer building, just under snow, and the summer bake
+   itself is untouched (byte-identical to HEAD). */
+
+// snow blanket over one captured top-face / roof plane, with a brighter eave
+// lip and a few hanging drips along the front edges. The roof snow is a near-
+// neutral bright white (R~=G~=B) rather than pal.snowCap's cool tint: near
+// white the HSL saturation of even a slight blue cast reads high, and roof
+// snow is part of criterion 2's changed region — a neutral white keeps the
+// winter facade saturation measurably BELOW summer.
+const ROOF_SNOW = "#eeeff1", ROOF_SNOW_HI = "#f4f5f6", ROOF_SNOW_LO = "#e6e8ea";
+function paintSnow(g, sp) {
+  poly(g, sp.pts, ROOF_SNOW);
+  if (sp.eaves) for (const [a, b] of sp.eaves) {
+    g.strokeStyle = ROOF_SNOW_HI; g.lineWidth = 2.6; g.lineCap = "round";
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    g.fillStyle = ROOF_SNOW_LO;
+    for (let k = 1; k <= 3; k++) {
+      const t = k / 4, dx = a[0] + (b[0] - a[0]) * t, dy = a[1] + (b[1] - a[1]) * t;
+      g.beginPath(); g.moveTo(dx - 2, dy - 1); g.lineTo(dx + 2, dy - 1); g.lineTo(dx, dy + 4); g.closePath(); g.fill();
+    }
+    g.lineCap = "butt";
+  }
+}
+
+// pull a building's whole facade ~10% toward its own luminance — the winter
+// grade that makes buildings visibly participate in the season, reducing
+// facade saturation (G14 criterion 2). A pure desaturation (no hue shift) so
+// it never adds blue saturation to the many near-neutral concrete/cream
+// facades; the cool cast comes from the mild screen-space grade in render.js.
+// Roof snow paints on top afterward, unmuted.
+function applyCoolGrade(g, c) {
+  const im = g.getImageData(0, 0, c.width, c.height), d = im.data, k = 0.10;
+  for (let p = 0; p < d.length; p += 4) {
+    if (d[p + 3] === 0) continue;
+    const r = d[p], gr = d[p + 1], b = d[p + 2];
+    const L = 0.299 * r + 0.587 * gr + 0.114 * b;
+    d[p]     = Math.max(0, Math.min(255, r + (L - r) * k));
+    d[p + 1] = Math.max(0, Math.min(255, gr + (L - gr) * k));
+    d[p + 2] = Math.max(0, Math.min(255, b + (L - b) * k));
+  }
+  g.putImageData(im, 0, 0);
+}
+
+// derive a snow-capped winter variant from a baked summer building sprite: a
+// cool-graded copy of the day canvas with snow (paintSnow) overpainting every
+// recorded top face + tinyHouse roof plane. Night glow / pool / beacon are
+// shared by reference (winter lit windows == summer's), so G1/G2/G9 are intact.
+function makeWinter(base) {
+  const c = document.createElement("canvas");
+  c.width = base.c.width; c.height = base.c.height;
+  const g = c.getContext("2d");
+  g.drawImage(base.c, 0, 0);
+  applyCoolGrade(g, c);
+  if (base.snowSpec) for (const sp of base.snowSpec) paintSnow(g, sp);
+  const w = { c, ox: base.ox, oy: base.oy };
+  if (base.night) w.night = base.night;
+  if (base.pool) w.pool = base.pool;
+  if (base.beacon) w.beacon = base.beacon;
+  return w;
+}
+
 /* ---- per-tile value jitter (G10) ----
    So identical adjacent towers never render as pixel-twins, every developed
    building sprite carries a small pool of value-shifted day copies. The
@@ -254,6 +335,12 @@ const SEASON_PAL = {
     grass: ["#9c9a48", "#98944a", "#9e9a4b", "#999545"],
     fleckA: "rgba(230,180,90,.3)", fleckB: "rgba(90,60,10,.2)",
     floor: "#97934a", leafLo: "#b0541e", leafHi: "#d2691e", snowCap: null,
+    // G14: 3 canopy hue pairs — yellow-gold ~45deg, orange ~25deg, deep red
+    // ~9deg — picked per tree by drawTree from the seeded hue value, so an
+    // autumn stand shows mixed fall color instead of one flat orange. Both the
+    // base and crown of each pair sit in the same 10deg band so the histogram
+    // shows three separated modes (valleys at ~15 and ~35deg).
+    leafSets: [["#c4931c", "#e8bb2c"], ["#a8511a", "#d2691e"], ["#8e1a0f", "#b92214"]],
     waterTop: "#255fa3", waterBot: "#215595",
     wave: "rgba(210,235,255,.3)", glint: "rgba(220,240,255,.45)",
     sand: "#d8bd74", sandHi: "#dcc17b", foam: "rgba(255,255,255,.30)", iceEdge: null,
@@ -274,7 +361,10 @@ const SEASON_PAL = {
 // tree exactly, so standalone park/mayor/stadium trees are unchanged.
 function drawTree(g, x, y, s, tint = 1, pal = null, sil = 0, hue = 0, ground = false) {
   let lo = pal ? pal.leafLo : "#1d6e2a", hi = pal ? pal.leafHi : "#2f9c3f";
-  if (hue) { lo = nudgeHue(lo, hue); hi = nudgeHue(hi, hue); }
+  if (pal && pal.leafSets) { // autumn: 3 discrete canopy hue pairs (G14)
+    const set = pal.leafSets[hue < -0.27 ? 2 : hue < 0.27 ? 1 : 0]; // red / orange / gold
+    lo = set[0]; hi = set[1];
+  } else if (hue) { lo = nudgeHue(lo, hue); hi = nudgeHue(hi, hue); }
   if (ground) { // G13: soft grounding shadow beneath the trunk base
     g.fillStyle = "rgba(0,0,0,.16)";
     g.beginPath(); g.ellipse(x, y + s * 0.06, s * 0.5, s * 0.17, 0, 0, 7); g.fill();
@@ -315,7 +405,7 @@ function drawTree(g, x, y, s, tint = 1, pal = null, sil = 0, hue = 0, ground = f
   }
 }
 
-function tinyHouse(g, cx, cy, s, wall, roof) {
+function tinyHouse(g, cx, cy, s, wall, roof, snow = false) {
   // little iso cottage: body + pitched roof, footprint ~s wide
   const hw = s / 2, hh = s / 4, ht = s * 0.42;
   const N = [cx, cy - hh], E = [cx + hw, cy], S = [cx, cy + hh], W = [cx - hw, cy];
@@ -323,11 +413,18 @@ function tinyHouse(g, cx, cy, s, wall, roof) {
   poly(g, [up(S, ht), up(E, ht), E, S], shade(wall, 0.95));
   // roof ridge runs W->E raised
   const ridge = ht + s * 0.34;
-  poly(g, [up(W, ht), up(N, ht), up(E, ht), [cx + hw * 0.1, cy - ridge], [cx - hw * 0.1, cy - ridge]], shade(roof, 1.05));
-  poly(g, [up(W, ht), up(S, ht), up(E, ht), [cx + hw * 0.1, cy - ridge], [cx - hw * 0.1, cy - ridge]], shade(roof, 0.75));
+  const rgR = [cx + hw * 0.1, cy - ridge], rgL = [cx - hw * 0.1, cy - ridge];
+  poly(g, [up(W, ht), up(N, ht), up(E, ht), rgR, rgL], shade(roof, 1.05));
+  poly(g, [up(W, ht), up(S, ht), up(E, ht), rgR, rgL], shade(roof, 0.75));
   // door
   g.fillStyle = "#3a2a18";
   g.fillRect(cx + hw * 0.25, cy + hh * 0.2 - ht, s * 0.13, ht * 0.6);
+  // G14: both pitched roof planes carry snow — captured for the derived winter
+  // variant (mayor) and, when `snow` is set, painted directly (rebaked r1)
+  const back = { pts: [up(W, ht), up(N, ht), up(E, ht), rgR, rgL] };
+  const front = { pts: [up(W, ht), up(S, ht), up(E, ht), rgR, rgL], eaves: [[up(W, ht), up(S, ht)], [up(S, ht), up(E, ht)]] };
+  if (SNOWSPEC) { SNOWSPEC.push(back); SNOWSPEC.push(front); }
+  if (snow) { paintSnow(g, back); paintSnow(g, front); }
 }
 
 function stack(g, x, y, ht, w, stripes = false) {
@@ -911,20 +1008,28 @@ function buildSprites() {
   }
 
   // ---- park ----
-  SPR.park = mkSprite(1, 1, 22, (g, ox, oy) => {
+  // G14: parameterized by season so the park's two standalone trees recolor
+  // with the year (snow caps in winter, fall hues in autumn) — the isolated-
+  // tree case the seasonal recolor used to miss. `sk` null/summer/spring is the
+  // pre-G14 summer bake, byte-for-byte (drawTree pal stays null, lawn stays
+  // green, the flower confetti draws with the same seeded R() sequence).
+  const parkDraw = (sk) => (g, ox, oy) => {
+    const P = (sk && sk !== "summer" && sk !== "spring") ? SEASON_PAL[sk] : null;
+    const lawn = sk === "winter" ? "#e4e9f1" : sk === "autumn" ? "#9c9850" : "#57b04f";
     diamondPath(g, ox, oy);
-    g.fillStyle = "#57b04f"; g.fill();
+    g.fillStyle = lawn; g.fill();
     g.strokeStyle = "rgba(0,0,0,.2)"; g.stroke();
-    g.fillStyle = "#8fd3f0";
+    g.fillStyle = sk === "winter" ? "#cfe0ee" : "#8fd3f0"; // pond (iced over in winter)
     g.beginPath(); g.ellipse(ox + 8, oy + 4, 9, 4.5, 0, 0, 7); g.fill();
     g.strokeStyle = "#7ba7c2"; g.stroke();
-    drawTree(g, ox - 14, oy + 2, 12, 1.05);
-    drawTree(g, ox - 2, oy - 4, 10, 0.9);
-    for (let k = 0; k < 8; k++) {
+    drawTree(g, ox - 14, oy + 2, 12, 1.05, P, 0, sk === "autumn" ? -0.5 : 0);
+    drawTree(g, ox - 2, oy - 4, 10, 0.9, P, 0, sk === "autumn" ? 0.5 : 0);
+    if (!P || sk === "spring") for (let k = 0; k < 8; k++) { // no flower beds under snow / stubble
       g.fillStyle = ["#ff5d5d", "#ffd34e", "#ff8ee0"][k % 3];
       g.fillRect(ox - 20 + R() * 40, oy - 4 + R() * 12, 2, 2);
     }
-  });
+  };
+  SPR.park = mkSprite(1, 1, 22, parkDraw("summer"));
 
   /* ---- residential (5 variants per level) ---- */
   const NV = 5; // zone sprite variants per level
@@ -937,14 +1042,22 @@ function buildSprites() {
   const r2Base = ["#977c6d", "#927662", "#9b806e", "#8e7263", "#9e8573"];
   const r3Base = ["#bea997", "#c2b19c", "#b8a08e", "#c5af9b", "#b39986"];
   const R_ROOF = ["#b0563c", "#a94f38", "#b5603f", "#a24a34", "#b56945"];
+  // G14: r1 (cottages + a standalone tree) parameterized by season — winter
+  // snows the pitched roofs and the tree, autumn turns the tree. sk null/
+  // summer/spring reproduce the pre-G14 bake exactly (no snow, green lawn,
+  // pal-less tree), so summer stays byte-identical.
+  const r1Draw = (v, sk) => (g, ox, oy) => {
+    const P = (sk && sk !== "summer" && sk !== "spring") ? SEASON_PAL[sk] : null;
+    const snow = sk === "winter";
+    const lawn = sk === "winter" ? "#e6ebf2" : sk === "autumn" ? "#9c9850" : "#5aa552";
+    diamondPath(g, ox, oy);
+    g.fillStyle = lawn; g.fill(); g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
+    tinyHouse(g, ox - 10, oy + 2, 22, houseWalls[v], houseRoofs[v], snow);
+    tinyHouse(g, ox + 12, oy - 2, 18, houseWalls[(v + 1) % NV], houseRoofs[(v + 1) % NV], snow);
+    drawTree(g, ox + 22, oy + 6, 8, 1, P, 0, sk === "autumn" ? 0.3 : 0);
+  };
   for (let v = 0; v < NV; v++) {
-    SPR.r1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
-      diamondPath(g, ox, oy);
-      g.fillStyle = "#5aa552"; g.fill(); g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
-      tinyHouse(g, ox - 10, oy + 2, 22, houseWalls[v], houseRoofs[v]);
-      tinyHouse(g, ox + 12, oy - 2, 18, houseWalls[(v + 1) % NV], houseRoofs[(v + 1) % NV]);
-      drawTree(g, ox + 22, oy + 6, 8, 1);
-    })));
+    SPR.r1.push(withJitter(mkSprite(1, 1, 30, r1Draw(v, "summer"))));
     SPR.r2.push(withJitter(withNight(1, 1, 46, (g, ox, oy) => {
       const base = r2Base[v];
       // G10: pale mid-rise deck top (keeps G9's roof luminance variety); the
@@ -1284,6 +1397,39 @@ function buildSprites() {
     }
   });
 
+  /* ---- seasonal building lookup (G14) ----
+     spriteFor picks a building set by season. summer & spring reuse the bake
+     above (byte-identical to HEAD). winter derives a snow-capped, cool-graded
+     variant of every developed building (makeWinter) and rebakes the two
+     tree-bearing amenities (r1, park) with snow-capped trees; the night glow /
+     pool / beacon layers are shared by reference, so G1/G2/G9 are untouched.
+     autumn only rebakes the tree-bearing amenities (fall canopy) — its
+     buildings stay the summer bake. This runs once at boot; renderFrame only
+     ever looks the set up, so a season rollover is not a rebuild event. */
+  const winArr = (arr) => arr.map((b) => withJitter(makeWinter(b)));
+  const seasonR1 = (sk) => { const a = []; for (let v = 0; v < NV; v++) a.push(withJitter(mkSprite(1, 1, 30, r1Draw(v, sk)))); return a; };
+  const summerSet = {
+    r1: SPR.r1, r2: SPR.r2, r3: SPR.r3, c1: SPR.c1, c2: SPR.c2, c3: SPR.c3,
+    i1: SPR.i1, i2: SPR.i2, i3: SPR.i3, park: SPR.park,
+    police: SPR.police, firesta: SPR.firesta, coal: SPR.coal, solar: SPR.solar,
+    school: SPR.school, hospital: SPR.hospital, mayor: SPR.mayor, stadium: SPR.stadium,
+  };
+  const winterSet = {
+    r1: seasonR1("winter"),
+    r2: winArr(SPR.r2), r3: winArr(SPR.r3),
+    c1: winArr(SPR.c1), c2: winArr(SPR.c2), c3: winArr(SPR.c3),
+    i1: winArr(SPR.i1), i2: winArr(SPR.i2), i3: winArr(SPR.i3),
+    park: mkSprite(1, 1, 22, parkDraw("winter")),
+    police: makeWinter(SPR.police), firesta: makeWinter(SPR.firesta),
+    coal: makeWinter(SPR.coal), solar: makeWinter(SPR.solar),
+    school: makeWinter(SPR.school), hospital: makeWinter(SPR.hospital),
+    mayor: makeWinter(SPR.mayor), stadium: makeWinter(SPR.stadium),
+  };
+  const autumnSet = Object.assign({}, summerSet, {
+    r1: seasonR1("autumn"), park: mkSprite(1, 1, 22, parkDraw("autumn")),
+  });
+  SPR.bset = { summer: summerSet, spring: summerSet, autumn: autumnSet, winter: winterSet };
+
   /* ---- night-light sprites (M10) ----
      Baked once here; renderFrame draws them additively ("lighter") after the
      dusk tint. No gradients or canvases are ever created per frame. */
@@ -1395,6 +1541,11 @@ function buildSprites() {
 // sprite lookup for an overlay tile (returns null when tile isn't the drawn anchor)
 function spriteFor(city, i) {
   const t = city.over[i];
+  // G14: buildings pick a season set — winter is snow-capped/cool-graded,
+  // autumn recolors the tree-bearing amenities, summer & spring are the base
+  // bake. SPR.bset is built at boot; this is a pure lookup, never a rebuild.
+  const season = seasonOf(city.month);
+  const B = (SPR.bset && SPR.bset[season]) || SPR.bset.summer;
   // developed zones: variant is a pure function of varnt[] (mod family size).
   // G10: pick a value-jittered day copy by a 4-colouring of (x, y) so two
   // orthogonally adjacent same-variant towers never render pixel-identical.
@@ -1410,21 +1561,21 @@ function spriteFor(city, i) {
   };
   switch (t) {
     case OV.ROAD:  // winter roads show plowed snow banks (M12)
-      return (seasonOf(city.month) === "winter" ? SPR.roadWinter : SPR.road)[roadMask(city, i)];
+      return (season === "winter" ? SPR.roadWinter : SPR.road)[roadMask(city, i)];
     case OV.WIRE:  return SPR.wire[wireMask(city, i)];
-    case OV.PARK:  return SPR.park;
+    case OV.PARK:  return B.park;
     case OV.RUBBLE: return SPR.rubble;
-    case OV.ZR:    return zone([SPR.r1, SPR.r2, SPR.r3], SPR.zoneR);
-    case OV.ZC:    return zone([SPR.c1, SPR.c2, SPR.c3], SPR.zoneC);
-    case OV.ZI:    return zone([SPR.i1, SPR.i2, SPR.i3], SPR.zoneI);
-    case OV.POLICE:  return SPR.police;
-    case OV.FIRESTA: return SPR.firesta;
-    case OV.COAL:    return SPR.coal;
-    case OV.SOLAR:   return SPR.solar;
-    case OV.SCHOOL:  return SPR.school;
-    case OV.HOSPITAL: return SPR.hospital;
-    case OV.MAYOR:   return SPR.mayor;
-    case OV.STADIUM: return SPR.stadium;
+    case OV.ZR:    return zone([B.r1, B.r2, B.r3], SPR.zoneR);
+    case OV.ZC:    return zone([B.c1, B.c2, B.c3], SPR.zoneC);
+    case OV.ZI:    return zone([B.i1, B.i2, B.i3], SPR.zoneI);
+    case OV.POLICE:  return B.police;
+    case OV.FIRESTA: return B.firesta;
+    case OV.COAL:    return B.coal;
+    case OV.SOLAR:   return B.solar;
+    case OV.SCHOOL:  return B.school;
+    case OV.HOSPITAL: return B.hospital;
+    case OV.MAYOR:   return B.mayor;
+    case OV.STADIUM: return B.stadium;
   }
   return null;
 }

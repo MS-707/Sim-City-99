@@ -44,9 +44,11 @@ body {
   display: flex; align-items: center; gap: 6px;
   cursor: default;
 }
-.titlebar > span:nth-child(2), #city-title { flex: 1; }
 #city-title { flex: 1; }
-.title-btns { display: flex; gap: 2px; }
+/* G6: the buttons cluster docks flush right in every titlebar — the old
+   nth-child(2) flex rule stretched the cluster itself in dialog titlebars,
+   parking close buttons next to the title text instead of the right edge. */
+.title-btns { display: flex; gap: 2px; margin-left: auto; }
 .tbtn {
   width: 16px; height: 14px; background: #c0c0c0; color: #000;
   border: 1px solid; border-color: #fff #404040 #404040 #fff;
@@ -58,6 +60,32 @@ body {
 }
 .btn95:active, .btn95.active { border-color: #404040 #fff #fff #404040; background: #b0b0b0; }
 .btn95.tiny { padding: 1px 4px; font-size: 10px; }
+
+/* Win95 sliders (G6): rectangular beveled #c0c0c0 thumb riding a sunken
+   groove — no stock Chromium blue. Inputs stay native <input type=range>. */
+input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  height: 21px; margin: 0; background: transparent;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; background: #808080;
+  border: 1px solid; border-color: #404040 #fff #fff #404040;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; box-sizing: border-box;
+  width: 11px; height: 21px; margin-top: -7px; border-radius: 0;
+  background: #c0c0c0;
+  border: 2px solid; border-color: #fff #404040 #404040 #fff;
+}
+input[type=range]::-moz-range-track {
+  height: 4px; background: #808080;
+  border: 1px solid; border-color: #404040 #fff #fff #404040;
+}
+input[type=range]::-moz-range-thumb {
+  box-sizing: border-box; width: 11px; height: 21px; border-radius: 0;
+  background: #c0c0c0;
+  border: 2px solid; border-color: #fff #404040 #404040 #fff;
+}
 
 /* ---------- main window layout ---------- */
 #win-main {
@@ -92,7 +120,15 @@ body {
   background: #c0c0c0; font-size: 9px; line-height: 10px; text-align: center;
 }
 .toolbtn canvas { image-rendering: pixelated; margin-bottom: 1px; }
-.toolbtn.active { border-color: #404040 #fff #fff #404040; background: #9db3c8; }
+/* G6: pressed toggle = sunken bevel + the classic #fff/#c0c0c0 pixel
+   dither, contents nudged 1px down-right (same total padding as rest state) */
+.toolbtn.active {
+  border-color: #404040 #fff #fff #404040;
+  background-color: #c0c0c0;
+  background-image: conic-gradient(#fff 25%, #c0c0c0 25% 50%, #fff 50% 75%, #c0c0c0 75%);
+  background-size: 2px 2px;
+  padding: 4px 0 1px 2px;
+}
 .toolbtn .cost { color: #555; font-size: 8px; }
 
 /* ---------- viewport ---------- */
@@ -315,10 +351,20 @@ body {
   #win-main { inset: 2px; }
   .mainrow { flex-direction: column; }
   #viewport { order: 1; min-height: 0; }
+  /* G6: the strip wraps into full rows — no tool hides past an invisible
+     horizontal scroll edge. flex-shrink 0 keeps every row on screen (the
+     viewport gives way instead); if rows still overrun 45vh on a tiny
+     screen, a Win95-styled scrollbar is the overflow affordance. */
   #toolbar {
-    order: 2; width: 100%; max-height: 84px;
-    flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    order: 2; width: 100%; max-height: 45vh; flex-shrink: 0;
+    flex-direction: row; flex-wrap: wrap; align-content: flex-start;
+    overflow-x: hidden; overflow-y: auto;
     border-right: none; border-top: 2px solid #808080;
+  }
+  #toolbar::-webkit-scrollbar { width: 14px; height: 14px; background: #dfdfdf; }
+  #toolbar::-webkit-scrollbar-thumb {
+    background: #c0c0c0;
+    border: 2px solid; border-color: #fff #404040 #404040 #fff;
   }
   .toolbtn { flex: 0 0 auto; width: 64px; }
   #sidepanel { display: none; }

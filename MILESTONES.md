@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G6 — Win95 chrome authenticity fixes** (graphics audit): close
-  buttons dock flush right, Win95-styled range sliders, and the other
-  judge-confirmed chrome defects. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G8 — Minimap camera rect, overlay legends & demand-meter zero line**
+  (graphics audit): stroke the camera viewport on the minimap, legend strip
+  for overlay modes, RCI zero line. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G8 — Minimap camera rect, overlay legends & demand-meter zero line**: Make the map's information layer trustworthy: stroke the projected camera-viewport rectangle on the minimap every frame in renderMinimap() (js/render.js ~399); show a one-line legend strip under the m…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G9 — Roofscape variety — beacon discipline, roof clutter, shade() fix**: Break the identical-red-beacon monotony and the empty-roof problem in js/sprites.js: make the mast+red-tip a C3-only signature on 2 of 5 variants; give R3 variants residential roof furniture (water ta…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G10 — Zone color identity — R/C/I readable from the main view**: End the hue lottery: constrain each zone's procedural palette to its minimap hue family (R warm brick/cream/terracotta, C cool glass blues/teals/grays, I desaturated ochre/rust/concrete), drop facade…
@@ -52,6 +50,15 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G6 — Win95 chrome authenticity**: .title-btns margin-left:auto
+  (nth-child stretch rule removed) docks every dialog close button at 6px
+  from the edge (was 100-450px); all six range sliders styled as beveled
+  Win95 thumbs on sunken grooves (zero default-blue pixels, behavior
+  intact); active tool buttons get the classic 2px checkerboard + 1px
+  content nudge; menubar mnemonics underlined; tablet toolbar wraps to
+  full rows (0 clipped buttons at 768px and 360px). Desktop chrome
+  geometry byte-identical. Verified against 7 checks (all pass).
 
 - [x] **G5 — Terrain seams & water repetition**: baked dark diamond strokes
   removed from grass/water/forest-floor (sealedDiamond same-color edge

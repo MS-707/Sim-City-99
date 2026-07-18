@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G14 — Seasons reach the buildings and every tree** (graphics audit):
-  bake winter variants of zone/civic sprites (snow-capped top faces) and every
-  tree so the city doesn't float on snow. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G15 — Splash screen joins the 1997 identity** (graphics audit): stage
+  the splash on the game's own world — procedural skyline strip, Win95 desktop
+  framing, era chrome. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G15 — Splash screen joins the 1997 identity**: Rebuild the splash as the same game: stage it on the teal Win95 desktop (or inside a maximized Win95 window), render a procedural isometric skyline strip from the actual sprite set beneath the logo, r…
-  (6 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G16 — Living-city motion pass — cars, smoke, tornado, UFO**: One js/render.js effects iteration: orient car bodies along their travel axis (two iso-direction shapes), scale the 70-car pool cap with map size, and queue warm headlight cones + red taillight pixels…
   (6 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G7r — City Graphs empty-state fix** *(judge-corrected replacement for
@@ -38,6 +36,21 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G14 — Seasons reach the buildings and every tree**: SPR.bset winter
+  building variants derived from each summer canvas — cool desaturation grade
+  (k=0.10) plus snow overpainting every recorded top-face/roof-plane polygon
+  with an eave lip and drips; park and r1 standalone trees rebaked per season
+  (winter snow, autumn warm); autumn forests gain 3 canopy hue modes (gold/
+  orange/red) off the existing seeded per-tree hue (no new RNG draws); a
+  screen-space seasonal composite grade faded by (1-ns). Winter/summer roof
+  luminance 1.0x->2.2x, facade saturation ratio 0.74 (25% drop); every winter
+  sprite snow-covered. Summer/spring buildings byte-identical to HEAD (373/373
+  sprites, 0 changed scene pixels); night glow/G9 beacons/G10 palettes/G11
+  civics preserved, terrain cache one rebuild/rollover, save unaffected,
+  winter-128 frame within 0%. Verified against the 5 archived criteria +
+  summer-identity/G1/G9/G10/G11 guard (all pass). (Committed in two parts:
+  72c94be implement checkpoint under the git-check hook, then verified.)
 
 - [x] **G13 — Shoreline & forest naturalization**: sandHi outer lip dimmed
   (#eeda9c->#e0c87f) and flattened so beaches stop reading as ramparts

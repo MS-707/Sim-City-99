@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G15 — Splash screen joins the 1997 identity** (graphics audit): stage
-  the splash on the game's own world — procedural skyline strip, Win95 desktop
-  framing, era chrome. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G16 — Living-city motion pass** (graphics audit): orient car bodies
+  along travel, scale the car pool with map size, headlight/taillight pixels,
+  smoke/tornado/UFO polish. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G16 — Living-city motion pass — cars, smoke, tornado, UFO**: One js/render.js effects iteration: orient car bodies along their travel axis (two iso-direction shapes), scale the 70-car pool cap with map size, and queue warm headlight cones + red taillight pixels…
-  (6 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G7r — City Graphs empty-state fix** *(judge-corrected replacement for
   rejected G7)*: the graphs dialog draws a blank white box until 2+ months of
   history exist (every fresh city); add axes, gridline labels, and a 'Collecting
@@ -36,6 +34,19 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G15 — Splash screen joins the 1997 identity**: the splash is now a
+  maximized Win95 window (real titlebar + _ □ ✕) on the game's teal desktop
+  instead of a disconnected navy radial gradient; beneath a hard-edged
+  beveled pixel logo (canvas, no CSS glow) runs a live isometric skyline
+  strip drawn from the shared SPR building/tree bake (24k sprite pixels,
+  proven to shrink when sprites are blanked). Win95 punched-circle radios
+  (zero native-blue px), hard 1px button shadows matching .win95, newspaper
+  -cream scenario cards. All splash functions intact — reroll changes the
+  seed+preview, size radios drive MAP, NEW CITY uses the previewed seed,
+  scenario cards + trophy shelf + LOAD all work — and the M15 responsive
+  layout holds at 768x1024. Verified against 6 archived criteria + a
+  functionality/responsive guard (all pass).
 
 - [x] **G14 — Seasons reach the buildings and every tree**: SPR.bset winter
   building variants derived from each summer canvas — cool desaturation grade

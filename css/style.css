@@ -10,26 +10,45 @@ body {
 #desktop { width: 100%; height: 100%; position: relative; }
 .hidden { display: none !important; }
 
-/* ---------- splash ---------- */
+/* ---------- splash (G15) ----------
+   The splash now lives on the game's own teal desktop, framed by a maximized
+   Win95 window (titlebar + bevelled #c0c0c0 panel) — the same chrome the game
+   runs in. The old navy radial gradient + gradient-text logo (a different
+   product visually) is gone. */
 #splash {
   position: absolute; inset: 0; z-index: 50;
-  background:
-    radial-gradient(ellipse at 50% 110%, #1a3a6b 0%, #05102a 70%),
-    #05102a;
+  background: #008080; /* the in-game desktop teal */
   display: flex; align-items: center; justify-content: center;
+  overflow-y: auto; padding: 10px;
 }
-.splash-inner { text-align: center; color: #fff; }
+#splash-win {
+  width: 100%; max-width: 960px; margin: auto;
+  display: flex; flex-direction: column;
+}
+#splash-titletext { flex: 1; }
+.splash-inner { text-align: center; color: #000; }
+/* G15: the logo is now a canvas of hard-edged beveled pixel lettering
+   (chrome/gold 90s box-art). No CSS blur/soft glow — image-rendering keeps
+   the up-scaled sprite pixels crisply stepped. */
 .splash-logo {
-  font-family: "Impact", "Arial Black", sans-serif;
-  font-size: 84px; letter-spacing: 6px;
-  background: linear-gradient(#fff59b 15%, #ff9d00 45%, #7a2b00 55%, #ffd76b 90%);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  text-shadow: 0 0 40px rgba(255,160,0,.25);
+  display: block; margin: 6px auto 2px;
+  width: min(560px, 90%); height: auto;
+  image-rendering: pixelated; image-rendering: crisp-edges;
 }
-.splash-sub { font-size: 20px; letter-spacing: 12px; color: #9fd3ff; margin-top: 4px; }
-.splash-tag { color: #6f86ad; margin: 18px 0 26px; font-size: 12px; }
-.splash-foot { color: #44557a; margin-top: 34px; font-size: 11px; }
+/* G15: the live iso skyline strip, seated in a sunken Win95 well */
+#splash-skyline {
+  display: block; margin: 10px auto 20px;
+  width: min(600px, 94%); height: auto;
+  image-rendering: pixelated; image-rendering: crisp-edges;
+  border: 2px solid; border-color: #404040 #fff #fff #404040;
+}
+.splash-sub { font-size: 20px; letter-spacing: 12px; color: #000080; margin-top: 4px; font-weight: bold; }
+.splash-tag { color: #333; margin: 14px 0 8px; font-size: 12px; }
+.splash-foot { color: #555; margin-top: 30px; font-size: 11px; }
 #splash .btn95.big { font-size: 16px; padding: 10px 26px; margin: 0 8px; }
+/* G15: primary splash buttons carry the hard 1px offset black shadow — the
+   same box-shadow the .win95 dialogs use (css/style.css bevel rule). */
+#btn-new-city, #btn-load-city, #btn-trophies-splash { box-shadow: 1px 1px 0 #000; }
 
 /* ---------- win95 widgets ---------- */
 .win95 {
@@ -333,7 +352,9 @@ input[type=range]::-moz-range-thumb {
 .newspaper .dlg-buttons .btn95 { font-family: Tahoma, sans-serif; }
 
 /* ---------- scenario mode (M9) ---------- */
-.scn-head { color: #9fd3ff; letter-spacing: 6px; font-size: 13px; margin-top: 26px; }
+/* G15: heading in the game's titlebar navy; cards in the newspaper pulp cream
+   (#dlg-news paper), so the splash pulls from the in-game palette. */
+.scn-head { color: #000080; font-weight: bold; letter-spacing: 6px; font-size: 13px; margin-top: 26px; }
 #scenario-row {
   display: flex; gap: 10px; justify-content: center;
   margin-top: 12px; flex-wrap: wrap;
@@ -341,7 +362,9 @@ input[type=range]::-moz-range-thumb {
 .scn-card {
   width: 236px; text-align: left; padding: 8px 10px;
   display: flex; flex-direction: column; gap: 4px;
+  background: #f4ecd8; /* newspaper pulp cream — matches .newspaper */
 }
+.scn-card:active { background: #eadfc4; } /* keep the cream on press, not gray */
 .scn-card .scn-title { font-weight: bold; font-size: 14px; }
 .scn-card .scn-desc { font-size: 10px; color: #333; line-height: 1.3; white-space: normal; }
 .scn-card .scn-goal { font-size: 10px; color: #000080; font-weight: bold; white-space: normal; }
@@ -362,7 +385,18 @@ input[type=range]::-moz-range-thumb {
   justify-content: center;
 }
 .picker-size { display: block; cursor: pointer; font-size: 12px; }
-.picker-size input { margin-right: 5px; }
+/* G15: Win95 punched-circle radios — a sunken 13px white well with a hard
+   black center dot when checked. appearance:none kills the Chromium blue dot. */
+.picker-size input[type=radio] {
+  -webkit-appearance: none; appearance: none;
+  width: 13px; height: 13px; margin: 0 5px -2px 0;
+  border-radius: 50%; background: #fff;
+  border: 2px solid; border-color: #404040 #fff #fff #404040; /* sunken */
+  cursor: pointer;
+}
+.picker-size input[type=radio]:checked {
+  background: radial-gradient(circle, #000 0 2.5px, #fff 3px);
+}
 #btn-reroll { margin-top: 8px; align-self: flex-start; }
 .picker-preview { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 #picker-canvas {

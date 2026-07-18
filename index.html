@@ -10,32 +10,45 @@
 <body>
 <div id="desktop">
 
-  <!-- Splash screen -->
+  <!-- Splash screen (G15): staged as a maximized Win95 window on the teal
+       desktop — the same visual world as the game. Beneath a hard-edged
+       beveled pixel logo runs a live isometric skyline strip drawn from the
+       shared SPR building/tree bake, so the title card reads as the same
+       1997 product, not a separate navy-gradient screen. -->
   <div id="splash">
-    <div class="splash-inner">
-      <div class="splash-logo">SIMCITY&nbsp;99</div>
-      <div class="splash-sub">— THE 1997 EDITION —</div>
-      <div class="splash-tag">56k modem not required &bull; Best viewed in 800×600</div>
-      <button id="btn-new-city" class="btn95 big">▶ &nbsp;NEW CITY</button>
-      <button id="btn-load-city" class="btn95 big">💾 &nbsp;LOAD CITY</button>
+    <div id="splash-win" class="win95">
+      <div class="titlebar">
+        <span class="title-icon">🏙️</span>
+        <span id="splash-titletext">SimCity 99 — Welcome, Mayor</span>
+        <span class="title-btns"><span class="tbtn">_</span><span class="tbtn">□</span><span class="tbtn">✕</span></span>
+      </div>
+      <div class="splash-inner">
+        <canvas id="splash-logo-canvas" class="splash-logo" width="560" height="120">SIMCITY 99</canvas>
+        <div class="splash-sub">— THE 1997 EDITION —</div>
+        <div class="splash-tag">56k modem not required &bull; Best viewed in 800×600</div>
+        <!-- live procedural iso skyline, baked from the real SPR sprite set -->
+        <canvas id="splash-skyline" width="600" height="210"></canvas>
+        <button id="btn-new-city" class="btn95 big">▶ &nbsp;NEW CITY</button>
+        <button id="btn-load-city" class="btn95 big">💾 &nbsp;LOAD CITY</button>
 
-      <!-- Map picker for free play (M11): size + previewed terrain seed -->
-      <div id="map-picker" class="win95 picker95">
-        <div class="picker-head">— NEW CITY TERRAIN —</div>
-        <div class="picker-row">
-          <div class="picker-sizes">
-            <label class="picker-size"><input type="radio" name="mapsize" value="64"> 64&times;64 &mdash; Village</label>
-            <label class="picker-size"><input type="radio" name="mapsize" value="80" checked> 80&times;80 &mdash; Classic</label>
-            <label class="picker-size"><input type="radio" name="mapsize" value="128"> 128&times;128 &mdash; Megalopolis</label>
-            <button id="btn-reroll" class="btn95">🎲 &nbsp;Reroll Terrain</button>
-          </div>
-          <div class="picker-preview">
-            <canvas id="picker-canvas" width="160" height="160"></canvas>
-            <div id="picker-seed" class="picker-seed">Seed —</div>
+        <!-- Map picker for free play (M11): size + previewed terrain seed -->
+        <div id="map-picker" class="win95 picker95">
+          <div class="picker-head">— NEW CITY TERRAIN —</div>
+          <div class="picker-row">
+            <div class="picker-sizes">
+              <label class="picker-size"><input type="radio" name="mapsize" value="64"> 64&times;64 &mdash; Village</label>
+              <label class="picker-size"><input type="radio" name="mapsize" value="80" checked> 80&times;80 &mdash; Classic</label>
+              <label class="picker-size"><input type="radio" name="mapsize" value="128"> 128&times;128 &mdash; Megalopolis</label>
+              <button id="btn-reroll" class="btn95">🎲 &nbsp;Reroll Terrain</button>
+            </div>
+            <div class="picker-preview">
+              <canvas id="picker-canvas" width="160" height="160"></canvas>
+              <div id="picker-seed" class="picker-seed">Seed —</div>
+            </div>
           </div>
         </div>
+        <div class="splash-foot">© 1997 Totally Not Maxis &bull; All sprites &amp; sounds are original, synthesized in-browser</div>
       </div>
-      <div class="splash-foot">© 1997 Totally Not Maxis &bull; All sprites &amp; sounds are original, synthesized in-browser</div>
     </div>
   </div>
 

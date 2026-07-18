@@ -6,9 +6,10 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G16 — Living-city motion pass** (graphics audit): orient car bodies
-  along travel, scale the car pool with map size, headlight/taillight pixels,
-  smoke/tornado/UFO polish. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G7r — City Graphs empty-state fix** (graphics audit, judge-corrected):
+  the graphs dialog draws a blank white box until 2+ months of history exist;
+  add axes, gridline labels, and a "Collecting data — check back in February"
+  empty state; traces appear from the second month rollover.
 
 ## Open
 
@@ -27,13 +28,30 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G7r — City Graphs empty-state fix** *(judge-corrected replacement for
-  rejected G7)*: the graphs dialog draws a blank white box until 2+ months of
-  history exist (every fresh city); add axes, gridline labels, and a 'Collecting
-  data — check back in February' empty state, and verify traces appear from the
-  second month rollover onward.
 
 ## Done
+
+- [x] **G16 — Living-city motion pass — cars, smoke, tornado, UFO**: cars are
+  now baked iso body sprites picked per travel axis (two parallelogram shapes,
+  never axis-aligned rects on diagonal streets), the pool cap scales with map
+  area (carCap = min(260, MAP²/80): 205 on 128x128 vs the old flat 70), and
+  after dusk each visible car queues a warm headlight cone + red taillight into
+  carLightQ, flushed additively in drawNightLights alongside the G2 layer so
+  streets sparkle (1163 moving-warm + 30 red night px vs HEAD 0; absent in a
+  car-free control). Industrial smoke warmed to coal-gray at ~0.52 start alpha
+  with faster growth and connected 2-puff plumes, and updateSmoke now scans
+  from a random wrapped origin so the whole map shares the puff budget — the
+  high-index lower-right that HEAD's ascending scan starved now smokes (11185
+  lower-right puff-frames over 300 vs HEAD 0). The tornado gained a dark
+  two-tone rotating funnel (core vs mid-green grass Δlum 46, was ~0), 8 orbiting
+  debris specks, a wide dust skirt and a larger sway; the UFO rides at 150px
+  above the ground (clears the dense-district roofline, was nestled ~64px among
+  roofs), its abduction beam reaches the ground (47 green px vs HEAD 0) with a
+  moving ground shadow and slower/larger frame%32 3px marker blink. Off-screen
+  cars are culled so the map-sized pool stays cheap (developed-128 + max
+  traffic + tornado steady-state ~1.6ms vs HEAD ~1.55ms, within 20%). G3 fire
+  smoke/flames/char preserved; zero page errors. Verified against the 6 archived
+  criteria with HEAD before/after baselines.
 
 - [x] **G15 — Splash screen joins the 1997 identity**: the splash is now a
   maximized Win95 window (real titlebar + _ □ ✕) on the game's teal desktop

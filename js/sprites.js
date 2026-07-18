@@ -1461,10 +1461,12 @@ function buildSprites() {
     [0, "rgba(200,215,255,0.6)"], [0.5, "rgba(170,190,255,0.28)"],
     [1, "rgba(140,160,255,0)"]]);
   // smoke puffs (G3): radial-falloff sprites for the smoke[] pool — soft
-  // light gray for industry stacks, darker warm gray for fire smoke
+  // light gray for industry stacks, darker warm gray for fire smoke.
+  // G16: industry smoke warmed to a coal-gray and its core opacity lifted to
+  // ~0.5 (was 0.42) so the stacks read as actually burning something, not cold.
   SPR.puff = radialSprite(16, [
-    [0, "rgba(196,196,206,0.42)"], [0.55, "rgba(196,196,206,0.2)"],
-    [1, "rgba(196,196,206,0)"]]);
+    [0, "rgba(206,200,190,0.52)"], [0.5, "rgba(206,200,190,0.26)"],
+    [1, "rgba(206,200,190,0)"]]);
   SPR.puffFire = radialSprite(16, [
     [0, "rgba(88,82,78,0.95)"], [0.5, "rgba(126,120,116,0.55)"],
     [1, "rgba(150,144,140,0)"]]);

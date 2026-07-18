@@ -4,9 +4,64 @@
 const cam = { x: 0, y: 0, z: 1 };   // world-space center + zoom
 let cvs, ctx, frame = 0;
 const smoke = [];                    // {x, y, age, drift, fire}
+const SMOKE_MAX = 200;               // shared puff budget (G16)
 const cars = [];                     // {id, x, y, fx, fy, tx, ty, p, spd, col}
 let carSeq = 0;
 const CAR_COLS = ["#e34a4a", "#4a8fe3", "#e8e8ee", "#f2c53a", "#57c957", "#b06fe0"];
+
+// G16: the car pool cap scales with map AREA — an 80x80 city fields ~80 cars,
+// a 128x128 fields 200+, so a big map looks as busy as it is. Clamped so a
+// 128 map can't spawn thousands. (HEAD used a flat Math.min(70, …) regardless
+// of size, leaving large maps looking empty.)
+const carCap = () => Math.min(260, Math.round(MAP * MAP / 80));
+
+// G16: two iso-oriented car body sprites (one per road axis) baked once per
+// color, plus a per-frame queue of night head/tail lights. Cars used to be
+// axis-aligned 7x4/5x3 fillRects that read wrong on the diagonal streets and
+// went dark at night; now each body is an iso parallelogram aligned to its
+// travel axis, and after dusk it queues a warm headlight cone + red taillight
+// that flush additively with the G2 night-light layer.
+const carSprites = { x: null, y: null }; // carSprites[axis][colorIndex]
+const carLightQ = [];                    // {x, y, fx, fy} world-space, per frame
+
+// build the 6-color x 2-axis body sheet on first use (like drawChar's cache).
+// A car is a small ground-plane quad (iso, so its long edge runs along the
+// road's tile axis) with a raised body + glass cabin, so it reads as a little
+// 3D vehicle pointing down the street rather than a flat rectangle.
+function buildCarSprites() {
+  const OX = 15, OY = 15, W = 30, H = 22;   // anchor = ground center
+  const lighten = (hex) => {
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    const f = (v) => Math.min(255, v + 60);
+    return `rgb(${f(r)},${f(g)},${f(b)})`;
+  };
+  const bake = (col, axis) => {
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    // iso quad: length along the road tile axis (hl), width across it (hw)
+    const hl = 0.30, hw = 0.14;
+    const quad = (elev, scl) => {
+      const L = hl * scl, Wd = hw * scl;
+      const pts = axis === "x"
+        ? [[L, Wd], [L, -Wd], [-L, -Wd], [-L, Wd]]   // long edge along +x
+        : [[Wd, L], [-Wd, L], [-Wd, -L], [Wd, -L]];  // long edge along +y
+      g.beginPath();
+      for (let k = 0; k < 4; k++) {
+        const dx = pts[k][0], dy = pts[k][1];
+        const X = OX + (dx - dy) * HW, Y = OY + (dx + dy) * HH - elev;
+        k ? g.lineTo(X, Y) : g.moveTo(X, Y);
+      }
+      g.closePath();
+    };
+    quad(0, 1.2); g.fillStyle = "rgba(8,8,14,0.5)"; g.fill();   // ground shadow
+    quad(4, 1.0); g.fillStyle = col; g.fill();                  // raised body
+    quad(6, 0.55); g.fillStyle = lighten(col); g.fill();        // cabin roof
+    quad(6.5, 0.28); g.fillStyle = "rgba(210,235,255,0.85)"; g.fill(); // glass
+    return { c, ox: OX, oy: OY };
+  };
+  carSprites.x = CAR_COLS.map((c) => bake(c, "x"));
+  carSprites.y = CAR_COLS.map((c) => bake(c, "y"));
+}
 
 function renderInit(canvas) {
   cvs = canvas;
@@ -428,7 +483,7 @@ function renderFrame(city, uiState, clearBG) {
     nightLayer.key = nKey;
   }
 
-  updateCars(city);
+  updateCars(city, ns);
   updateSmoke(city);
   drawDisaster(city);
   updateChopper(city); // news helicopter (M18) — O(1), presentation-only
@@ -492,6 +547,15 @@ function renderPhotoTo(canvas, city, uiState, cx, cy, cz) {
 function drawNightLights(city, ns) {
   ctx.globalCompositeOperation = "lighter";
   ctx.drawImage(nightLayer.cv, 0, 0); // per-sprite alpha was clamped at draw
+  // G16: moving car head/tail lights ride the same additive pass — queued this
+  // frame by updateCars, they sparkle over the darkened streets
+  if (carLightQ.length) {
+    ctx.save();
+    worldTransform();
+    ctx.globalAlpha = 1;
+    flushCarLights();
+    ctx.restore();
+  }
   const d = city.disaster;
   if (d) {
     ctx.save();
@@ -577,21 +641,26 @@ function drawFlames(wx, wy, i) {
 
 /* ---------------- cars ---------------- */
 // a cheap pool of cars that drive tile-to-tile along connected roads.
-// pool size scales with total congestion so busy cities look busy.
-function updateCars(city) {
+// pool size scales with total congestion (and now map area, G16) so busy
+// cities look busy. `ns` is the night strength: when > 0 each car queues a
+// headlight cone + taillight into carLightQ for the additive night pass.
+function updateCars(city, ns) {
+  if (!carSprites.x) buildCarSprites();
+  carLightQ.length = 0;
   const roads = [];
   let total = 0;
   for (let i = 0; i < city.over.length; i++)
     if (city.over[i] === OV.ROAD) { roads.push(i); total += city.traffic[i]; }
 
-  const want = roads.length >= 8 ? Math.min(70, 6 + (total / 45 | 0)) : 0;
+  // G16: cap scales with map area (carCap) instead of the flat 70
+  const want = roads.length >= 8 ? Math.min(carCap(), 6 + (total / 45 | 0)) : 0;
   while (cars.length > want) cars.pop();
-  for (let tries = 0; tries < 8 && cars.length < want && roads.length; tries++) {
+  for (let tries = 0; tries < 12 && cars.length < want && roads.length; tries++) {
     const i = roads[(Math.random() * roads.length) | 0];
     if (Math.random() * 160 > city.traffic[i] + 25) continue; // favor busy roads
     const x = i % MAP, y = (i / MAP) | 0;
     cars.push({ id: carSeq++, fx: x, fy: y, tx: x, ty: y, x, y, p: 1,
-                spd: 0.1, col: CAR_COLS[carSeq % CAR_COLS.length] });
+                spd: 0.1, col: carSeq % CAR_COLS.length });
   }
 
   for (let k = cars.length - 1; k >= 0; k--) {
@@ -620,20 +689,86 @@ function updateCars(city) {
     c.x = c.fx + (c.tx - c.fx) * c.p;
     c.y = c.fy + (c.ty - c.fy) * c.p;
     const wx = worldX(c.x, c.y), wy = worldY(c.x, c.y);
-    ctx.fillStyle = "#101018";
-    ctx.fillRect(wx - 3, wy - 3, 7, 4);            // shadow / chassis
-    ctx.fillStyle = c.col;
-    ctx.fillRect(wx - 2, wy - 5, 5, 3);            // body
-    ctx.fillStyle = "rgba(255,255,255,.75)";
-    ctx.fillRect(wx - 1, wy - 4, 2, 1);            // windshield glint
+    // cull off-screen cars: the pool is map-sized (G16) but only visible cars
+    // pay draw + night-light cost, so a busy 128 map stays cheap
+    const sx = (wx - cam.x) * cam.z + cvs.width / 2;
+    const sy = (wy - cam.y) * cam.z + cvs.height / 2;
+    if (sx < -40 || sx > cvs.width + 40 || sy < -70 || sy > cvs.height + 50) continue;
+    // G16: pick the body sprite for this car's travel axis so it points down
+    // the road it's on — one of two iso shapes, never an axis-aligned rect.
+    const tdx = c.tx - c.fx, tdy = c.ty - c.fy;
+    const axis = tdx !== 0 ? "x" : "y";
+    const spr = carSprites[axis][c.col];
+    ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+    // G16: after dusk, queue this car's lights at its screen-forward heading —
+    // headlight cone ahead, taillight behind — for the additive night pass.
+    if (ns > 0 && (tdx || tdy)) {
+      const rx = (tdx - tdy) * HW, ry = (tdx + tdy) * HH; // screen forward
+      const inv = 1 / (Math.hypot(rx, ry) || 1);
+      carLightQ.push(wx, wy, rx * inv, ry * inv);
+    }
   }
+}
+
+// G16: flush the frame's car lights onto the scene additively (called from
+// drawNightLights, already in "lighter" mode over the dusk tint) — warm-white
+// headlight cones and red taillights that move with the cars, so trafficked
+// streets sparkle after dark. This is the per-frame companion to the cached
+// G2 night-light layer (lamps/window glow): those are static within a sim
+// tick and baked once; cars move every frame and can't be cached, so they
+// ride in this same additive pass instead.
+function flushCarLights() {
+  for (let k = 0; k < carLightQ.length; k += 4) {
+    const x = carLightQ[k], y = carLightQ[k + 1], fx = carLightQ[k + 2], fy = carLightQ[k + 3];
+    const px = -fy, py = fx;                 // screen perpendicular
+    const nose = x + fx * 5, noseY = y + fy * 5 - 3;
+    const tipX = x + fx * 20, tipY = y + fy * 20 - 3;
+    // soft wide cone
+    ctx.fillStyle = "rgba(255,232,180,0.32)";
+    ctx.beginPath();
+    ctx.moveTo(nose, noseY);
+    ctx.lineTo(tipX + px * 8, tipY + py * 8);
+    ctx.lineTo(tipX - px * 8, tipY - py * 8);
+    ctx.closePath(); ctx.fill();
+    // bright warm core near the lamps
+    const cX = x + fx * 11, cY = y + fy * 11 - 3;
+    ctx.fillStyle = "rgba(255,245,215,0.85)";
+    ctx.beginPath();
+    ctx.moveTo(nose, noseY);
+    ctx.lineTo(cX + px * 3, cY + py * 3);
+    ctx.lineTo(cX - px * 3, cY - py * 3);
+    ctx.closePath(); ctx.fill();
+    // red taillights behind the car
+    const bx = x - fx * 6, by = y - fy * 6 - 3;
+    ctx.fillStyle = "rgba(255,32,32,1)";
+    ctx.fillRect(bx + px * 2.5 - 1, by + py * 2.5 - 1, 3, 2);
+    ctx.fillRect(bx - px * 2.5 - 2, by - py * 2.5 - 1, 3, 2);
+  }
+}
+
+// G16: a 2-puff industrial plume — a lead puff and a younger trailing puff
+// just below it — so a stack emits a connected rising column instead of one
+// lone dot. Guards the shared budget.
+function pushPlume(x, y, drift) {
+  if (smoke.length >= SMOKE_MAX) return;
+  smoke.push({ x, y, age: 0, drift });
+  if (smoke.length < SMOKE_MAX)
+    smoke.push({ x: x + drift * 4 - 2, y: y + 7, age: 6, drift: drift * 0.6 });
 }
 
 function updateSmoke(city) {
   // spawn from coal plants, big industry — and burning tiles (G3): each
-  // fire feeds 2-3 dark rising puffs into the shared pool
-  if (frame % 6 === 0) {
-    for (let i = 0; i < city.over.length; i++) {
+  // fire feeds dark rising puffs into the shared pool.
+  // G16: scan from a RANDOM origin and wrap so the whole map shares the puff
+  // budget. HEAD scanned ascending from index 0 and broke at the cap, which
+  // starved the high-index lower-right industry (it never got a turn); the
+  // randomized start gives every district a fair share.
+  if (frame % 6 === 0 && smoke.length < SMOKE_MAX) {
+    const N = city.over.length;
+    const start = (Math.random() * N) | 0;
+    for (let s = 0; s < N; s++) {
+      if (smoke.length >= SMOKE_MAX) break;
+      const i = (start + s) % N;
       const t = city.over[i];
       if (city.fire[i]) {
         if (Math.random() < 0.2) {
@@ -642,25 +777,25 @@ function updateSmoke(city) {
                        y: worldY(x, y) - 26 - Math.random() * 8,
                        age: 0, drift: Math.random() * 0.5 - 0.25, fire: true });
         }
-      } else if (t === OV.COAL && city.anc[i] === i && Math.random() < 0.6) {
+      } else if (t === OV.COAL && city.anc[i] === i && Math.random() < 0.5) {
         const x = i % MAP, y = (i / MAP) | 0;
-        smoke.push({ x: worldX(x, y) - 18, y: worldY(x, y) + HH - 78, age: 0, drift: Math.random() * 0.4 - 0.1 });
-      } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && Math.random() < 0.25) {
+        pushPlume(worldX(x, y) - 18, worldY(x, y) + HH - 78, Math.random() * 0.4 - 0.1);
+      } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && Math.random() < 0.28) {
         const x = i % MAP, y = (i / MAP) | 0;
-        smoke.push({ x: worldX(x, y) - 12, y: worldY(x, y) - 68, age: 0, drift: Math.random() * 0.3 });
+        pushPlume(worldX(x, y) - 12, worldY(x, y) - 68, Math.random() * 0.3);
       }
-      if (smoke.length > 160) break;
     }
   }
   // soft-edged puffs (G3): prebaked radial-falloff sprites, scaled up and
-  // faded out as they age — fire smoke is darker and rises faster
+  // faded out as they age — fire smoke is darker and rises faster; G16 grows
+  // the warm-gray industrial puffs faster so plumes billow, not trickle.
   for (let k = smoke.length - 1; k >= 0; k--) {
     const p = smoke[k];
     const life = p.fire ? 80 : 90;
     p.age++; p.y -= p.fire ? 0.55 : 0.45; p.x += p.drift;
     if (p.age > life) { smoke.splice(k, 1); continue; }
     const s = p.fire ? SPR.puffFire : SPR.puff;
-    const r = (p.fire ? 6 : 4) + p.age * (p.fire ? 0.14 : 0.09);
+    const r = (p.fire ? 6 : 5) + p.age * (p.fire ? 0.14 : 0.16);
     ctx.globalAlpha = 1 - p.age / life;
     ctx.drawImage(s.c, p.x - r, p.y - r, r * 2, r * 2);
   }
@@ -817,32 +952,64 @@ function drawDisaster(city) {
   if (!d) return;
   const wx = worldX(d.x, d.y), wy = worldY(d.x, d.y);
   if (d.kind === "tornado") {
-    for (let k = 0; k < 7; k++) {
-      const r = 5 + k * 3.4;
-      const ang = frame * 0.25 + k;
-      ctx.fillStyle = `rgba(120,120,130,${0.55 - k * 0.05})`;
-      ctx.beginPath();
-      ctx.ellipse(wx + Math.cos(ang) * 3, wy - 8 - k * 9, r, r * 0.45, 0, 0, 7);
-      ctx.fill();
+    // G16: a dark two-tone rotating funnel with a dust skirt, orbiting debris
+    // and a wide slow sway — HEAD's seven faint gray ellipses were nearly
+    // invisible over grass.
+    const sway = Math.sin(frame * 0.05) * 11;              // wide, slow sway
+    // wide low-alpha dust skirt kicked up at the base
+    ctx.fillStyle = "rgba(150,140,120,0.24)";
+    ctx.beginPath(); ctx.ellipse(wx, wy + 4, 36, 12, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(120,112,96,0.16)";
+    ctx.beginPath(); ctx.ellipse(wx, wy + 2, 48, 9, 0, 0, 7); ctx.fill();
+    // funnel: stacked ellipses, dark core + lighter rotating rim, narrow at
+    // the base and flaring toward the top
+    for (let k = 0; k < 10; k++) {
+      const fy = wy + 2 - k * 10;
+      const r = 5 + k * 2.9;
+      const cxk = wx + sway * (k / 10) + Math.cos(frame * 0.22 + k * 0.9) * (2 + k * 0.5);
+      ctx.fillStyle = `rgba(34,32,40,${Math.min(0.95, 0.94 - k * 0.05)})`;
+      ctx.beginPath(); ctx.ellipse(cxk, fy, r, r * 0.42, 0, 0, 7); ctx.fill();
+      const rim = frame * 0.3 + k * 0.7;                   // sweeps around = spin
+      ctx.fillStyle = `rgba(158,156,166,${0.5 - k * 0.028})`;
+      ctx.beginPath(); ctx.ellipse(cxk + Math.cos(rim) * r * 0.55, fy, r * 0.34, r * 0.28, 0, 0, 7); ctx.fill();
+    }
+    // 8 dark debris specks orbiting the lower funnel
+    for (let k = 0; k < 8; k++) {
+      const a = frame * 0.17 + k * (Math.PI / 4);
+      const rr = 20 + (k % 3) * 7;
+      ctx.fillStyle = "#241f18";
+      ctx.fillRect(wx + Math.cos(a) * rr, wy - 8 + Math.sin(a) * rr * 0.42, 3, 3);
     }
   } else { // ufo
-    const bob = Math.sin(frame * 0.1) * 4;
-    // beam
-    const gr = ctx.createLinearGradient(wx, wy - 60, wx, wy);
-    gr.addColorStop(0, "rgba(140,255,140,.45)"); gr.addColorStop(1, "rgba(140,255,140,.05)");
+    // G16: hoist the saucer above the skyline (~140px, HEAD sat at ~64px,
+    // below the towers), run the abduction beam all the way to the ground with
+    // a moving shadow, and slow/enlarge the marker blink (frame%32, 3px).
+    const bob = Math.sin(frame * 0.08) * 5;
+    const drift = Math.sin(frame * 0.05) * 6;              // lateral hover drift
+    const sx = wx + drift, alt = 150, sy = wy - alt + bob; // saucer center
+    // moving ground shadow ellipse (tracks the saucer's drift + bob)
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.beginPath(); ctx.ellipse(sx, wy + 2, 20 - bob * 0.4, 6, 0, 0, 7); ctx.fill();
+    // abduction beam — gradient from the saucer down to the ground tile
+    const gr = ctx.createLinearGradient(sx, sy, wx, wy);
+    gr.addColorStop(0, "rgba(150,255,150,0.5)");
+    gr.addColorStop(0.65, "rgba(125,255,145,0.24)");
+    gr.addColorStop(1, "rgba(120,255,140,0.25)");
     ctx.fillStyle = gr;
     ctx.beginPath();
-    ctx.moveTo(wx - 6, wy - 60 + bob); ctx.lineTo(wx + 6, wy - 60 + bob);
-    ctx.lineTo(wx + 26, wy); ctx.lineTo(wx - 26, wy);
+    ctx.moveTo(sx - 8, sy + 4); ctx.lineTo(sx + 8, sy + 4);
+    ctx.lineTo(wx + 24, wy); ctx.lineTo(wx - 24, wy);
     ctx.closePath(); ctx.fill();
-    // saucer
-    ctx.fillStyle = "#9aa4b2";
-    ctx.beginPath(); ctx.ellipse(wx, wy - 64 + bob, 22, 7, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = "#cdd6e2";
-    ctx.beginPath(); ctx.ellipse(wx, wy - 69 + bob, 10, 6, 0, Math.PI, 0); ctx.fill();
-    for (let k = 0; k < 4; k++) {
-      ctx.fillStyle = (frame + k) % 8 < 4 ? "#ff5b5b" : "#ffe95b";
-      ctx.beginPath(); ctx.arc(wx - 15 + k * 10, wy - 62 + bob, 1.8, 0, 7); ctx.fill();
+    // saucer body
+    ctx.fillStyle = "#6c7686";
+    ctx.beginPath(); ctx.ellipse(sx, sy + 3, 24, 6, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = "#aab4c2";
+    ctx.beginPath(); ctx.ellipse(sx, sy, 24, 8, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#d2dbe8";
+    ctx.beginPath(); ctx.ellipse(sx, sy - 6, 11, 7, 0, Math.PI, 0); ctx.fill();
+    for (let k = 0; k < 5; k++) {
+      ctx.fillStyle = (frame + k * 6) % 32 < 16 ? "#ff5b5b" : "#ffe95b";
+      ctx.beginPath(); ctx.arc(sx - 18 + k * 9, sy + 2, 3, 0, 7); ctx.fill();
     }
   }
 }

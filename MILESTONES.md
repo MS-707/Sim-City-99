@@ -6,10 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G5 — Terrain seam & water repetition fix** (graphics audit): stroke
-  tile edges only where terrain type changes, fade same-type interior
-  strokes, kill the "tiled bathroom floor" look; water variation.
-  Criteria: docs/gfx-audit-slate.json.
+- [ ] **G6 — Win95 chrome authenticity fixes** (graphics audit): close
+  buttons dock flush right, Win95-styled range sliders, and the other
+  judge-confirmed chrome defects. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -28,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G6 — Win95 chrome authenticity fixes**: Fix the broken/anachronistic chrome: replace the css/style.css:47 nth-child flex rule so every dialog close button docks flush right (or add .title-btns { margin-left: auto }); style range inputs as W…
-  (6 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G8 — Minimap camera rect, overlay legends & demand-meter zero line**: Make the map's information layer trustworthy: stroke the projected camera-viewport rectangle on the minimap every frame in renderMinimap() (js/render.js ~399); show a one-line legend strip under the m…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G9 — Roofscape variety — beacon discipline, roof clutter, shade() fix**: Break the identical-red-beacon monotony and the empty-roof problem in js/sprites.js: make the mast+red-tip a C3-only signature on 2 of 5 variants; give R3 variants residential roof furniture (water ta…
@@ -55,6 +52,16 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G5 — Terrain seams & water repetition**: baked dark diamond strokes
+  removed from grass/water/forest-floor (sealedDiamond same-color edge
+  sealing); SPR.terrEdge[16] neighbor-mask overlays stroke only real
+  land-type boundaries; 3 water variants x 3 frames picked by a pure
+  coordinate hash with traveling shimmer; grass variant de-checkerboarded
+  (terrHash), seasonal grass spreads tightened to <=2.4%. Interior seam
+  dips 32->1.2 lum (grass) / 26->3.4 (water); adjacent water tiles 0% ->
+  17-19% differing pixels; rebuild rate halved. Verified against 6 checks
+  incl. season/cache regression guard (all pass).
 
 - [x] **G4 — Postcard auto-framing**: postcardBounds() fits the developed
   bbox (terrain fallback) into the photo mount via a dedicated

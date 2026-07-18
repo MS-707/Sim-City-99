@@ -207,16 +207,37 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
       if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
       const i = y * MAP + x;
       if (city.terr[i] === TERR.WATER) {
-        const w = S.water[waterFrame];
+        // G5: per-tile variant (scrambled hash) + per-tile frame offset
+        // (x + y) — adjacent lake tiles never show the same pixels, and the
+        // shimmer travels across the water instead of looping in lockstep.
+        // Pure in (x, y, waterFrame): cache-safe, identical every rebuild.
+        const w = S.water[terrHash(x, y) % WATER_VARIANTS][(waterFrame + x + y) % WATER_FRAMES];
         g.drawImage(w.c, wx - w.ox, wy - w.oy);
         const sm = shoreMask(city, i); // sand / rime ice on land-facing edges
         if (sm) { const sh = S.shore[sm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       } else {
-        const gs = S.grass[city.varnt[i] % 4];
+        // G5: grass variant by scrambled (x, y) hash — open meadows mottle
+        // organically instead of alternating with varnt's seeded stripes
+        const gs = S.grass[terrHash(x, y) & 3];
         g.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
         const bm = beachMask(city, i); // shore fringe on the land side of the seam
         if (bm) { const sh = S.shore[bm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       }
+    }
+  }
+  // G5: second sweep — conditional type-change edge strokes (grass/forest),
+  // drawn after every fill so a neighbor's seam-sealing overdraw can't shave
+  // them. Interior same-type seams get no stroke at all; this runs only on
+  // the rare rebuild, never per frame.
+  for (let s = 0; s <= (MAP - 1) * 2; s++) {
+    for (let x = Math.max(0, s - MAP + 1); x <= Math.min(MAP - 1, s); x++) {
+      const y = s - x;
+      const wx = worldX(x, y), wy = worldY(x, y);
+      if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
+      const i = y * MAP + x;
+      if (city.terr[i] === TERR.WATER) continue;
+      const em = terrEdgeMask(city, i);
+      if (em) { const eg = SPR.terrEdge[em]; g.drawImage(eg.c, wx - eg.ox, wy - eg.oy); }
     }
   }
   L.key = key;
@@ -244,7 +265,10 @@ function renderFrame(city, uiState, clearBG) {
   const maxWY = cam.y + cvs.height / 2 / cam.z + 128;
 
   const blink = (frame / 24 | 0) % 2 === 0;
-  const waterFrame = (frame / 16 | 0) % SPR.water.length; // prebuilt frame cycle
+  // prebuilt water frame cycle — divisor 32 (G5): the water-driven terrain
+  // rebuild lands at ~1.9x/second instead of 3.7x; per-tile (x + y) offsets
+  // in buildTerrainLayer keep the shimmer lively between rebuilds
+  const waterFrame = (frame / 32 | 0) % WATER_FRAMES;
 
   // flat terrain: one cached blit unless the camera / water / terrain moved —
   // or the season changed (M12): the palette swap costs exactly one rebuild

@@ -155,36 +155,39 @@ function withNight(w, h, extraTop, draw) {
    Terrain-family sprites (grass, water, shore, forest, road banks) are baked
    once per season at boot — the same draw code runs four times with a palette
    parameter. The renderer just looks up SPR.season[seasonOf(city.month)]. */
+/* G5: every season's 4 grass fills sit within ~2% lightness of each other —
+   open grass mottles organically instead of checkerboarding; the variant is
+   picked by a scrambled (x, y) hash in buildTerrainLayer, not by varnt. */
 const SEASON_PAL = {
   summer: {
-    grass: ["#4a9d44", "#459743", "#50a349", "#43903f"],
+    grass: ["#4a9d44", "#479a47", "#4d9f46", "#489744"],
     fleckA: "rgba(255,255,255,.08)", fleckB: "rgba(0,60,0,.15)",
     floor: "#3d8a3a", leafLo: "#1d6e2a", leafHi: "#2f9c3f", snowCap: null,
-    waterTop: "#2a6fbe", waterBot: "#1c4f92",
+    waterTop: "#2564af", waterBot: "#215aa1",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#eeda9c", foam: "rgba(255,255,255,.55)",
   },
   spring: { // fresh greens, blossom flecks in the grass
-    grass: ["#55ac4b", "#4ea44b", "#5db252", "#4a9e46"],
+    grass: ["#55ac4b", "#52a94e", "#57ae51", "#53a74d"],
     fleckA: "rgba(255,215,235,.4)", fleckB: "rgba(0,70,0,.15)",
     floor: "#46993f", leafLo: "#2a8a36", leafHi: "#4fb453", snowCap: null,
-    waterTop: "#2f77c4", waterBot: "#205598",
+    waterTop: "#2a6bb5", waterBot: "#2561a7",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#eeda9c", foam: "rgba(255,255,255,.55)",
   },
   autumn: { // dry stubble lawns, orange/red canopies
-    grass: ["#9c9a48", "#948f3f", "#a4a04e", "#8e8a3e"],
+    grass: ["#9c9a48", "#98944a", "#9e9a4b", "#999545"],
     fleckA: "rgba(230,180,90,.3)", fleckB: "rgba(90,60,10,.2)",
     floor: "#7e7a38", leafLo: "#b0541e", leafHi: "#d2691e", snowCap: null,
-    waterTop: "#2a6ab2", waterBot: "#1c4a86",
+    waterTop: "#255fa3", waterBot: "#215595",
     wave: "rgba(210,235,255,.3)", glint: "rgba(220,240,255,.45)",
     sand: "#d8bd74", sandHi: "#ead597", foam: "rgba(255,255,255,.5)",
   },
   winter: { // snowed-under lawns, pine canopies with snow caps, icy shores
-    grass: ["#e9edf3", "#e4e9f0", "#eef1f6", "#e0e6ee"],
+    grass: ["#e9edf3", "#e6eaf1", "#eceff5", "#e5e9f0"],
     fleckA: "rgba(255,255,255,.5)", fleckB: "rgba(165,182,210,.35)",
     floor: "#dfe5ee", leafLo: "#2c5a34", leafHi: "#38703f", snowCap: "#eef2f7",
-    waterTop: "#a8c8de", waterBot: "#8fb4d0",
+    waterTop: "#9fc1d9", waterBot: "#98bbd5",
     wave: "rgba(255,255,255,.4)", glint: "rgba(240,248,255,.7)",
     sand: "#c9d6e4", sandHi: "#e8eef5", foam: "rgba(255,255,255,.7)",
   },
@@ -230,6 +233,31 @@ function stack(g, x, y, ht, w, stripes = false) {
   g.fillStyle = "#3c3c44"; g.fillRect(x - w / 2 - 1, y - ht - 2, w + 2, 3);
 }
 
+// G5: scrambled coordinate hash for terrain variation (grass mottle, water
+// variant). Pure in (x, y) — every boot and every frame agrees, so the
+// terrain-layer cache stays deterministic and rebuild-free.
+function terrHash(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+// G5: water bakes WATER_VARIANTS positional variants x WATER_FRAMES shimmer
+// frames per season — buildTerrainLayer picks the variant by terrHash and
+// offsets the frame by (x + y), so adjacent lake tiles never render alike.
+const WATER_FRAMES = 3, WATER_VARIANTS = 3;
+
+// G5: opaque fill for flat terrain diamonds — the fill plus a 2px stroke in
+// the SAME style straddling the edge, so adjacent tiles composite to full
+// opacity across their shared seam. Without the old dark edge strokes, bare
+// antialiased diamond edges would let the canvas background bleed through
+// every interior seam as a faint grid.
+function sealedDiamond(g, ox, oy, style) {
+  diamondPath(g, ox, oy);
+  g.fillStyle = style; g.fill();
+  g.strokeStyle = style; g.lineWidth = 2; g.stroke();
+}
+
 function diamondPath(g, ox, oy) {
   g.beginPath();
   g.moveTo(ox, oy - HH); g.lineTo(ox + HW, oy);
@@ -252,13 +280,12 @@ function buildSprites() {
     const P = SEASON_PAL[sk];
     const fam = { grass: [], water: [], shore: [], forest: [] };
 
-    // grass (or snowpack, or dry stubble)
+    // grass (or snowpack, or dry stubble) — no edge stroke (G5): interior
+    // same-type seams are invisible; type-change boundaries get their line
+    // from the SPR.terrEdge overlays chosen per tile in buildTerrainLayer
     for (let v = 0; v < 4; v++) {
       fam.grass.push(mkSprite(1, 1, 0, (g, ox, oy) => {
-        diamondPath(g, ox, oy);
-        g.fillStyle = P.grass[v];
-        g.fill();
-        g.strokeStyle = "rgba(0,0,0,.18)"; g.lineWidth = 1; g.stroke();
+        sealedDiamond(g, ox, oy, P.grass[v]); // opaque seam, no bleed
         g.save(); diamondPath(g, ox, oy); g.clip();
         g.fillStyle = P.fleckA;
         for (let k = 0; k < 14; k++) g.fillRect(ox - HW + R() * TW, oy - HH + R() * TH, 2, 1);
@@ -268,31 +295,35 @@ function buildSprites() {
       }));
     }
 
-    // water: a small family of frames cycled by the render frame counter.
-    // Wave/glint positions are pure arithmetic in (k, f) so every boot builds
-    // pixel-identical frames and equal frame values always render identically.
-    for (let f = 0; f < 3; f++) {
-      fam.water.push(mkSprite(1, 1, 0, (g, ox, oy) => {
-        diamondPath(g, ox, oy);
-        const gr = g.createLinearGradient(ox, oy - HH, ox, oy + HH);
-        gr.addColorStop(0, P.waterTop); gr.addColorStop(1, P.waterBot);
-        g.fillStyle = gr; g.fill();
-        g.strokeStyle = "rgba(0,0,40,.25)"; g.stroke();
-        g.save(); diamondPath(g, ox, oy); g.clip();
-        g.strokeStyle = P.wave; g.lineWidth = 1;
-        for (let k = 0; k < 4; k++) {
-          const wy = oy - HH + 4 + k * 7 + ((k * 5 + f * 2) % 5);
-          const wx = ox - HW + ((k * 13 + f * 11) % 40);
-          g.beginPath(); g.moveTo(wx, wy);
-          g.bezierCurveTo(wx + 8, wy - 2, wx + 14, wy + 2, wx + 22, wy); g.stroke();
-        }
-        g.fillStyle = P.glint; // shimmering glints (ice sparkle in winter)
-        for (let k = 0; k < 3; k++) {
-          g.fillRect(ox - HW + 4 + ((k * 23 + f * 17) % 54),
-                     oy - HH + 3 + ((k * 11 + f * 7) % 26), 2, 1);
-        }
-        g.restore();
-      }));
+    // water: WATER_VARIANTS positional variants x WATER_FRAMES shimmer
+    // frames (G5) — fam.water[v][f]. No edge stroke: an open lake reads as
+    // one continuous surface. Wave/glint positions are pure arithmetic in
+    // (k, f, v) so every boot builds pixel-identical frames and equal
+    // (variant, frame) pairs always render identically.
+    for (let v = 0; v < WATER_VARIANTS; v++) {
+      const vfr = [];
+      for (let f = 0; f < WATER_FRAMES; f++) {
+        vfr.push(mkSprite(1, 1, 0, (g, ox, oy) => {
+          const gr = g.createLinearGradient(ox, oy - HH, ox, oy + HH);
+          gr.addColorStop(0, P.waterTop); gr.addColorStop(1, P.waterBot);
+          sealedDiamond(g, ox, oy, gr); // opaque seam, no bleed
+          g.save(); diamondPath(g, ox, oy); g.clip();
+          g.strokeStyle = P.wave; g.lineWidth = 1;
+          for (let k = 0; k < 4; k++) {
+            const wy = oy - HH + 4 + k * 7 + ((k * 5 + f * 2 + v * 3) % 5);
+            const wx = ox - HW + ((k * 13 + f * 11 + v * 19) % 40);
+            g.beginPath(); g.moveTo(wx, wy);
+            g.bezierCurveTo(wx + 8, wy - 2, wx + 14, wy + 2, wx + 22, wy); g.stroke();
+          }
+          g.fillStyle = P.glint; // shimmering glints (ice sparkle in winter)
+          for (let k = 0; k < 3; k++) {
+            g.fillRect(ox - HW + 4 + ((k * 23 + f * 17 + v * 29) % 54),
+                       oy - HH + 3 + ((k * 11 + f * 7 + v * 5) % 26), 2, 1);
+          }
+          g.restore();
+        }));
+      }
+      fam.water.push(vfr);
     }
 
     // shoreline bands (16 masks; bit0=N bit1=E bit2=S bit3=W) — sand in
@@ -331,9 +362,8 @@ function buildSprites() {
       const tier = [];
       for (let v = 0; v < 3; v++) {
         tier.push(mkSprite(1, 1, 26, (g, ox, oy) => {
-          diamondPath(g, ox, oy);
-          g.fillStyle = P.floor; g.fill();
-          g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
+          sealedDiamond(g, ox, oy, P.floor); // no dark stroke (G5): grass/
+          // forest boundaries get their line from the SPR.terrEdge overlays
           const n = TREES_PER_TIER[d] + (v % 2);
           for (let k = 0; k < n; k++) {
             drawTree(g, ox - 14 + ((k * 9 + v * 7 + d * 3) % 28) + R() * 4,
@@ -352,6 +382,32 @@ function buildSprites() {
   SPR.water = SPR.season.summer.water;
   SPR.shore = SPR.season.summer.shore;
   SPR.forest = SPR.season.summer.forest;
+
+  // ---- type-change terrain edges (G5; 16 masks, bit0=N bit1=E bit2=S
+  // bit3=W) ---- the ONLY place terrain seams are stroked. Interior tiles
+  // bake no edge at all; buildTerrainLayer draws one of these overlays per
+  // land tile on the edges whose neighbor is a different land type
+  // (grass vs forest), so meadows stay continuous while stands of trees
+  // keep a legible boundary. Clipped to the tile's own diamond, the 5px
+  // stroke leaves ~2.5px inside the seam — enough that a neighboring
+  // forest floor's 1px seam-sealing overdraw still leaves a clear line.
+  // Season-independent.
+  SPR.terrEdge = [];
+  for (let m = 0; m < 16; m++) {
+    SPR.terrEdge.push(mkSprite(1, 1, 0, (g, ox, oy) => {
+      if (!m) return; // no differing neighbor: nothing drawn
+      const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+      const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
+      g.save(); diamondPath(g, ox, oy); g.clip();
+      g.strokeStyle = "rgba(0,0,0,.45)"; g.lineWidth = 5; g.lineCap = "butt";
+      for (let b = 0; b < 4; b++) {
+        if (!(m & (1 << b))) continue;
+        const [P0, P1] = edges[b];
+        g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
+      }
+      g.restore();
+    }));
+  }
 
   SPR.rubble = mkSprite(1, 1, 0, (g, ox, oy) => {
     diamondPath(g, ox, oy);
@@ -884,6 +940,26 @@ function beachMask(city, i) {
   if (water(x + 1, y)) m |= 2;
   if (water(x, y + 1)) m |= 4;
   if (water(x - 1, y)) m |= 8;
+  return m;
+}
+
+// G5: for a LAND tile — bitmask of 4-neighbors whose land type differs
+// (grass vs forest); the terrain layer strokes only these edges. Water
+// boundaries are excluded: the shore band already straddles those seams.
+// Off-map neighbors never raise an edge.
+function terrEdgeMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  const f = city.terr[i] === TERR.FOREST;
+  let m = 0;
+  const diff = (X, Y) => {
+    if (!city.inMap(X, Y)) return false;
+    const t = city.terr[city.idx(X, Y)];
+    return t !== TERR.WATER && (t === TERR.FOREST) !== f;
+  };
+  if (diff(x, y - 1)) m |= 1;
+  if (diff(x + 1, y)) m |= 2;
+  if (diff(x, y + 1)) m |= 4;
+  if (diff(x - 1, y)) m |= 8;
   return m;
 }
 

@@ -748,28 +748,100 @@ function openShortcuts() {
   showDlg("dlg-shortcuts");
 }
 
+/* --------- City Graphs (G7r) ---------
+   History fills one point per month rollover (collectBudget), so a fresh city
+   — and every scenario at boot — opens with < 2 points and used to draw a
+   blank white box. Now the sub-2-point case shows a period-flavored "Collecting
+   data" card, and once two months exist both series plot over a labeled frame:
+   a dark x/y axis, faint quarter gridlines, a min/max value scale down each
+   side (green = population on the left, blue = funds on the right) and a month
+   axis along the bottom. Each open re-reads city.history, so the plot always
+   reflects the current run. */
+// Plot frame: left/right value gutters, a thin top and a month-label bottom.
+const GR = { PL: 40, PR: 40, PT: 10, PB: 18, PAD: 3 };
+// Compact value formatter for the axis gutters (e.g. 20000 -> "20k").
+function graphNum(v) {
+  v = Math.round(v);
+  const a = Math.abs(v);
+  if (a >= 10000) return Math.round(v / 1000) + "k";
+  if (a >= 1000) return (v / 1000).toFixed(1) + "k";
+  return String(v);
+}
 function openGraphs() {
   const cv = document.getElementById("graph-canvas");
   const g = cv.getContext("2d");
-  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
-  const plot = (data, color, maxOverride) => {
-    if (data.length < 2) return;
-    const max = maxOverride ?? Math.max(...data.map(Math.abs), 1);
-    g.strokeStyle = color; g.lineWidth = 1.5;
-    g.beginPath();
-    data.forEach((v, k) => {
-      const x = k / (data.length - 1) * (cv.width - 10) + 5;
-      const y = cv.height - 10 - (v / max) * (cv.height - 25);
-      k ? g.lineTo(x, y) : g.moveTo(x, y);
-    });
-    g.stroke();
-  };
-  g.strokeStyle = "#ddd";
-  for (let k = 1; k < 4; k++) {
-    g.beginPath(); g.moveTo(0, cv.height / 4 * k); g.lineTo(cv.width, cv.height / 4 * k); g.stroke();
+  const W = cv.width, H = cv.height;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, W, H);
+
+  const x0 = GR.PL, x1 = W - GR.PR, y0 = GR.PT, y1 = H - GR.PB;
+  const top = y0 + GR.PAD, bot = y1 - GR.PAD; // 0 sits a few px above the axis
+
+  // faint quarter gridlines (kept from the original, boxed into the plot area)
+  g.strokeStyle = "#ddd"; g.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const gy = Math.round(y0 + (y1 - y0) * k / 4) + 0.5;
+    g.beginPath(); g.moveTo(x0, gy); g.lineTo(x1, gy); g.stroke();
   }
-  plot(city.history.pop, "#0a0");
-  plot(city.history.funds, "#00a");
+  for (let k = 1; k < 4; k++) {
+    const gx = Math.round(x0 + (x1 - x0) * k / 4) + 0.5;
+    g.beginPath(); g.moveTo(gx, y0); g.lineTo(gx, y1); g.stroke();
+  }
+
+  const pop = city.history.pop, funds = city.history.funds;
+  // --- empty / low-data state: too few months to plot a line yet ---
+  if (pop.length < 2) {
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillStyle = "#444"; g.font = "bold 13px 'MS Sans Serif',Arial,sans-serif";
+    g.fillText("Collecting data —", W / 2, H / 2 - 9);
+    g.fillStyle = "#555"; g.font = "11px 'MS Sans Serif',Arial,sans-serif";
+    g.fillText("check back in February", W / 2, H / 2 + 9);
+    showDlg("dlg-graphs");
+    return;
+  }
+
+  // trace over an independent per-series scale so both fill the frame
+  const plot = (data, color) => {
+    const max = Math.max(...data.map(Math.abs), 1);
+    const px = (k) => x0 + 2 + k / (data.length - 1) * (x1 - x0 - 4);
+    const py = (v) => Math.max(top, Math.min(bot, bot - (v / max) * (bot - top)));
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    data.forEach((v, k) => (k ? g.lineTo(px(k), py(v)) : g.moveTo(px(k), py(v))));
+    g.stroke();
+    if (data.length <= 60) { // vertex dots when sparse enough to read
+      g.fillStyle = color;
+      data.forEach((v, k) => { g.beginPath(); g.arc(px(k), py(v), 2, 0, 7); g.fill(); });
+    }
+    return max;
+  };
+  const popMax = plot(pop, "#0a0");
+  const fundMax = plot(funds, "#00a");
+
+  // strong axes on top of the traces (dark, clearly beyond the #ddd gridlines)
+  g.strokeStyle = "#333"; g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(x0 + 0.5, y0); g.lineTo(x0 + 0.5, y1);        // y-axis
+  g.moveTo(x0, y1 + 0.5); g.lineTo(x1, y1 + 0.5);        // x-axis
+  g.stroke();
+
+  // value scale: population (dark green) down the left gutter, funds (dark
+  // blue) down the right — tinted to their traces but dark enough to read
+  g.font = "bold 10px 'MS Sans Serif',Arial,sans-serif"; g.textBaseline = "middle";
+  g.textAlign = "right"; g.fillStyle = "#040";
+  g.fillText(graphNum(popMax), x0 - 4, top);
+  g.fillText(graphNum(popMax / 2), x0 - 4, (top + bot) / 2);
+  g.fillText("0", x0 - 4, bot);
+  g.textAlign = "left"; g.fillStyle = "#004";
+  g.fillText(graphNum(fundMax), x1 + 4, top);
+  g.fillText(graphNum(fundMax / 2), x1 + 4, (top + bot) / 2);
+  g.fillText("0", x1 + 4, bot);
+
+  // month axis along the bottom: first month, span label, latest month
+  g.fillStyle = "#333"; g.font = "bold 9px 'MS Sans Serif',Arial,sans-serif";
+  g.textBaseline = "top";
+  g.textAlign = "left"; g.fillText("mo 1", x0, y1 + 4);
+  g.textAlign = "center"; g.fillText("months", (x0 + x1) / 2, y1 + 4);
+  g.textAlign = "right"; g.fillText("mo " + pop.length, x1, y1 + 4);
+
   showDlg("dlg-graphs");
 }
 

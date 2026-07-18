@@ -6,10 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G7r — City Graphs empty-state fix** (graphics audit, judge-corrected):
-  the graphs dialog draws a blank white box until 2+ months of history exist;
-  add axes, gridline labels, and a "Collecting data — check back in February"
-  empty state; traces appear from the second month rollover.
+- [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
+  and lose capacity after ~30 years with rebuild prompts, coal smog scales
+  with load; power mix pie in the budget window.
 
 ## Open
 
@@ -25,11 +24,28 @@ Queue policy: keep at least 5 open improvements at all times.
 - [ ] **M22 — Ordinances**: city ordinances dialog (curfew, recycling,
   carpool incentive, arcade tax) with monthly costs/benefits wired into the
   sim, unlocked by tier; advisors recommend relevant ordinances.
+- [ ] **M24 — Water & sewage system**: water towers/pumps + pipe network with
+  a coverage map (stampCoverage pattern), water required for zones to reach
+  higher density like power; a Water minimap overlay and budget upkeep.
+- [ ] **M25 — Rail & subway transit**: buildable rail/subway lines that carry
+  trips off the roads, measurably lowering congestion near stations (wired to
+  the M1 traffic model); station coverage draws riders; budget upkeep.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
 
 ## Done
+
+- [x] **G7r — City Graphs empty-state fix**: openGraphs() rewritten — a
+  fresh city / scenario boot (history <2 points) now shows a centered
+  "Collecting data — check back in February" card instead of a blank white
+  box; once >=2 months exist both traces render (pop #0a0 / funds #00a) over
+  a dark x/y axis with min/mid/max value gutters and a month axis; empty
+  state gives way to traces from the second rollover; reopening re-reads
+  live history. Verifier also fixed a zero-baseline overdraw and bumped
+  trace lineWidth so flat traces are detectable. Criteria set by an
+  independent Opus high-effort reviewer (Fable quota exhausted; session on
+  Opus). Verified against 6 criteria (all pass, zero console errors).
 
 - [x] **G16 — Living-city motion pass — cars, smoke, tornado, UFO**: cars are
   now baked iso body sprites picked per travel axis (two parallelogram shapes,

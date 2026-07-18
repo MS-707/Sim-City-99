@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G12 — Road art upgrade** (graphics audit): widen asphalt, add curbs,
-  clean junctions, dash continuity in roadSprite(). Criteria:
-  docs/gfx-audit-slate.json.
+- [ ] **G13 — Shoreline & forest naturalization** (graphics audit): flatten
+  the beach band, jitter it per edge, curve the coast with corner wedges,
+  organic forest scatter. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G13 — Shoreline & forest naturalization**: Soften the coast and the forests: flatten the beach band (drop/dim the sandHi outer-lip highlight), jitter band width per edge with seeded noise, and add corner wedge fills so the coast curves instead…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G14 — Seasons reach the buildings and every tree**: Stop the city floating on the snow: bake a winter variant per zone/civic sprite overpainting top faces (and tinyHouse roof planes) with pal.snowCap plus an eave drip line — the seasonal bake loop and…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G15 — Splash screen joins the 1997 identity**: Rebuild the splash as the same game: stage it on the teal Win95 desktop (or inside a maximized Win95 window), render a procedural isometric skyline strip from the actual sprite set beneath the logo, r…
@@ -42,6 +40,17 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G12 — Road art upgrade**: roadSprite() asphalt widened from ~44% to
+  ~70% of the tile edge with 1px lighter-gray curb lines each side (winter
+  keeps the M12 plowed snow banks); center-line dashes on 3+ connection
+  tiles stop 9px short of center so junction boxes stay unmarked; straight
+  tiles draw one edge-to-edge stroke with an armLen/4 period so the dash
+  phase is 0 at every edge-midpoint — dash/gap run variance 37px -> <1px
+  across seams, no mirror at center. All 16 masks + winter variants bake at
+  the unchanged 64x32/ox32/oy16 anchor; night lamp compositing untouched.
+  Verified against the 5 archived criteria + 16-mask/winter guard
+  (17/17 checks, all pass).
 
 - [x] **G11 — Civic buildings that players can find**: police/fire/school/
   hospital rebuilt with raised massing on set-back paved aprons plus skyline

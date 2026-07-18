@@ -693,35 +693,69 @@ function buildSprites() {
   SPR.road = []; SPR.roadWinter = []; SPR.wire = [];
   // winter roads (M12): same geometry, plowed asphalt with snow banks piled
   // along both edges of every arm — baked here, selected by spriteFor
+  // G12: wide asphalt (~72% of the edge vs HEAD's 44%) with a lighter curb line
+  // on each verge; centre-line dashes run one continuous edge-to-edge stroke on
+  // straight tiles (even 4-4 rhythm carried seamlessly across tile seams) and
+  // stop short of the centre on junctions/corners so junction boxes stay clean.
   const roadSprite = (m, snow) => mkSprite(1, 1, 0, (g, ox, oy) => {
     const C = [ox, oy];
-    const asphalt = "#55565e", line = "#d8c24a";
-    // arms
+    const asphalt = "#55565e", curb = "#93949c", line = "#d8c24a";
+    const AW0 = 0.14, AW1 = 0.86;              // asphalt spans ~72% of each edge
+    const armLen = Math.hypot(HW / 2, HH / 2); // centre → edge-midpoint distance
+    const dash = armLen / 4;                   // 4-4 rhythm; a straight tile = 8 dashes
+    const clearR = 9;                          // junction dashes stop this far from centre
+    const straight = m === 5 || m === 10;      // 2 opposite arms => a through road
+    // arms + curbs (m===0 draws all four as an isolated patch)
     for (let b = 0; b < 4; b++) {
       if (!(m & (1 << b)) && m !== 0) continue;
       const [P0, P1] = EDGE[b];
       const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
-      const e1 = [P0[0] + (P1[0] - P0[0]) * 0.28, P0[1] + (P1[1] - P0[1]) * 0.28];
-      const e2 = [P0[0] + (P1[0] - P0[0]) * 0.72, P0[1] + (P1[1] - P0[1]) * 0.72];
+      const e1 = [P0[0] + (P1[0] - P0[0]) * AW0, P0[1] + (P1[1] - P0[1]) * AW0];
+      const e2 = [P0[0] + (P1[0] - P0[0]) * AW1, P0[1] + (P1[1] - P0[1]) * AW1];
       const c1 = [C[0] + e1[0] - mid[0], C[1] + e1[1] - mid[1]];
       const c2 = [C[0] + e2[0] - mid[0], C[1] + e2[1] - mid[1]];
       poly(g, [e1, e2, c2, c1], asphalt);
-      if (snow) { // plowed snow banks along both arm edges
+      if (snow) { // plowed snow banks piled along both arm edges (M12)
         g.strokeStyle = "#e8edf3"; g.lineWidth = 2.6; g.lineCap = "round";
         g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
         g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
         g.lineCap = "butt";
-      }
-      if (m & (1 << b)) { // center line dash
-        g.strokeStyle = line; g.lineWidth = 1.4;
-        g.setLineDash([4, 4]);
-        g.beginPath(); g.moveTo(C[0], C[1]); g.lineTo(mid[0], mid[1]); g.stroke();
-        g.setLineDash([]);
+      } else { // 1px curb line, lighter than asphalt, on each verge
+        g.strokeStyle = curb; g.lineWidth = 1.2;
+        g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
+        g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
       }
     }
-    // center pad
-    poly(g, [[C[0] - 6.4, C[1] - 3.2], [C[0] + 6.4, C[1] - 3.2],
-             [C[0] + 6.4, C[1] + 3.2], [C[0] - 6.4, C[1] + 3.2]], asphalt);
+    // center pad keeps junction boxes solid asphalt
+    poly(g, [[C[0] - 7, C[1] - 3.5], [C[0] + 7, C[1] - 3.5],
+             [C[0] + 7, C[1] + 3.5], [C[0] - 7, C[1] + 3.5]], asphalt);
+    // ---- center-line dashes (drawn last, over the asphalt) ----
+    g.strokeStyle = line; g.lineWidth = 1.4; g.lineCap = "butt";
+    g.setLineDash([dash, dash]); g.lineDashOffset = 0;
+    if (straight) {
+      // single edge-to-edge stroke: length 8*dash lands phase 0 at both edge-
+      // midpoints, so the rhythm continues across seams with no mirror at center
+      const bs = m === 5 ? [0, 2] : [1, 3];
+      const mA = EDGE[bs[0]], mB = EDGE[bs[1]];
+      const midA = [(mA[0][0] + mA[1][0]) / 2, (mA[0][1] + mA[1][1]) / 2];
+      const midB = [(mB[0][0] + mB[1][0]) / 2, (mB[0][1] + mB[1][1]) / 2];
+      g.beginPath();
+      g.moveTo(midA[0], midA[1]); g.lineTo(C[0], C[1]); g.lineTo(midB[0], midB[1]);
+      g.stroke();
+    } else { // junctions / corners / dead-ends: dash from each edge inward but
+      // stop clearR short of center; phase 0 at the edge aligns with neighbours
+      for (let b = 0; b < 4; b++) {
+        if (!(m & (1 << b))) continue;
+        const [P0, P1] = EDGE[b];
+        const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
+        const ux = (C[0] - mid[0]) / armLen, uy = (C[1] - mid[1]) / armLen;
+        g.beginPath();
+        g.moveTo(mid[0], mid[1]);
+        g.lineTo(mid[0] + ux * (armLen - clearR), mid[1] + uy * (armLen - clearR));
+        g.stroke();
+      }
+    }
+    g.setLineDash([]); g.lineDashOffset = 0;
   });
   for (let m = 0; m < 16; m++) {
     SPR.road.push(roadSprite(m, false));

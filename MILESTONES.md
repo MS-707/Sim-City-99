@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G8 — Minimap camera rect, overlay legends & demand-meter zero line**
-  (graphics audit): stroke the camera viewport on the minimap, legend strip
-  for overlay modes, RCI zero line. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G9 — Roofscape variety** (graphics audit): beacon discipline (C3-only
+  signature), residential/industrial roof furniture, shade() fix.
+  Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G9 — Roofscape variety — beacon discipline, roof clutter, shade() fix**: Break the identical-red-beacon monotony and the empty-roof problem in js/sprites.js: make the mast+red-tip a C3-only signature on 2 of 5 variants; give R3 variants residential roof furniture (water ta…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G10 — Zone color identity — R/C/I readable from the main view**: End the hue lottery: constrain each zone's procedural palette to its minimap hue family (R warm brick/cream/terracotta, C cool glass blues/teals/grays, I desaturated ochre/rust/concrete), drop facade…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G11 — Civic buildings that players can find**: Give the 2x2 civics skyline presence and identity: raise police/hospital massing to ~50-60px (or add landmark elements clearing the 68px skyline — police comms mast cluster, hospital tower wing behind…
@@ -50,6 +48,24 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G8 — Minimap camera rect, overlay legends & demand zero line**:
+  renderMinimap strokes the projected camera viewport as a crisp 1px white
+  rect (screen corners inverted to tile space, integer-aligned, clamped to
+  the map — tracks pans exactly: 10-tile pan moved it 10*sc px; scales with
+  zoom; present and clamped at 64/80/128); #mm-legend strip under the
+  minimap shows per-mode swatches/gradients in the overlay's own colors
+  ("free / jammed", "edu / health", …), hidden in City mode, and all seven
+  mode buttons carry full-name tooltips (Pol renamed Pollu); traffic
+  overlay keeps district context at ~35% City-mode brightness (measured
+  luminance ratios 0.347 R / 0.343 C, was flat #111 at 0.10) under the
+  green->red heat ramp; #mapmodes is an equal-width 4-per-row grid (width
+  spread 0px, was 5.3px over ragged 5+2 rows) with the sunken checkerboard
+  dither on the active mode; the RCI zero line is a 2px black/white tick
+  overhanging each track 4px with +/- pole glyphs, and any nonzero demand
+  draws a >=3px bar on its side (sim-driven r=-0.24 at 20% tax renders 7px
+  below the midline). Minimap click-jump byte-exact at all three map sizes;
+  zero page errors. Verified against the 5 archived criteria (all pass).
 
 - [x] **G6 — Win95 chrome authenticity**: .title-btns margin-left:auto
   (nth-child stretch rule removed) docks every dialog close button at 6px

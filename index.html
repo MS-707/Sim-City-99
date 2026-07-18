@@ -71,6 +71,8 @@
       <div id="sidepanel">
         <fieldset class="fs95"><legend>Demand</legend>
           <div id="rci">
+            <!-- G8: +/- pole glyphs beside the tracks; the zero line crosses each track at 50% -->
+            <div class="rci-axis"><span class="rci-pole">+</span><span class="rci-pole">&minus;</span></div>
             <div class="rci-col"><div class="rci-barwrap"><div id="rci-r" class="rci-bar r"></div></div><span>R</span></div>
             <div class="rci-col"><div class="rci-barwrap"><div id="rci-c" class="rci-bar c"></div></div><span>C</span></div>
             <div class="rci-col"><div class="rci-barwrap"><div id="rci-i" class="rci-bar i"></div></div><span>I</span></div>
@@ -78,8 +80,10 @@
         </fieldset>
         <fieldset class="fs95"><legend>Map</legend>
           <canvas id="minimap" width="160" height="160"></canvas>
+          <!-- G8: one-line legend for the active overlay mode; hidden in City mode -->
+          <div id="mm-legend" class="hidden"></div>
           <div id="mapmodes">
-            <button class="btn95 tiny mm active" data-mode="all">City</button><button class="btn95 tiny mm" data-mode="power">Pwr</button><button class="btn95 tiny mm" data-mode="poll">Pol</button><button class="btn95 tiny mm" data-mode="value">Val</button><button class="btn95 tiny mm" data-mode="crime">Cri</button><button class="btn95 tiny mm" data-mode="traffic">Trf</button><button class="btn95 tiny mm" data-mode="svc">Svc</button>
+            <button class="btn95 tiny mm active" data-mode="all" title="City overview">City</button><button class="btn95 tiny mm" data-mode="power" title="Power grid">Pwr</button><button class="btn95 tiny mm" data-mode="poll" title="Pollution">Pollu</button><button class="btn95 tiny mm" data-mode="value" title="Land value">Val</button><button class="btn95 tiny mm" data-mode="crime" title="Crime">Cri</button><button class="btn95 tiny mm" data-mode="traffic" title="Traffic congestion">Trf</button><button class="btn95 tiny mm" data-mode="svc" title="City services (education &amp; health)">Svc</button>
           </div>
         </fieldset>
         <fieldset class="fs95"><legend>Vitals</legend>

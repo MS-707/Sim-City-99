@@ -149,13 +149,22 @@ input[type=range]::-moz-range-thumb {
 
 #rci { display: flex; justify-content: space-around; height: 78px; }
 .rci-col { display: flex; flex-direction: column; align-items: center; font-weight: bold; }
+/* G8: +/- glyphs mark the demand poles, aligned with the 60px tracks */
+.rci-axis {
+  display: flex; flex-direction: column; justify-content: space-between;
+  height: 60px; font-weight: bold; font-size: 11px; line-height: 10px;
+}
 .rci-barwrap {
   width: 18px; height: 60px; position: relative;
   background: #808080; border: 1px inset #fff;
 }
+/* G8: legible zero line — a black-over-white 2px tick that overhangs the
+   track 4px each side and paints above the bars, so 50% reads as zero at
+   a glance instead of a hairline lost in the gray groove */
 .rci-barwrap::after {
-  content: ""; position: absolute; left: 0; right: 0; top: 50%;
-  border-top: 1px solid #000;
+  content: ""; position: absolute; left: -4px; right: -4px; top: 50%;
+  margin-top: -1px; height: 2px; z-index: 1; box-sizing: border-box;
+  background: #000; border-bottom: 1px solid #fff;
 }
 .rci-bar { position: absolute; left: 2px; right: 2px; height: 0; }
 .rci-bar.r { background: #00b000; }
@@ -163,7 +172,26 @@ input[type=range]::-moz-range-thumb {
 .rci-bar.i { background: #d0b000; }
 
 #minimap { width: 100%; image-rendering: pixelated; border: 1px inset #fff; background:#000; cursor: pointer; display:block; }
-#mapmodes { display: flex; gap: 1px; margin-top: 3px; flex-wrap: wrap; }
+/* G8: one-line overlay legend under the minimap (hidden in City mode) */
+#mm-legend {
+  display: flex; align-items: center; gap: 3px; margin-top: 3px;
+  font-size: 9px; line-height: 10px; white-space: nowrap;
+}
+#mm-legend i {
+  font-style: normal; display: inline-block; flex: 0 0 auto;
+  width: 11px; height: 8px; border: 1px solid #404040;
+}
+#mm-legend i.grad { flex: 1 1 auto; }
+/* G8: seven mode buttons in an equal-width 4-per-row grid; the active
+   mode wears the sunken pressed-toggle dither like the toolbar */
+#mapmodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 3px; }
+#mapmodes .mm { padding: 1px 0; min-width: 0; }
+#mapmodes .mm.active {
+  border-color: #404040 #fff #fff #404040;
+  background-color: #c0c0c0;
+  background-image: conic-gradient(#fff 25%, #c0c0c0 25% 50%, #fff 50% 75%, #c0c0c0 75%);
+  background-size: 2px 2px;
+}
 
 #vitals { width: 100%; border-collapse: collapse; }
 #vitals td { padding: 1px 2px; font-size: 11px; }

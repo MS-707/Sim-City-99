@@ -836,6 +836,37 @@ function drawCursor(city, uiState) {
 }
 
 /* ---------------- minimap ---------------- */
+// default City-mode color of one tile — shared by the City view and the
+// overlay modes that keep the district as dimmed context (G8)
+function minimapCityCol(city, i) {
+  if (city.fire[i]) return "#f80";
+  const t = city.over[i];
+  if (t === OV.ROAD) return "#888";
+  if (t === OV.WIRE) return "#ba8";
+  if (t === OV.ZR) return city.lvl[i] ? "#2d2" : "#141";
+  if (t === OV.ZC) return city.lvl[i] ? "#46f" : "#114";
+  if (t === OV.ZI) return city.lvl[i] ? "#dc2" : "#441";
+  if (t === OV.PARK) return "#5c5";
+  if (t === OV.POLICE) return "#88f";
+  if (t === OV.FIRESTA) return "#f55";
+  if (t === OV.COAL || t === OV.SOLAR) return "#ff0";
+  if (t === OV.SCHOOL) return "#0cc";
+  if (t === OV.HOSPITAL) return "#fcf";
+  if (t === OV.MAYOR) return "#fd6";
+  if (t === OV.STADIUM) return "#e5e";
+  if (t === OV.RUBBLE) return "#654";
+  return city.terr[i] === TERR.WATER ? "#136" : (city.terr[i] === TERR.FOREST ? "#0a3a12" : "#1c4a1c");
+}
+
+// G8: scale a #rgb/#rrggbb color to a fraction of its brightness — overlay
+// context tiles render at ~35% of their City-mode color instead of flat #111
+function minimapDim(hex, f) {
+  const [r, g, b] = hex.length === 4
+    ? [parseInt(hex[1], 16) * 17, parseInt(hex[2], 16) * 17, parseInt(hex[3], 16) * 17]
+    : [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+  return `rgb(${r * f | 0},${g * f | 0},${b * f | 0})`;
+}
+
 function renderMinimap(city, mode) {
   const mm = document.getElementById("minimap");
   const g = mm.getContext("2d");
@@ -859,7 +890,7 @@ function renderMinimap(city, mode) {
       if (city.over[i] === OV.ROAD) {
         const v = city.traffic[i]; // green -> yellow -> red as congestion rises
         col = `rgb(${Math.min(255, 60 + v * 1.6) | 0},${Math.max(0, 200 - v * 1.4) | 0},40)`;
-      } else col = city.terr[i] === TERR.WATER ? "#013" : "#111";
+      } else col = minimapDim(minimapCityCol(city, i), 0.35); // G8: keep district context
     } else if (mode === "svc") {
       // education (green) + health (red) coverage
       const e = city.eduCov[i], h = city.medCov[i];
@@ -870,28 +901,36 @@ function renderMinimap(city, mode) {
       col = v > 6 ? `rgb(${80 + v},20,${30 + v / 2})` : (city.terr[i] === TERR.WATER ? "#013" : "#121");
     } else {
       // default city view
-      const t = city.over[i];
-      if (t === OV.ROAD) col = "#888";
-      else if (t === OV.WIRE) col = "#ba8";
-      else if (t === OV.ZR) col = city.lvl[i] ? "#2d2" : "#141";
-      else if (t === OV.ZC) col = city.lvl[i] ? "#46f" : "#114";
-      else if (t === OV.ZI) col = city.lvl[i] ? "#dc2" : "#441";
-      else if (t === OV.PARK) col = "#5c5";
-      else if (t === OV.POLICE) col = "#88f";
-      else if (t === OV.FIRESTA) col = "#f55";
-      else if (t === OV.COAL || t === OV.SOLAR) col = "#ff0";
-      else if (t === OV.SCHOOL) col = "#0cc";
-      else if (t === OV.HOSPITAL) col = "#fcf";
-      else if (t === OV.MAYOR) col = "#fd6";
-      else if (t === OV.STADIUM) col = "#e5e";
-      else if (t === OV.RUBBLE) col = "#654";
-      else col = city.terr[i] === TERR.WATER ? "#136" : (city.terr[i] === TERR.FOREST ? "#0a3a12" : "#1c4a1c");
-      if (city.fire[i]) col = "#f80";
+      col = minimapCityCol(city, i);
     }
     g.fillStyle = col;
     // integer pixel edges: every canvas pixel belongs wholly to one tile, so
     // fractional scales (e.g. 160/128) never blend neighbouring tile colors
     const px = Math.round(x * sc), py = Math.round(y * sc);
     g.fillRect(px, py, Math.round((x + 1) * sc) - px, Math.round((y + 1) * sc) - py);
+  }
+
+  // G8: projected camera-viewport rectangle — invert worldX/worldY for the
+  // four screen corners to get their continuous tile coordinates, then stroke
+  // the tile-space bounding box (clamped to the map) as a crisp 1px white
+  // rect. Tracks every pan/zoom at every map size since sc = canvas / MAP.
+  if (cvs) {
+    let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity;
+    for (const [sx, sy] of [[0, 0], [cvs.width, 0], [0, cvs.height], [cvs.width, cvs.height]]) {
+      const wx = (sx - cvs.width / 2) / cam.z + cam.x;
+      const wy = (sy - cvs.height / 2) / cam.z + cam.y;
+      const a = wx / HW, b = (wy - HH) / HH;
+      const tx = (a + b) / 2, ty = (b - a) / 2;
+      tx0 = Math.min(tx0, tx); tx1 = Math.max(tx1, tx);
+      ty0 = Math.min(ty0, ty); ty1 = Math.max(ty1, ty);
+    }
+    // integer-aligned stroke on the half-pixel grid: the 1px line stays
+    // crisp full-intensity white instead of feathering across two columns
+    const cl = (v) => Math.round(Math.max(0, Math.min(MAP, v)) * sc);
+    const rx = Math.min(cl(tx0), mm.width - 2), ry = Math.min(cl(ty0), mm.height - 2);
+    const rw = Math.max(1, cl(tx1) - rx - 1), rh = Math.max(1, cl(ty1) - ry - 1);
+    g.strokeStyle = "#fff";
+    g.lineWidth = 1;
+    g.strokeRect(rx + 0.5, ry + 0.5, rw, rh);
   }
 }

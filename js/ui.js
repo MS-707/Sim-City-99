@@ -534,11 +534,30 @@ function bindKeys() {
   });
 }
 
+// G8: one-line legend per overlay mode — swatches/gradients echo the exact
+// colors renderMinimap paints, so the strip explains what the map shows
+const MM_LEGENDS = {
+  power:   '<i class="sw" style="background:#ff0"></i>plant <i class="sw" style="background:#f80"></i>powered <i class="sw" style="background:#334"></i>dark',
+  poll:    '<i class="grad" style="background:linear-gradient(90deg,#131,#7a4628,#ff3c28)"></i>clean / foul',
+  value:   '<i class="grad" style="background:linear-gradient(90deg,#1e283c,#6adabb)"></i>cheap / prime',
+  crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#a5143e)"></i>safe / lawless',
+  traffic: '<i class="grad" style="background:linear-gradient(90deg,#3cc828,#dcb428,#ff0028)"></i>free / jammed',
+  svc:     '<i class="sw" style="background:#28dc3c"></i>edu <i class="sw" style="background:#dc283c"></i>health <i class="sw" style="background:#dcdc3c"></i>both',
+};
+
+function updateMapLegend(mode) {
+  const el = document.getElementById("mm-legend");
+  if (mode === "all") { el.classList.add("hidden"); return; }
+  el.innerHTML = MM_LEGENDS[mode];
+  el.classList.remove("hidden");
+}
+
 function bindMinimap() {
   document.querySelectorAll(".mm").forEach(b => {
     b.addEventListener("click", () => {
       UI.mapMode = b.dataset.mode;
       document.querySelectorAll(".mm").forEach(x => x.classList.toggle("active", x === b));
+      updateMapLegend(b.dataset.mode);
     });
   });
   const mm = document.getElementById("minimap");
@@ -961,7 +980,9 @@ function refreshHUD() {
   const setBar = (id, v) => {
     const el = document.getElementById(id);
     const half = 29; // px from midline
-    const h = Math.abs(v) * half;
+    // G8: any nonzero demand draws at least a 3px bar on its side of the
+    // zero line — a whisper of demand no longer renders as a blank track
+    const h = v === 0 ? 0 : Math.max(3, Math.abs(v) * half);
     el.style.height = h + "px";
     if (v >= 0) { el.style.bottom = "50%"; el.style.top = "auto"; }
     else { el.style.top = "50%"; el.style.bottom = "auto"; }

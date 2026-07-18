@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M19 — Power plant variety & aging**: gas and wind plants, plants age
-  and lose capacity after ~30 years with rebuild prompts, coal smog scales
-  with load; power mix pie in the budget window.
+- [ ] **M20 — Soundtrack expansion**: 3-4 distinct generative music moods
+  (calm building, bustling metropolis, disaster tension, night jazz) that
+  crossfade based on sim state; music credits easter egg in About.
 
 ## Open
 
@@ -35,6 +35,19 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M19 — Power plant variety & aging**: OV.GAS (2x2, cap 450, §4500,
+  moderate load-scaled smog) and OV.WIND (1x1, cap 80, §2500, zero smog)
+  added as toolbar plants with procedural sprites and POWER_CAP entries
+  summed into supply; a plantYear array records each plant's build year and
+  plantEffectiveCap decays full->~50% between age 30 and 45 (age35 coal=250)
+  with an end-of-life rebuild notice, reset on bulldoze+replace; coal smog in
+  recomputeMaps scales with grid load (pollution 328 under load vs less idle);
+  a power-mix breakdown (powerMix() -> {coal,solar,gas,wind}) in the budget
+  window; save v8 round-trips plantYear (v7 saves default to load year).
+  Coal/solar caps, smoke plumes and the M13/M23 budget panels preserved.
+  Criteria set by an independent Opus reviewer (Fable quota exhausted).
+  Verified against 7 criteria (all pass).
 
 - [x] **G7r — City Graphs empty-state fix**: openGraphs() rewritten — a
   fresh city / scenario boot (history <2 points) now shows a centered

@@ -16,26 +16,71 @@ const OV = {
   NONE: 0, ROAD: 1, WIRE: 2, ZR: 3, ZC: 4, ZI: 5, PARK: 6,
   POLICE: 7, FIRESTA: 8, COAL: 9, SOLAR: 10, RUBBLE: 11,
   MAYOR: 12, STADIUM: 13, SCHOOL: 14, HOSPITAL: 15,
+  // M19: two new generators join coal/solar. GAS is a big fossil peaker
+  // (high output, coal-level smog); WIND is a clean low-output farm.
+  GAS: 16, WIND: 17,
 };
 
 // footprint (w,h) per overlay type
 const OV_SIZE = {
   [OV.POLICE]: 2, [OV.FIRESTA]: 2, [OV.COAL]: 2, [OV.SOLAR]: 2,
   [OV.STADIUM]: 2, [OV.SCHOOL]: 2, [OV.HOSPITAL]: 2,
+  [OV.GAS]: 2, [OV.WIND]: 2, // M19
 };
 const sizeOf = (t) => OV_SIZE[t] || 1;
+
+// M19: which overlay types are power generators (participate in the supply
+// sum, upkeep, aging and the budget power mix — and are never counted as a
+// power CONSUMER by the demand scan). One predicate used everywhere so the
+// four generator types stay perfectly in sync.
+const isPlant = (t) => t === OV.COAL || t === OV.SOLAR || t === OV.GAS || t === OV.WIND;
 
 // population / jobs per developed zone level (index 0 unused)
 const RES_POP = [0, 8, 24, 56];
 const COM_JOB = [0, 6, 18, 40];
 const IND_JOB = [0, 8, 22, 48];
 
-const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120 };
+/* ---- power plant capacity & aging (M19) ----
+   POWER_CAP is the NAMEPLATE (young, full-health) output each generator adds
+   to the grid supply. Gas is the biggest single plant (well above coal), wind
+   the smallest (well below solar). The wind figure already folds in a real
+   wind farm's ~35% capacity factor — an 80-cap "farm" stands in for a much
+   larger installed nameplate — so the grid contribution is a fixed, fully
+   deterministic 80 (no per-tick RNG, so determinism is preserved).
+
+   Aging: every plant records the calendar year it was built (plantYear[],
+   keyed by anchor tile, serialized in save v8). Its EFFECTIVE contribution
+   follows a documented curve of AGE = currentYear - buildYear:
+       age <= 30            -> 100% of nameplate   (prime years)
+       30 < age < 45        -> linear decay        (1 - 0.5*(age-30)/15)
+       age >= 45            -> 50% of nameplate     (end-of-life floor)
+   The curve is applied in recomputePower's supply sum, so a young plant is
+   worth full nameplate and an ancient one measurably less. Bulldozing and
+   rebuilding resets the build year (fresh nameplate). From PLANT_WARN_AGE on,
+   a "the old plant is failing — rebuild it" notice hits the ticker. */
+const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120, [OV.GAS]: 450, [OV.WIND]: 80 };
+const PLANT_PRIME_AGE = 30;   // full nameplate through this age
+const PLANT_EOL_AGE   = 45;   // decayed to the floor by here
+const PLANT_MIN_FACTOR = 0.5; // end-of-life output = 50% of nameplate
+const PLANT_WARN_AGE  = 40;   // start nagging the mayor to rebuild
+
+function plantAgeFactor(age) {
+  if (age <= PLANT_PRIME_AGE) return 1;
+  if (age >= PLANT_EOL_AGE) return PLANT_MIN_FACTOR;
+  return 1 - (1 - PLANT_MIN_FACTOR) * (age - PLANT_PRIME_AGE) / (PLANT_EOL_AGE - PLANT_PRIME_AGE);
+}
+
+// human-readable plant names for the query panel and the aging ticker notice
+const PLANT_LABEL = {
+  [OV.COAL]: "coal plant", [OV.SOLAR]: "solar array",
+  [OV.GAS]: "gas plant", [OV.WIND]: "wind farm",
+};
 
 const COST = {
   bulldoze: 1, road: 10, wire: 5, zr: 100, zc: 100, zi: 100,
   park: 50, tree: 25, waterfill: 50,
   police: 500, firesta: 500, coal: 3000, solar: 5000,
+  gas: 4500, wind: 2500, // M19
   school: 400, hospital: 600,
   mayor: 0, stadium: 500, // milestone rewards — gifts (or nearly so)
 };
@@ -240,6 +285,11 @@ class City {
     this.eduCov  = new Uint8Array(n);   // school (education) coverage
     this.medCov  = new Uint8Array(n);   // hospital (health) coverage
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
+    // M19: build year of the power plant anchored at each tile (0 = no plant
+    // here). Only meaningful at anchor tiles; drives the aging capacity curve.
+    // Serialized in save v8.
+    this.plantYear = new Int32Array(n);
+    this.warnedPlants = {};             // anchors already nagged near end-of-life (ephemeral)
 
     this.funds = 20000;
     this.taxRate = 7;               // percent
@@ -374,8 +424,12 @@ class City {
       const i = this.idx(x + dx, y + dy);
       this.over[i] = type; this.lvl[i] = 0; this.anc[i] = a;
       this.varnt[i] = (Math.random() * 5) | 0;
+      this.plantYear[i] = 0;
       if (this.terr[i] === TERR.FOREST) { this.terr[i] = TERR.GRASS; this.terrRev++; }
     }
+    // M19: a freshly built plant is brand new — stamp its build year so it
+    // starts at full nameplate capacity and ages from here.
+    if (isPlant(type)) { this.plantYear[a] = this.year; delete this.warnedPlants[a]; }
     this.funds -= cost;
     this.powerDirty = true;
     this.devRev++;
@@ -402,7 +456,9 @@ class City {
       const j = this.idx(ax + dx, ay + dy);
       this.over[j] = OV.NONE; this.lvl[j] = 0; this.anc[j] = -1;
       this.fire[j] = 0; this.unpow[j] = 0;
+      this.plantYear[j] = 0; // M19: demolishing a plant clears its build year
     }
+    delete this.warnedPlants[a];
     this.funds -= COST.bulldoze;
     this.powerDirty = true;
     this.devRev++;
@@ -417,10 +473,12 @@ class City {
     const conducts = (i) => this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD
       && this.over[i] !== OV.RUBBLE;
     for (let i = 0; i < this.over.length; i++) {
-      if ((this.over[i] === OV.COAL || this.over[i] === OV.SOLAR) && this.anc[i] === i) {
-        supply += POWER_CAP[this.over[i]];
+      if (isPlant(this.over[i]) && this.anc[i] === i) {
+        // M19: a plant contributes its AGED effective capacity, not its raw
+        // nameplate — full through age 30, decaying to 50% by age 45.
+        supply += this.plantEffectiveCap(i);
       }
-      if (this.over[i] === OV.COAL || this.over[i] === OV.SOLAR) {
+      if (isPlant(this.over[i])) {
         this.powered[i] = 1; q.push(i);
       }
     }
@@ -439,7 +497,7 @@ class City {
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (this.powered[i] && t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
-          && t !== OV.COAL && t !== OV.SOLAR) demand++;
+          && !isPlant(t)) demand++;
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -452,7 +510,7 @@ class City {
       const cutRatio = 1 - supply / demand;
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
-        if (this.powered[i] && t >= OV.ZR && t !== OV.COAL && t !== OV.SOLAR &&
+        if (this.powered[i] && t >= OV.ZR && !isPlant(t) &&
             Math.random() < cutRatio) this.powered[i] = 0;
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
@@ -464,11 +522,66 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
-            t !== OV.COAL && t !== OV.SOLAR && Math.random() < 0.3)
+            !isPlant(t) && Math.random() < 0.3)
           this.powered[i] = 0;
       }
     }
     this.powerDirty = false;
+  }
+
+  /* ---- plant aging (M19) ----
+     Effective grid contribution of the plant anchored at tile `a`: its
+     nameplate scaled by the age curve (plantAgeFactor). A plant with no
+     recorded build year (0 sentinel — e.g. a pre-M19 save, defensively) is
+     treated as brand new (current year), i.e. full nameplate. */
+  plantEffectiveCap(a) {
+    const t = this.over[a];
+    if (!isPlant(t)) return 0;
+    const by = this.plantYear[a] || this.year;
+    const age = Math.max(0, this.year - by);
+    return Math.round(POWER_CAP[t] * plantAgeFactor(age));
+  }
+
+  // Live per-type effective capacity feeding the grid, summed across every
+  // plant of each type (used by the budget power-mix breakdown, M19-4). The
+  // four values sum to powerSupply. A type with no plants reports 0.
+  powerMix() {
+    const mix = { coal: 0, solar: 0, gas: 0, wind: 0 };
+    for (let i = 0; i < this.over.length; i++) {
+      const t = this.over[i];
+      if (this.anc[i] !== i || !isPlant(t)) continue;
+      const cap = this.plantEffectiveCap(i);
+      if (t === OV.COAL) mix.coal += cap;
+      else if (t === OV.SOLAR) mix.solar += cap;
+      else if (t === OV.GAS) mix.gas += cap;
+      else if (t === OV.WIND) mix.wind += cap;
+    }
+    return mix;
+  }
+
+  /* ---- end-of-life rebuild notice (M19) ----
+     Runs once per month rollover. A plant that has aged past PLANT_WARN_AGE
+     is failing — its output is decaying toward the 50% floor — so the ticker
+     nags the mayor to bulldoze and rebuild it. Each plant is nagged at most
+     once (warnedPlants, keyed by anchor); rebuilding clears the flag so a
+     fresh plant can nag again decades later. */
+  plantAgingTick() {
+    for (let i = 0; i < this.over.length; i++) {
+      const t = this.over[i];
+      if (this.anc[i] !== i || !isPlant(t)) continue;
+      const by = this.plantYear[i] || this.year;
+      const age = this.year - by;
+      if (age >= PLANT_WARN_AGE) {
+        if (!this.warnedPlants[i]) {
+          this.warnedPlants[i] = true;
+          const nm = PLANT_LABEL[t] || "power plant";
+          this.pushMsg(`🏚️ The old ${nm} at (${i % MAP}, ${(i / MAP) | 0}) is failing — ` +
+            `output is fading with age. Bulldoze and rebuild it to restore full power.`);
+        }
+      } else if (this.warnedPlants[i]) {
+        delete this.warnedPlants[i]; // clock wound back / rebuilt: reset the nag
+      }
+    }
   }
 
   // ---------- road access (multi-source BFS, depth 3) ----------
@@ -617,10 +730,20 @@ class City {
   recomputeMaps() {
     const n = MAP * MAP;
     const src = new Float32Array(n);
+    // M19: fossil-plant smog scales with the grid LOAD FACTOR — how hard the
+    // plants are actually being driven — not a flat constant. A coal plant
+    // feeding a hungry grid burns more fuel and smokes more than an idle one.
+    // load = powerDemand / powerSupply, clamped to [0,1]; both are set by the
+    // preceding recomputePower(). An idle plant still emits a small floor.
+    const load = this.powerSupply > 0
+      ? Math.max(0, Math.min(1, this.powerDemand / this.powerSupply)) : 0;
+    const coalSmog = 40 + 120 * load; // idle 40 → full-load 160
+    const gasSmog  = 30 + 90 * load;  // moderate: idle 30 → full-load 120 (below coal)
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       if (t === OV.ZI) src[i] += 30 + this.lvl[i] * 35;
-      if (t === OV.COAL) src[i] += 120;
+      if (t === OV.COAL) src[i] += coalSmog;
+      if (t === OV.GAS) src[i] += gasSmog;   // gas smokes; solar & wind stay clean
       if (t === OV.ROAD) src[i] += 8;
       if (this.fire[i]) src[i] += 100;
     }
@@ -973,7 +1096,7 @@ class City {
       else if (t === OV.FIRESTA && this.anc[i] === i) fireSt++;
       else if (t === OV.SCHOOL && this.anc[i] === i) schools++;
       else if (t === OV.HOSPITAL && this.anc[i] === i) hospitals++;
-      else if ((t === OV.COAL || t === OV.SOLAR) && this.anc[i] === i) plants++;
+      else if (isPlant(t) && this.anc[i] === i) plants++;
     }
     const f = this.funding;
     return {
@@ -1190,6 +1313,7 @@ class City {
       if (this.month >= 12) { this.month = 0; this.year++; }
       this.eventsTick();
       this.roadWearTick();    // road wear & crumble (M23) — rollover only
+      this.plantAgingTick();  // power plant aging notices (M19) — rollover only
       this.collectBudget();
       this.updateRecords();   // City Hall records (M17) — rollover only
       this.scanComplaints();  // citizen complaints (M17) — rollover only
@@ -1211,11 +1335,13 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 7, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 8, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
       roadWear: Array.from(this.roadWear),
+      // M19 (save v8): per-anchor power-plant build years, for the aging curve
+      plantYear: Array.from(this.plantYear),
       bonds: this.bonds,
       month: this.month, year: this.year, tickCount: this.tickCount,
       disastersEnabled: this.disastersEnabled,
@@ -1250,6 +1376,15 @@ class City {
     c.funding = Object.assign({ police: 100, fire: 100, roads: 100, edu: 100, health: 100 },
       (d.funding && typeof d.funding === "object") ? d.funding : {});
     if (Array.isArray(d.roadWear)) c.roadWear.set(d.roadWear);
+    // M19 (save v8): restore per-anchor plant build years. A v7-or-earlier
+    // save has no plantYear field: default every existing plant's build year
+    // to the loaded/current year, so it loads at full nameplate capacity and
+    // begins aging from the moment of load (no phantom decay on old cities).
+    if (Array.isArray(d.plantYear)) c.plantYear.set(d.plantYear);
+    else {
+      for (let i = 0; i < c.over.length; i++)
+        if (isPlant(c.over[i]) && c.anc[i] === i) c.plantYear[i] = c.year;
+    }
     c.history = d.history || { pop: [], funds: [] };
     // time-capsule events (M7): restore fired ids + live modifiers with their
     // remaining timers; a pre-M7 (v<=2) save simply has neither field, and
@@ -1298,7 +1433,8 @@ function toolOverlay(tool) {
   return ({
     road: OV.ROAD, wire: OV.WIRE, zr: OV.ZR, zc: OV.ZC, zi: OV.ZI,
     park: OV.PARK, police: OV.POLICE, firesta: OV.FIRESTA,
-    coal: OV.COAL, solar: OV.SOLAR, school: OV.SCHOOL, hospital: OV.HOSPITAL,
+    coal: OV.COAL, solar: OV.SOLAR, gas: OV.GAS, wind: OV.WIND,
+    school: OV.SCHOOL, hospital: OV.HOSPITAL,
     mayor: OV.MAYOR, stadium: OV.STADIUM,
   })[tool] ?? OV.NONE;
 }

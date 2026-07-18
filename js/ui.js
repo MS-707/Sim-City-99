@@ -41,6 +41,8 @@ const TOOLS = [
   { id: "hospital", name: "Hospital",  key: "h", icon: null, spr: () => SPR.hospital },
   { id: "coal",     name: "Coal Pwr",  key: "=", icon: null, spr: () => SPR.coal },
   { id: "solar",    name: "Solar Pwr", key: "+", icon: null, spr: () => SPR.solar },
+  { id: "gas",      name: "Gas Pwr",   key: "g", icon: null, spr: () => SPR.gas },
+  { id: "wind",     name: "Wind Pwr",  key: "i", icon: null, spr: () => SPR.wind },
   // milestone rewards — locked until the city earns its rank
   { id: "mayor",    name: "Mayor Hse", key: "m", icon: null, spr: () => SPR.mayor,
     minTier: TOOL_TIER.mayor },
@@ -634,9 +636,60 @@ function openBudget() {
     document.getElementById("fund-label-" + dept).textContent = city.funding[dept] + "%";
   }
   fillBudgetTable();
+  fillPowerMix();
   fillBondPanel();
   setBondNote("");
   showDlg("dlg-budget");
+}
+
+/* --------- power-mix breakdown (M19) ---------
+   A pie plus a labeled legend of each generator type's LIVE effective
+   capacity (city.powerMix(), which folds in plant aging and sums to
+   powerSupply). Types with more/larger plants take a bigger slice; a type
+   with no plants shows a 0 slice. Rebuilt whenever the budget dialog opens. */
+const POWERMIX_TYPES = [
+  { key: "coal",  label: "Coal",  col: "#6b6b73" },
+  { key: "gas",   label: "Gas",   col: "#c9853b" },
+  { key: "solar", label: "Solar", col: "#2f74c0" },
+  { key: "wind",  label: "Wind",  col: "#5fb56a" },
+];
+function fillPowerMix() {
+  const mix = city.powerMix();
+  const total = POWERMIX_TYPES.reduce((s, t) => s + mix[t.key], 0);
+  const cv = document.getElementById("powermix-pie");
+  if (cv) {
+    const g = cv.getContext("2d");
+    g.clearRect(0, 0, cv.width, cv.height);
+    const cx = cv.width / 2, cy = cv.height / 2, r = Math.min(cx, cy) - 3;
+    if (total <= 0) {
+      g.fillStyle = "#b8b8b8";
+      g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill();
+      g.strokeStyle = "#808080"; g.lineWidth = 1; g.stroke();
+      g.fillStyle = "#404040"; g.font = "9px Tahoma, sans-serif";
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText("no plants", cx, cy);
+    } else {
+      let a0 = -Math.PI / 2;
+      for (const t of POWERMIX_TYPES) {
+        if (mix[t.key] <= 0) continue;
+        const a1 = a0 + (mix[t.key] / total) * Math.PI * 2;
+        g.fillStyle = t.col;
+        g.beginPath(); g.moveTo(cx, cy);
+        g.arc(cx, cy, r, a0, a1); g.closePath(); g.fill();
+        a0 = a1;
+      }
+      g.strokeStyle = "#303030"; g.lineWidth = 1;
+      g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke();
+    }
+  }
+  const rows = POWERMIX_TYPES.map((t) => {
+    const mw = mix[t.key];
+    const pct = total > 0 ? Math.round(mw / total * 100) : 0;
+    return `<tr><td><i class="sw" style="background:${t.col}"></i>${t.label}</td>` +
+           `<td>${mw} MW (${pct}%)</td></tr>`;
+  }).join("");
+  document.getElementById("powermix-legend").innerHTML =
+    rows + `<tr class="total"><td>Total supply</td><td>${total} MW</td></tr>`;
 }
 
 function fillBudgetTable() {
@@ -850,11 +903,20 @@ function openQuery(x, y) {
   const terrName = ["Grass", "Water", "Forest"][city.terr[i]];
   const ovName = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
     "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
-    "Mayor's House", "Stadium", "School", "Hospital"][city.over[i]];
+    "Mayor's House", "Stadium", "School", "Hospital", "Gas plant", "Wind farm"][city.over[i]];
+  // M19: for a power-plant anchor, surface its age and aged output vs nameplate
+  let plantRow = "";
+  if (isPlant(city.over[i]) && city.anc[i] === i) {
+    const a = i, by = city.plantYear[a] || city.year, age = Math.max(0, city.year - by);
+    const eff = city.plantEffectiveCap(a), nameplate = POWER_CAP[city.over[a]];
+    plantRow = `<tr><td>Plant age</td><td>${age} yr (built ${by})</td></tr>` +
+      `<tr><td>Output</td><td>${eff} / ${nameplate} MW${eff < nameplate ? " (aging)" : ""}</td></tr>`;
+  }
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
     <tr><td>Zone/Building</td><td>${ovName}${city.lvl[i] ? " (level " + city.lvl[i] + ")" : ""}</td></tr>
+    ${plantRow}
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>

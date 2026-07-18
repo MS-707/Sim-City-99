@@ -199,6 +199,7 @@ function poolBlocked(city, x, y) {
   if (ov >= OV.ZR && ov <= OV.ZI) return city.lvl[i] > 0;
   return ov === OV.POLICE || ov === OV.FIRESTA || ov === OV.SCHOOL ||
          ov === OV.HOSPITAL || ov === OV.COAL || ov === OV.SOLAR ||
+         ov === OV.GAS || ov === OV.WIND ||
          ov === OV.MAYOR || ov === OV.STADIUM;
 }
 
@@ -780,6 +781,10 @@ function updateSmoke(city) {
       } else if (t === OV.COAL && city.anc[i] === i && Math.random() < 0.5) {
         const x = i % MAP, y = (i / MAP) | 0;
         pushPlume(worldX(x, y) - 18, worldY(x, y) + HH - 78, Math.random() * 0.4 - 0.1);
+      } else if (t === OV.GAS && city.anc[i] === i && Math.random() < 0.42) {
+        // M19: gas plants smoke from their short stacks (coal-level smog)
+        const x = i % MAP, y = (i / MAP) | 0;
+        pushPlume(worldX(x, y) - 14, worldY(x, y) + HH - 62, Math.random() * 0.4 - 0.1);
       } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && Math.random() < 0.28) {
         const x = i % MAP, y = (i / MAP) | 0;
         pushPlume(worldX(x, y) - 12, worldY(x, y) - 68, Math.random() * 0.3);
@@ -1047,7 +1052,7 @@ function minimapCityCol(city, i) {
   if (t === OV.PARK) return "#5c5";
   if (t === OV.POLICE) return "#88f";
   if (t === OV.FIRESTA) return "#f55";
-  if (t === OV.COAL || t === OV.SOLAR) return "#ff0";
+  if (t === OV.COAL || t === OV.SOLAR || t === OV.GAS || t === OV.WIND) return "#ff0";
   if (t === OV.SCHOOL) return "#0cc";
   if (t === OV.HOSPITAL) return "#fcf";
   if (t === OV.MAYOR) return "#fd6";
@@ -1074,7 +1079,7 @@ function renderMinimap(city, mode) {
     const i = y * MAP + x;
     let col = null;
     if (mode === "power") {
-      if (city.over[i] === OV.COAL || city.over[i] === OV.SOLAR) col = "#ff0";
+      if (isPlant(city.over[i])) col = "#ff0";
       else if (city.powered[i]) col = "#f80";
       else if (city.over[i] !== OV.NONE) col = "#334";
       else col = city.terr[i] === TERR.WATER ? "#013" : "#111";

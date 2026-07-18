@@ -144,6 +144,13 @@
         <div class="fund-row"><label>🏥 Health <b id="fund-label-health">100%</b></label>
           <input type="range" class="fund-slider" id="fund-health" data-dept="health" min="0" max="100" value="100"></div>
       </fieldset>
+      <!-- Power mix breakdown (M19): pie + legend of live per-type capacity -->
+      <fieldset class="fs95 powermixbox"><legend>Power Mix</legend>
+        <div class="powermix">
+          <canvas id="powermix-pie" width="88" height="88"></canvas>
+          <table id="powermix-legend" class="budget-table"></table>
+        </div>
+      </fieldset>
       <!-- Municipal bonds (M13) -->
       <fieldset class="fs95 bondbox"><legend>Municipal Bonds</legend>
         <div id="bond-rating" class="bond-rating"></div>

@@ -255,6 +255,15 @@ input[type=range]::-moz-range-thumb {
 .fund-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; font-size: 12px; }
 .fund-row label { flex: 0 0 128px; display: flex; justify-content: space-between; }
 .fund-row input[type=range] { flex: 1; min-width: 0; }
+/* power-mix breakdown (M19) */
+.powermixbox { margin-top: 8px; }
+.powermix { display: flex; align-items: center; gap: 12px; }
+.powermix canvas { flex: 0 0 auto; }
+#powermix-legend { flex: 1 1 auto; margin-top: 0; }
+#powermix-legend .sw {
+  display: inline-block; width: 10px; height: 10px; margin-right: 5px;
+  border: 1px solid #404040; vertical-align: middle;
+}
 /* news chopper traffic report (M18) */
 #dlg-traffic { min-width: 340px; }
 #traffic-table th { text-align: left; font-size: 11px; border-bottom: 1px solid #000; padding: 2px 6px; }

@@ -1277,6 +1277,67 @@ function buildSprites() {
     g.restore();
   });
 
+  /* ---- gas plant (M19) ----
+     A big fossil peaker in the coal/solar prism-and-stack idiom: a low tan
+     turbine hall with lit machine-hall windows, two short striped exhaust
+     stacks (its coal-level smog rises from here, updateSmoke) and a round
+     steel gas storage tank. Baked with withNight so its windows glow.
+     G13-style discipline: windows()'s pane-lighting draws from a DEDICATED
+     seeded stream (swapped in/out around the bake) so inserting this new
+     sprite never shifts the shared ART_RNG sequence — every building baked
+     after it (school/hospital/mayor/stadium, seasonal r1) stays byte-identical. */
+  {
+    const gasRng = mulberry32(0x6A5C0A1);
+    const prevRng = ART_RNG; ART_RNG = gasRng;
+    SPR.gas = withNight(2, 2, 66, (g, ox, oy) => {
+      const { W, S, E, N } = prism(g, ox, oy, 2, 2, 26, "#7d7360");
+      windows(g, up(S, 0), up(E, 0), 26, 2, 5, 0.55, "#ffd27a", "#20242c", GLOW_SODIUM);
+      // two short exhaust stacks rising off the back of the hall
+      stack(g, ox - 14, N[1] - 16, 26, 8, true);
+      stack(g, ox + 10, N[1] - 12, 21, 7, true);
+      // round steel gas storage tank on the SE apron
+      const tx = S[0] + 15, ty = S[1] - 30;
+      g.fillStyle = "#c6ccd3";
+      g.beginPath(); g.ellipse(tx, ty, 11, 11, 0, 0, 7); g.fill();
+      g.fillStyle = "#a4acb4"; // shaded right hemisphere
+      g.beginPath(); g.ellipse(tx, ty, 11, 11, 0, Math.PI * 0.1, Math.PI * 0.9); g.fill();
+      g.strokeStyle = "#6d747c"; g.lineWidth = 1;
+      g.beginPath(); g.ellipse(tx, ty, 11, 11, 0, 0, 7); g.stroke();
+      g.beginPath(); g.moveTo(tx - 11, ty); g.lineTo(tx + 11, ty); g.stroke(); // equator band
+    });
+    ART_RNG = prevRng;
+  }
+
+  /* ---- wind farm (M19) ----
+     A clean, low-output generator: a grassy pad carrying two white lattice-
+     free turbine towers, each with a hub and three swept blades. No stack,
+     no windows — zero smog. Uses mkSprite (no night bake) like solar. */
+  SPR.wind = mkSprite(2, 2, 88, (g, ox, oy) => {
+    const { N, E, S, W } = prism(g, ox, oy, 2, 2, 6, "#6f9e57");
+    const turbine = (bx, baseY, h) => {
+      // tapered tower
+      g.fillStyle = "#eceff2"; g.fillRect(bx - 2, baseY - h, 4, h);
+      g.fillStyle = "#ccd2d8"; g.fillRect(bx - 2, baseY - h, 1.6, h); // shaded side
+      g.fillStyle = "#b7bec5"; g.fillRect(bx - 3, baseY - 2, 6, 3);   // footing
+      const hx = bx, hy = baseY - h;
+      // three swept blades at 120°, a fixed rake (deterministic, no RNG)
+      g.strokeStyle = "#f2f5f8"; g.lineWidth = 2.4; g.lineCap = "round";
+      for (let k = 0; k < 3; k++) {
+        const a = k * (Math.PI * 2 / 3) - 1.05;
+        g.beginPath(); g.moveTo(hx, hy);
+        g.lineTo(hx + Math.cos(a) * 17, hy + Math.sin(a) * 17); g.stroke();
+      }
+      g.lineCap = "butt";
+      // nacelle / hub
+      g.fillStyle = "#f6f8fb";
+      g.beginPath(); g.arc(hx, hy, 3, 0, 7); g.fill();
+      g.strokeStyle = "#9aa2aa"; g.lineWidth = 1; g.stroke();
+    };
+    const cx = (W[0] + E[0]) / 2, cy = (N[1] + S[1]) / 2 - 6;
+    turbine(cx - 12, cy + 8, 58); // taller turbine, back-left
+    turbine(cx + 12, cy + 14, 44); // shorter turbine, front-right
+  });
+
   // School: red-brick block with a tall white bell-tower landmark, a cyan
   // book roof glyph (minimap #0cc), a small yard and a paved apron.
   SPR.school = withNight(2, 2, 72, (g, ox, oy) => {
@@ -1412,6 +1473,7 @@ function buildSprites() {
     r1: SPR.r1, r2: SPR.r2, r3: SPR.r3, c1: SPR.c1, c2: SPR.c2, c3: SPR.c3,
     i1: SPR.i1, i2: SPR.i2, i3: SPR.i3, park: SPR.park,
     police: SPR.police, firesta: SPR.firesta, coal: SPR.coal, solar: SPR.solar,
+    gas: SPR.gas, wind: SPR.wind,
     school: SPR.school, hospital: SPR.hospital, mayor: SPR.mayor, stadium: SPR.stadium,
   };
   const winterSet = {
@@ -1422,6 +1484,7 @@ function buildSprites() {
     park: mkSprite(1, 1, 22, parkDraw("winter")),
     police: makeWinter(SPR.police), firesta: makeWinter(SPR.firesta),
     coal: makeWinter(SPR.coal), solar: makeWinter(SPR.solar),
+    gas: makeWinter(SPR.gas), wind: makeWinter(SPR.wind),
     school: makeWinter(SPR.school), hospital: makeWinter(SPR.hospital),
     mayor: makeWinter(SPR.mayor), stadium: makeWinter(SPR.stadium),
   };
@@ -1574,6 +1637,8 @@ function spriteFor(city, i) {
     case OV.FIRESTA: return B.firesta;
     case OV.COAL:    return B.coal;
     case OV.SOLAR:   return B.solar;
+    case OV.GAS:     return B.gas;
+    case OV.WIND:    return B.wind;
     case OV.SCHOOL:  return B.school;
     case OV.HOSPITAL: return B.hospital;
     case OV.MAYOR:   return B.mayor;

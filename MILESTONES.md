@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G13 — Shoreline & forest naturalization** (graphics audit): flatten
-  the beach band, jitter it per edge, curve the coast with corner wedges,
-  organic forest scatter. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G14 — Seasons reach the buildings and every tree** (graphics audit):
+  bake winter variants of zone/civic sprites (snow-capped top faces) and every
+  tree so the city doesn't float on snow. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G14 — Seasons reach the buildings and every tree**: Stop the city floating on the snow: bake a winter variant per zone/civic sprite overpainting top faces (and tinyHouse roof planes) with pal.snowCap plus an eave drip line — the seasonal bake loop and…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G15 — Splash screen joins the 1997 identity**: Rebuild the splash as the same game: stage it on the teal Win95 desktop (or inside a maximized Win95 window), render a procedural isometric skyline strip from the actual sprite set beneath the logo, r…
   (6 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G16 — Living-city motion pass — cars, smoke, tornado, UFO**: One js/render.js effects iteration: orient car bodies along their travel axis (two iso-direction shapes), scale the 70-car pool cap with map size, and queue warm headlight cones + red taillight pixels…
@@ -40,6 +38,19 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G13 — Shoreline & forest naturalization**: sandHi outer lip dimmed
+  (#eeda9c->#e0c87f) and flattened so beaches stop reading as ramparts
+  (outer-lip-vs-body luma 11.7%->2.4%); per-edge sand band width jittered
+  5-9px by a seeded shoreRng across 4 terrHash-picked SPR.shore variants;
+  convex-corner wedge triangle fills curve the coast; forest floor blended
+  toward grass (delta 15->3) with feathered terrEdge; trees get grounding
+  shadows, 3 silhouettes (round/conifer/oak) and per-tree hue jitter, live
+  mirror-flip on odd (x+y) so 4-adjacent forest never repeats; winter
+  iceEdge shore crack (29 luma step). Separate mulberry32 streams keep the
+  shared bake unshifted — 163 building/road/tree sprites byte-identical;
+  terrain cache deterministic; G5/M5/M12 intact. Verified against the 5
+  archived criteria + regression guard (all pass).
 
 - [x] **G12 — Road art upgrade**: roadSprite() asphalt widened from ~44% to
   ~70% of the tile edge with 1px lighter-gray curb lines each side (winter

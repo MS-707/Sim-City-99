@@ -214,14 +214,16 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
         const w = S.water[terrHash(x, y) % WATER_VARIANTS][(waterFrame + x + y) % WATER_FRAMES];
         g.drawImage(w.c, wx - w.ox, wy - w.oy);
         const sm = shoreMask(city, i); // sand / rime ice on land-facing edges
-        if (sm) { const sh = S.shore[sm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        // G13: per-tile shore-width variant by the same scrambled hash used for
+        // grass/water (cache-safe, deterministic) — coasts wander in width
+        if (sm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][sm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       } else {
         // G5: grass variant by scrambled (x, y) hash — open meadows mottle
         // organically instead of alternating with varnt's seeded stripes
         const gs = S.grass[terrHash(x, y) & 3];
         g.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
         const bm = beachMask(city, i); // shore fringe on the land side of the seam
-        if (bm) { const sh = S.shore[bm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        if (bm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][bm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       }
     }
   }
@@ -320,7 +322,18 @@ function renderFrame(city, uiState, clearBG) {
       // forest rises above the flat layer — drawn live for correct occlusion
       if (t === TERR.FOREST && ov === OV.NONE) {
         const fs = forestSprite(city, i); // cluster-aware density
-        ctx.drawImage(fs.c, wx - fs.ox, wy - fs.oy);
+        // G13: mirror every other tile (checkerboard by x+y parity) around its
+        // own center — a deterministic, cache-independent flip that guarantees
+        // two 4-adjacent forest tiles never render an identical arrangement,
+        // even when the position hash lands them on the same canopy variant
+        if ((x + y) & 1) {
+          ctx.save();
+          ctx.translate(wx, 0); ctx.scale(-1, 1); ctx.translate(-wx, 0);
+          ctx.drawImage(fs.c, wx - fs.ox, wy - fs.oy);
+          ctx.restore();
+        } else {
+          ctx.drawImage(fs.c, wx - fs.ox, wy - fs.oy);
+        }
         if (ng) nightPunch(fs, wx, wy); // trees shadow glow behind them
       }
 

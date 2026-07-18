@@ -23,6 +23,17 @@ function lighten(hex, t) {
   return `rgb(${r + (255 - r) * t | 0},${g + (255 - g) * t | 0},${b + (255 - b) * t | 0})`;
 }
 
+// G13: nudge a hex color warmer (k>0) or cooler (k<0) for per-tree canopy hue
+// jitter — k in ~[-1,1]. Keeps the leaf family, just breaks the flat "every
+// tree the same green" look.
+function nudgeHue(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.max(0, Math.min(255, (r + 24 * k) | 0));
+  b = Math.max(0, Math.min(255, (b - 16 * k) | 0));
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
 // G9: sprite baking must be byte-identical across boots — windows() pane
 // lighting draws from this stream, which buildSprites points at its seeded
 // mulberry32 before any sprite bakes. Never Math.random in a bake path.
@@ -219,51 +230,88 @@ function withJitter(base) {
    open grass mottles organically instead of checkerboarding; the variant is
    picked by a scrambled (x, y) hash in buildTerrainLayer, not by varnt. */
 const SEASON_PAL = {
+  // G13: `floor` now sits within ~6 luminance of the season's grass so forest
+  // tiles stop reading as hard dark diamonds; `sandHi` is dimmed to within a
+  // few % of `sand` so the beach no longer reads as a raised rampart; `iceEdge`
+  // (winter only) is a dark shore crack that keeps the frozen coastline legible
   summer: {
     grass: ["#4a9d44", "#479a47", "#4d9f46", "#489744"],
     fleckA: "rgba(255,255,255,.08)", fleckB: "rgba(0,60,0,.15)",
-    floor: "#3d8a3a", leafLo: "#1d6e2a", leafHi: "#2f9c3f", snowCap: null,
+    floor: "#479843", leafLo: "#1d6e2a", leafHi: "#2f9c3f", snowCap: null,
     waterTop: "#2564af", waterBot: "#215aa1",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
-    sand: "#dcc37a", sandHi: "#eeda9c", foam: "rgba(255,255,255,.55)",
+    sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
   },
   spring: { // fresh greens, blossom flecks in the grass
     grass: ["#55ac4b", "#52a94e", "#57ae51", "#53a74d"],
     fleckA: "rgba(255,215,235,.4)", fleckB: "rgba(0,70,0,.15)",
-    floor: "#46993f", leafLo: "#2a8a36", leafHi: "#4fb453", snowCap: null,
+    floor: "#53a74b", leafLo: "#2a8a36", leafHi: "#4fb453", snowCap: null,
     waterTop: "#2a6bb5", waterBot: "#2561a7",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
-    sand: "#dcc37a", sandHi: "#eeda9c", foam: "rgba(255,255,255,.55)",
+    sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
   },
   autumn: { // dry stubble lawns, orange/red canopies
     grass: ["#9c9a48", "#98944a", "#9e9a4b", "#999545"],
     fleckA: "rgba(230,180,90,.3)", fleckB: "rgba(90,60,10,.2)",
-    floor: "#7e7a38", leafLo: "#b0541e", leafHi: "#d2691e", snowCap: null,
+    floor: "#97934a", leafLo: "#b0541e", leafHi: "#d2691e", snowCap: null,
     waterTop: "#255fa3", waterBot: "#215595",
     wave: "rgba(210,235,255,.3)", glint: "rgba(220,240,255,.45)",
-    sand: "#d8bd74", sandHi: "#ead597", foam: "rgba(255,255,255,.5)",
+    sand: "#d8bd74", sandHi: "#dcc17b", foam: "rgba(255,255,255,.30)", iceEdge: null,
   },
   winter: { // snowed-under lawns, pine canopies with snow caps, icy shores
     grass: ["#e9edf3", "#e6eaf1", "#eceff5", "#e5e9f0"],
     fleckA: "rgba(255,255,255,.5)", fleckB: "rgba(165,182,210,.35)",
-    floor: "#dfe5ee", leafLo: "#2c5a34", leafHi: "#38703f", snowCap: "#eef2f7",
+    floor: "#e3e8f0", leafLo: "#2c5a34", leafHi: "#38703f", snowCap: "#eef2f7",
     waterTop: "#9fc1d9", waterBot: "#98bbd5",
     wave: "rgba(255,255,255,.4)", glint: "rgba(240,248,255,.7)",
-    sand: "#c9d6e4", sandHi: "#e8eef5", foam: "rgba(255,255,255,.7)",
+    sand: "#c9d6e4", sandHi: "#e8eef5", foam: "rgba(255,255,255,.5)", iceEdge: "#7fa0bf",
   },
 };
 
-function drawTree(g, x, y, s, tint = 1, pal = null) {
-  const lo = pal ? pal.leafLo : "#1d6e2a", hi = pal ? pal.leafHi : "#2f9c3f";
+// G13: `sil` selects a canopy silhouette (0 round, 1 conifer, 2 wide oak),
+// `hue` jitters the leaf color per tree, and `ground` drops a grounding shadow
+// ellipse so forest trees stop floating. Defaults reproduce the pre-G13 round
+// tree exactly, so standalone park/mayor/stadium trees are unchanged.
+function drawTree(g, x, y, s, tint = 1, pal = null, sil = 0, hue = 0, ground = false) {
+  let lo = pal ? pal.leafLo : "#1d6e2a", hi = pal ? pal.leafHi : "#2f9c3f";
+  if (hue) { lo = nudgeHue(lo, hue); hi = nudgeHue(hi, hue); }
+  if (ground) { // G13: soft grounding shadow beneath the trunk base
+    g.fillStyle = "rgba(0,0,0,.16)";
+    g.beginPath(); g.ellipse(x, y + s * 0.06, s * 0.5, s * 0.17, 0, 0, 7); g.fill();
+  }
   g.strokeStyle = "#5d4123"; g.lineWidth = 2;
   g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - s * 0.8); g.stroke();
-  g.fillStyle = shade(lo, tint);
-  g.beginPath(); g.ellipse(x, y - s * 1.1, s * 0.55, s * 0.65, 0, 0, 7); g.fill();
-  g.fillStyle = shade(hi, tint);
-  g.beginPath(); g.ellipse(x - s * 0.15, y - s * 1.3, s * 0.4, s * 0.45, 0, 0, 7); g.fill();
-  if (pal && pal.snowCap) { // winter: fresh snow load on the crown
-    g.fillStyle = pal.snowCap;
-    g.beginPath(); g.ellipse(x - s * 0.1, y - s * 1.42, s * 0.42, s * 0.28, 0, 0, 7); g.fill();
+  if (sil === 1) { // conifer: stacked triangular skirts, pointed crown
+    g.fillStyle = shade(lo, tint);
+    for (let t = 0; t < 3; t++) {
+      const cy = y - s * (0.55 + t * 0.42), hw = s * (0.6 - t * 0.14);
+      g.beginPath(); g.moveTo(x, cy - s * 0.5); g.lineTo(x + hw, cy); g.lineTo(x - hw, cy); g.closePath(); g.fill();
+    }
+    g.fillStyle = shade(hi, tint);
+    g.beginPath(); g.moveTo(x, y - s * 1.72); g.lineTo(x + s * 0.22, y - s * 1.32); g.lineTo(x - s * 0.22, y - s * 1.32); g.closePath(); g.fill();
+    if (pal && pal.snowCap) {
+      g.fillStyle = pal.snowCap;
+      g.beginPath(); g.moveTo(x, y - s * 1.72); g.lineTo(x + s * 0.16, y - s * 1.42); g.lineTo(x - s * 0.16, y - s * 1.42); g.closePath(); g.fill();
+    }
+  } else if (sil === 2) { // wide oak: broad low canopy, two shoulder lobes
+    g.fillStyle = shade(lo, tint);
+    g.beginPath(); g.ellipse(x, y - s * 0.95, s * 0.78, s * 0.58, 0, 0, 7); g.fill();
+    g.fillStyle = shade(hi, tint);
+    g.beginPath(); g.ellipse(x - s * 0.28, y - s * 1.12, s * 0.44, s * 0.38, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(x + s * 0.3, y - s * 1.02, s * 0.4, s * 0.34, 0, 0, 7); g.fill();
+    if (pal && pal.snowCap) {
+      g.fillStyle = pal.snowCap;
+      g.beginPath(); g.ellipse(x - s * 0.08, y - s * 1.32, s * 0.5, s * 0.24, 0, 0, 7); g.fill();
+    }
+  } else { // round (pre-G13 default)
+    g.fillStyle = shade(lo, tint);
+    g.beginPath(); g.ellipse(x, y - s * 1.1, s * 0.55, s * 0.65, 0, 0, 7); g.fill();
+    g.fillStyle = shade(hi, tint);
+    g.beginPath(); g.ellipse(x - s * 0.15, y - s * 1.3, s * 0.4, s * 0.45, 0, 0, 7); g.fill();
+    if (pal && pal.snowCap) { // winter: fresh snow load on the crown
+      g.fillStyle = pal.snowCap;
+      g.beginPath(); g.ellipse(x - s * 0.1, y - s * 1.42, s * 0.42, s * 0.28, 0, 0, 7); g.fill();
+    }
   }
 }
 
@@ -507,6 +555,11 @@ function terrHash(x, y) {
 // frames per season — buildTerrainLayer picks the variant by terrHash and
 // offsets the frame by (x + y), so adjacent lake tiles never render alike.
 const WATER_FRAMES = 3, WATER_VARIANTS = 3;
+// G13: the shore band bakes SHORE_VARIANTS width-jittered variants per mask.
+// buildTerrainLayer picks one by terrHash(x,y), so a straight coast draws a
+// wandering sand width per tile instead of one uniform rampart — cache-safe
+// and deterministic, exactly like the water variants above.
+const SHORE_VARIANTS = 4;
 
 // G5: opaque fill for flat terrain diamonds — the fill plus a 2px stroke in
 // the SAME style straddling the edge, so adjacent tiles composite to full
@@ -531,6 +584,11 @@ function buildSprites() {
   const seeded = mulberry32(0x5EED);
   const R = () => seeded(); // stable art randomness
   ART_RNG = seeded; // G9: windows() pane lighting joins the seeded stream
+  // G13: shore-width and forest hue/silhouette jitter draw from their own
+  // seeded streams so they never shift the shared R()/ART_RNG sequence — the
+  // building/window/roof bakes downstream stay byte-identical to pre-G13.
+  const shoreRng = mulberry32(0x5A17);
+  const forestRng = mulberry32(0x0F0E);
 
   // ---- terrain families, baked once per season (M12) ----
   // The same draw code runs for each of the four palettes; renderFrame picks
@@ -588,49 +646,104 @@ function buildSprites() {
       fam.water.push(vfr);
     }
 
-    // shoreline bands (16 masks; bit0=N bit1=E bit2=S bit3=W) — sand in
-    // summer, rime ice in winter. Drawn over a water tile on its land-facing
-    // edges AND over a land tile on its water-facing edges, so the treatment
-    // straddles the seam with no hard line.
-    for (let m = 0; m < 16; m++) {
-      fam.shore.push(mkSprite(1, 1, 4, (g, ox, oy) => {
-        if (!m) return; // open water / inland: no band
-        const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
-        const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
-        // clip to a slightly expanded diamond so the band hugs both sides of the seam
-        g.save();
-        g.translate(ox, oy); g.scale((TW + 6) / TW, (TH + 3) / TH); g.translate(-ox, -oy);
-        diamondPath(g, ox, oy);
-        g.restore();
-        g.save(); g.clip();
-        const lerp = (P0, t) => [P0[0] + (ox - P0[0]) * t, P0[1] + (oy - P0[1]) * t];
-        for (let b = 0; b < 4; b++) {
-          if (!(m & (1 << b))) continue;
-          const [P0, P1] = edges[b];
+    // shoreline bands (SHORE_VARIANTS x 16 masks; bit0=N bit1=E bit2=S bit3=W)
+    // — sand in summer, icy shelf + ice-edge crack in winter. Drawn over a
+    // water tile on its land-facing edges AND over a land tile on its
+    // water-facing edges, so the treatment straddles the seam with no hard
+    // line. G13: per-edge seeded width jitter (each variant differs), corner
+    // wedge fills so the coast bevels around corners instead of pinching into
+    // bowties at diagonal water contacts, a DIMMED dry lip (so the beach stops
+    // reading as a rampart), and — in winter — a dark ice-edge crack instead.
+    for (let sv = 0; sv < SHORE_VARIANTS; sv++) {
+      const svar = [];
+      for (let m = 0; m < 16; m++) {
+        svar.push(mkSprite(1, 1, 4, (g, ox, oy) => {
+          if (!m) return; // open water / inland: no band
+          const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+          const cpts = [N, E, S, W];
+          const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
+          // per-edge sand width, 5..9px — jittered from the shore stream so
+          // the four variants differ and adjacent coast tiles wander in width
+          const wdt = [0, 0, 0, 0];
+          for (let b = 0; b < 4; b++) wdt[b] = 5 + shoreRng() * 4;
+          // clip to a slightly expanded diamond so the band hugs both sides of the seam
+          g.save();
+          g.translate(ox, oy); g.scale((TW + 6) / TW, (TH + 3) / TH); g.translate(-ox, -oy);
+          diamondPath(g, ox, oy);
+          g.restore();
+          g.save(); g.clip();
+          const lerp = (P0, t) => [P0[0] + (ox - P0[0]) * t, P0[1] + (oy - P0[1]) * t];
           g.lineCap = "butt";
-          g.strokeStyle = P.sand; g.lineWidth = 7; // main band on the edge
-          g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
-          g.strokeStyle = P.sandHi; g.lineWidth = 3; // dry highlight
-          g.beginPath(); g.moveTo(...lerp(P0, 0.06)); g.lineTo(...lerp(P1, 0.06)); g.stroke();
-          g.strokeStyle = P.foam; g.lineWidth = 1.4; // surf foam / ice fringe
-          g.beginPath(); g.moveTo(...lerp(P0, 0.22)); g.lineTo(...lerp(P1, 0.22)); g.stroke();
-        }
-        g.restore();
-      }));
+          // 1) main sand band per set edge, jittered width
+          for (let b = 0; b < 4; b++) {
+            if (!(m & (1 << b))) continue;
+            const [P0, P1] = edges[b];
+            g.strokeStyle = P.sand; g.lineWidth = wdt[b];
+            g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
+          }
+          // 2) corner wedge fills: where BOTH edges meeting at a diamond corner
+          // are shore edges, fill a triangle so the sand bevels around the
+          // corner (kills the 90-degree notch / diagonal-contact bowtie)
+          g.fillStyle = P.sand;
+          for (let c = 0; c < 4; c++) {
+            const eA = (c + 3) & 3, eB = c;                 // the two edges at corner c
+            if (!((m & (1 << eA)) && (m & (1 << eB)))) continue;
+            const CP = cpts[c];
+            const oA = edges[eA][0] === CP ? edges[eA][1] : edges[eA][0]; // far ends
+            const oB = edges[eB][0] === CP ? edges[eB][1] : edges[eB][0];
+            const fl = (Q0, Q1, t) => [Q0[0] + (Q1[0] - Q0[0]) * t, Q0[1] + (Q1[1] - Q0[1]) * t];
+            const fA = fl(CP, oA, 0.34), fB = fl(CP, oB, 0.34);
+            const apex = [CP[0] + (ox - CP[0]) * 0.5, CP[1] + (oy - CP[1]) * 0.5];
+            g.beginPath(); g.moveTo(fA[0], fA[1]); g.lineTo(apex[0], apex[1]);
+            g.lineTo(fB[0], fB[1]); g.closePath(); g.fill();
+          }
+          // 3) outer lip: winter draws a DARK ice-edge crack on the seam so the
+          // frozen coast stays legible against the snowpack; other seasons draw
+          // a DIMMED dry highlight that no longer reads as a raised rampart
+          for (let b = 0; b < 4; b++) {
+            if (!(m & (1 << b))) continue;
+            const [P0, P1] = edges[b];
+            if (P.iceEdge) {
+              g.strokeStyle = P.iceEdge; g.lineWidth = 2.2;
+              g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
+            } else {
+              g.strokeStyle = P.sandHi; g.lineWidth = 2.2;
+              g.beginPath(); g.moveTo(...lerp(P0, 0.10)); g.lineTo(...lerp(P1, 0.10)); g.stroke();
+            }
+          }
+          // 4) surf foam / ice fringe
+          for (let b = 0; b < 4; b++) {
+            if (!(m & (1 << b))) continue;
+            const [P0, P1] = edges[b];
+            g.strokeStyle = P.foam; g.lineWidth = 1.4;
+            g.beginPath(); g.moveTo(...lerp(P0, 0.24)); g.lineTo(...lerp(P1, 0.24)); g.stroke();
+          }
+          g.restore();
+        }));
+      }
+      fam.shore.push(svar);
     }
 
-    // forest: 3 density tiers x 3 variants (tier picked by neighbor count)
+    // forest: 3 density tiers x 3 canopy-mix variants (tier picked by neighbor
+    // count in forestSprite; variant picked by terrHash so adjacent stands
+    // differ). G13: each tree gets a grounding shadow, one of three silhouettes
+    // (round / conifer / oak) cycled across the stand, and per-tree hue jitter
+    // — so forests stop reading as diamonds full of identical lollipops. The
+    // three shared R() calls per tree (position/size/tint) match pre-G13
+    // exactly; silhouette/hue draw from forestRng, leaving the building bakes
+    // downstream byte-identical.
     for (let d = 0; d < 3; d++) {
       const tier = [];
       for (let v = 0; v < 3; v++) {
         tier.push(mkSprite(1, 1, 26, (g, ox, oy) => {
-          sealedDiamond(g, ox, oy, P.floor); // no dark stroke (G5): grass/
-          // forest boundaries get their line from the SPR.terrEdge overlays
+          sealedDiamond(g, ox, oy, P.floor); // floor blends with grass (G13)
           const n = TREES_PER_TIER[d] + (v % 2);
           for (let k = 0; k < n; k++) {
+            const sil = (k + v + d) % 3;         // round / conifer / oak
+            const hue = forestRng() * 1.6 - 0.8; // per-tree canopy hue jitter
             drawTree(g, ox - 14 + ((k * 9 + v * 7 + d * 3) % 28) + R() * 4,
                      oy + 7 - ((k * 5 + v * 3) % 11),
-                     TREE_SIZE_TIER[d] + R() * 4, 0.85 + R() * 0.4, P);
+                     TREE_SIZE_TIER[d] + R() * 4, 0.85 + R() * 0.4, P, sil, hue, true);
           }
         }));
       }
@@ -649,10 +762,10 @@ function buildSprites() {
   // bit3=W) ---- the ONLY place terrain seams are stroked. Interior tiles
   // bake no edge at all; buildTerrainLayer draws one of these overlays per
   // land tile on the edges whose neighbor is a different land type
-  // (grass vs forest), so meadows stay continuous while stands of trees
-  // keep a legible boundary. Clipped to the tile's own diamond, the 5px
-  // stroke leaves ~2.5px inside the seam — enough that a neighboring
-  // forest floor's 1px seam-sealing overdraw still leaves a clear line.
+  // (grass vs forest). G13: softened from the old hard black 5px line to a
+  // low-alpha dusky-green feather — the forest floor now blends with grass
+  // (delta <= 8), so the boundary reads as a soft tree-line shadow rather
+  // than a hard dark diamond edge, while stands stay legible via their trees.
   // Season-independent.
   SPR.terrEdge = [];
   for (let m = 0; m < 16; m++) {
@@ -661,7 +774,7 @@ function buildSprites() {
       const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
       const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
       g.save(); diamondPath(g, ox, oy); g.clip();
-      g.strokeStyle = "rgba(0,0,0,.45)"; g.lineWidth = 5; g.lineCap = "butt";
+      g.strokeStyle = "rgba(32,56,38,.28)"; g.lineWidth = 3; g.lineCap = "butt";
       for (let b = 0; b < 4; b++) {
         if (!(m & (1 << b))) continue;
         const [P0, P1] = edges[b];
@@ -1385,7 +1498,11 @@ function forestSprite(city, i) {
   if (forest(x - 1, y)) n++;
   const tier = n <= 1 ? 0 : n <= 3 ? 1 : 2;
   const fam = SPR.season[seasonOf(city.month)].forest[tier]; // seasonal canopy (M12)
-  return fam[city.varnt[i] % fam.length];
+  // G13: pick the canopy variant by the scrambled position hash (like the G5
+  // grass/water variants) rather than city.varnt, so neighbouring stands
+  // decorrelate; the (x+y) flip in the render pass then guarantees adjacent
+  // forest tiles never draw an identical arrangement. Pure in (x, y).
+  return fam[terrHash(x, y) % fam.length];
 }
 
 function wireMask(city, i) {

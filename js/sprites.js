@@ -14,6 +14,20 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 
+// G9: lerp a color toward white. shade(base, 1.3) multiplies channels and
+// clips pale bases (e.g. the hospital's #e6e3da) to pure white — a 35%
+// lerp brightens every base the same perceptual step while keeping its hue.
+function lighten(hex, t) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgb(${r + (255 - r) * t | 0},${g + (255 - g) * t | 0},${b + (255 - b) * t | 0})`;
+}
+
+// G9: sprite baking must be byte-identical across boots — windows() pane
+// lighting draws from this stream, which buildSprites points at its seeded
+// mulberry32 before any sprite bakes. Never Math.random in a bake path.
+let ART_RNG = Math.random;
+
 function mkSprite(w, h, extraTop, draw) {
   const cw = (w + h) * HW, ch = extraTop + (w + h) * HH;
   const c = document.createElement("canvas");
@@ -48,7 +62,7 @@ const up = (p, ht) => [p[0], p[1] - ht];
 // solid iso prism: top + two visible faces
 function prism(g, ox, oy, w, h, ht, base, opts = {}) {
   const { N, E, S, W } = corners(ox, oy, w, h);
-  const topC = opts.top || shade(base, 1.3);
+  const topC = opts.top || lighten(base, 0.35); // G9: pale tops keep hue
   const leftC = opts.left || shade(base, 0.72);
   const rightC = opts.right || shade(base, 0.92);
   poly(g, [up(W, ht), up(S, ht), S, W], leftC);           // SW face
@@ -83,7 +97,7 @@ function windows(g, p0, p1, ht, rows, cols, lit = 0.5, color = "#ffe9a0", dark =
       const u0 = (c + 0.25) / cols, u1 = (c + 0.75) / cols;
       const ax = p0[0] + (p1[0] - p0[0]) * u0, ay = p0[1] + (p1[1] - p0[1]) * u0;
       const bx = p0[0] + (p1[0] - p0[0]) * u1, by = p0[1] + (p1[1] - p0[1]) * u1;
-      const isLit = Math.random() < lit;
+      const isLit = ART_RNG() < lit; // G9: seeded — bakes are boot-identical
       g.fillStyle = isLit ? color : dark;
       g.beginPath();
       g.moveTo(ax, ay - y1); g.lineTo(bx, by - y1);
@@ -233,6 +247,91 @@ function stack(g, x, y, ht, w, stripes = false) {
   g.fillStyle = "#3c3c44"; g.fillRect(x - w / 2 - 1, y - ht - 2, w + 2, 3);
 }
 
+/* ---- roofscape furniture (G9) ----
+   Shared roof treatment for mid/high-rise sprites: a darker tar/gravel
+   field inset behind a 1px parapet line, then a few seeded clutter pieces.
+   Everything draws on the DAY context only — nothing here touches GLOWG or
+   POOLG, so new roof furniture stays dark in the night bake (G1). */
+
+// parapet inset + roof field: fills the top-face diamond scaled to 82%
+// around its center and strokes the 1px parapet line; returns the top-face
+// center so callers can arrange furniture on the deck
+function roofDeck(g, ox, oy, w, h, ht, field, line) {
+  const { N, E, S, W } = corners(ox, oy, w, h);
+  const cx = (N[0] + E[0] + S[0] + W[0]) / 4;
+  const cy = (N[1] + E[1] + S[1] + W[1]) / 4 - ht;
+  const ins = (p) => [cx + (p[0] - cx) * 0.82, cy + (p[1] - ht - cy) * 0.82];
+  poly(g, [ins(N), ins(E), ins(S), ins(W)], field, line);
+  return [cx, cy];
+}
+
+// seeded service clutter — AC units, spinning vents, access hatches,
+// skylights — scattered around the deck center. sx widens the scatter for
+// 2x2 roofs. Positions/kinds come from the caller's seeded RNG.
+function roofClutter(g, cx, cy, n, R, sx = 1) {
+  for (let k = 0; k < n; k++) {
+    const px = cx + (R() * 26 - 13) * sx, py = cy + (R() * 10 - 5) * sx;
+    const kind = (R() * 4) | 0;
+    if (kind === 0) {          // AC unit on a shadow pad
+      g.fillStyle = "#23262c"; g.fillRect(px - 5, py - 2, 10, 4);
+      g.fillStyle = "#585c66"; g.fillRect(px - 5, py - 6, 10, 5);
+      g.fillStyle = "#7e838e"; g.fillRect(px - 5, py - 7, 10, 2);
+      g.fillStyle = "#2c2f36"; g.fillRect(px - 3, py - 5, 3, 2);
+    } else if (kind === 1) {   // spinning vent
+      g.fillStyle = "#23262c"; g.fillRect(px - 2, py, 5, 2);
+      g.fillStyle = "#6c717c"; g.fillRect(px - 1, py - 4, 3, 4);
+      g.fillStyle = "#9aa0ab";
+      g.beginPath(); g.ellipse(px + 0.5, py - 5, 2.6, 1.7, 0, 0, 7); g.fill();
+    } else if (kind === 2) {   // roof access hatch
+      g.fillStyle = "#23262c"; g.fillRect(px - 4, py - 1, 8, 3);
+      g.fillStyle = "#565a64"; g.fillRect(px - 4, py - 4, 8, 4);
+      g.fillStyle = "#787c86"; g.fillRect(px - 4, py - 5, 8, 2);
+    } else {                   // skylight
+      g.fillStyle = "#1c2733"; g.fillRect(px - 5, py - 3, 9, 5);
+      g.fillStyle = "#8fc3e0"; g.fillRect(px - 4, py - 2, 7, 3);
+    }
+  }
+}
+
+// residential roof furniture (G9): the R3 towers trade the old mast for a
+// wooden water tank, a stair bulkhead, planters and a clothesline
+function waterTank(g, x, y) {
+  g.fillStyle = "#23262c"; g.fillRect(x - 5, y, 10, 2);       // shadow pad
+  g.fillStyle = "#3c3630"; g.fillRect(x - 4, y - 2, 2, 3);    // legs
+  g.fillRect(x + 2, y - 2, 2, 3);
+  g.fillStyle = "#8a7a64"; g.fillRect(x - 4, y - 10, 8, 8);   // stave drum
+  g.fillStyle = "#a5947c"; g.fillRect(x - 4, y - 10, 3, 8);
+  g.fillStyle = "#54493c";                                    // conic cap
+  g.beginPath(); g.moveTo(x - 5, y - 10); g.lineTo(x + 5, y - 10);
+  g.lineTo(x, y - 14); g.closePath(); g.fill();
+}
+
+function bulkhead(g, x, y, base) {
+  g.fillStyle = "#23262c"; g.fillRect(x - 5, y, 11, 2);       // shadow pad
+  g.fillStyle = shade(base, 0.62); g.fillRect(x - 5, y - 8, 11, 8);
+  g.fillStyle = shade(base, 0.9); g.fillRect(x - 5, y - 10, 11, 3);
+  g.fillStyle = "#2e2a24"; g.fillRect(x - 1, y - 6, 4, 6);    // stair door
+}
+
+function clothesline(g, x, y, R) {
+  g.strokeStyle = "#4a4a52"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(x - 8, y); g.lineTo(x - 8, y - 7);
+  g.moveTo(x + 8, y + 2); g.lineTo(x + 8, y - 5); g.stroke();
+  g.strokeStyle = "#d8d8de";
+  g.beginPath(); g.moveTo(x - 8, y - 7); g.lineTo(x + 8, y - 5); g.stroke();
+  const cols = ["#cfe0ee", "#efe3c0", "#d6e8c2"]; // washing on the line
+  for (let k = 0; k < 3; k++) {
+    g.fillStyle = cols[(k + (R() * 3 | 0)) % 3];
+    g.fillRect(x - 6 + k * 5, y - 6, 3, 4);
+  }
+}
+
+function planter(g, x, y) {
+  g.fillStyle = "#5c4630"; g.fillRect(x - 4, y - 2, 8, 3);
+  g.fillStyle = "#3e8a3e"; g.fillRect(x - 4, y - 4, 8, 2);
+  g.fillStyle = "#54a648"; g.fillRect(x - 3, y - 5, 3, 1); g.fillRect(x + 1, y - 5, 2, 1);
+}
+
 // G5: scrambled coordinate hash for terrain variation (grass mottle, water
 // variant). Pure in (x, y) — every boot and every frame agrees, so the
 // terrain-layer cache stays deterministic and rebuild-free.
@@ -269,6 +368,7 @@ function diamondPath(g, ox, oy) {
 function buildSprites() {
   const seeded = mulberry32(0x5EED);
   const R = () => seeded(); // stable art randomness
+  ART_RNG = seeded; // G9: windows() pane lighting joins the seeded stream
 
   // ---- terrain families, baked once per season (M12) ----
   // The same draw code runs for each of the four palettes; renderFrame picks
@@ -535,16 +635,33 @@ function buildSprites() {
       const { W, S, E } = prism(g, ox, oy, 1, 1, 36, base);
       windows(g, up(W, 0), up(S, 0), 36, 3, 2, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       windows(g, up(S, 0), up(E, 0), 36, 3, 3, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
-      g.fillStyle = "#4c4c52"; g.fillRect(ox - 6, oy - 36 - HH + 2, 8, 5); // roof AC
+      // G9: tar deck behind a 1px parapet, dressed with seeded service gear
+      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 36, "#26282d", "rgba(14,12,10,.9)");
+      // sun-catching coping cap along the two back parapet edges
+      g.strokeStyle = lighten(base, 0.75); g.lineWidth = 1.6;
+      g.beginPath();
+      g.moveTo(cx - HW * 0.82, cy); g.lineTo(cx, cy - HH * 0.82);
+      g.lineTo(cx + HW * 0.82, cy); g.stroke();
+      g.fillStyle = "#4c4c52"; g.fillRect(cx - 8, cy - 3, 8, 5); // roof AC
+      g.fillStyle = "#686870"; g.fillRect(cx - 8, cy - 4, 8, 2);
+      g.fillStyle = "#1c2733"; g.fillRect(cx + 5, cy + 4, 9, 5); // skylight
+      g.fillStyle = "#9fd3ef"; g.fillRect(cx + 6, cy + 5, 7, 3);
+      roofClutter(g, cx + 2, cy - 2, 2, R);
     }));
     SPR.r3.push(withNight(1, 1, 82, (g, ox, oy) => {
       const base = ["#c9c1ae", "#a9b6c4", "#c7a9a1", "#b4c4ae", "#cbb98e"][v];
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base);
+      // softer top lerp than the default: keeps the pale parapet rims a
+      // clear >= 12 color distance from the hospital's #d8d5ca helipad (G9)
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base, { top: lighten(base, 0.16) });
       windows(g, up(W, 0), up(S, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       windows(g, up(S, 0), up(E, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
-      g.strokeStyle = "#333"; g.lineWidth = 1.5;
-      g.beginPath(); g.moveTo(ox, N[1] - 68); g.lineTo(ox, N[1] - 80); g.stroke();
-      g.fillStyle = "#e33"; g.fillRect(ox - 1, N[1] - 82, 3, 3);
+      // G9: no mast here — the beacon is a C3-only signature now. R3 roofs
+      // get residential furniture on a tar deck behind the parapet.
+      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 68, shade(base, 0.55), "rgba(24,20,16,.9)");
+      waterTank(g, cx - 9 + (R() * 4 | 0), cy + 2);
+      bulkhead(g, cx + 8, cy + 1 + (R() * 3 | 0), base);
+      if (v % 2) clothesline(g, cx - 2, cy + 9, R);
+      else { planter(g, cx - 15, cy + 3); planter(g, cx + 2, cy + 9); }
     }));
   }
 
@@ -568,19 +685,34 @@ function buildSprites() {
       const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base);
       windows(g, up(W, 0), up(S, 0), 44, 4, 3, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
       windows(g, up(S, 0), up(E, 0), 44, 4, 4, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
+      // G9: gravel deck behind a 1px parapet plus seeded service gear
+      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 44, shade(base, 0.55), "rgba(16,16,20,.85)");
+      roofClutter(g, cx, cy, 3, R);
     }));
-    SPR.c3.push(withNight(1, 1, 104, (g, ox, oy) => {
+    // G9: the mast + red beacon is a C3-only signature carried by exactly
+    // 2 of the 5 variants; the tip bakes in its lit state and the renderer
+    // blinks it live via spr.beacon (phase-offset per tower)
+    const c3mast = v === 1 || v === 3;
+    const c3spr = withNight(1, 1, 104, (g, ox, oy) => {
       const glass = ["#3e6f9e", "#2e8a84", "#7a6a4e", "#5e4e8e", "#8e4e5e"][v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
         { top: shade(glass, 1.5), left: shade(glass, 0.62), right: shade(glass, 0.88) });
       windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
       windows(g, up(S, 0), up(E, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
-      g.strokeStyle = "#222"; g.lineWidth = 2;
-      g.beginPath(); g.moveTo(ox, N[1] - 88); g.lineTo(ox, N[1] - 102); g.stroke();
-      g.fillStyle = "#f33"; g.fillRect(ox - 1.5, N[1] - 104, 3, 3);
+      // G9: service deck on the glass crown
+      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 88, shade(glass, 1.12), "rgba(16,20,28,.8)");
+      roofClutter(g, cx + 4, cy + 3, 2 + (v & 1), R);
+      if (c3mast) {
+        g.strokeStyle = "#222"; g.lineWidth = 2;
+        g.beginPath(); g.moveTo(ox, N[1] - 88); g.lineTo(ox, N[1] - 102); g.stroke();
+        g.fillStyle = "#f33"; g.fillRect(ox - 1.5, N[1] - 104, 3, 3);
+      }
       // lit lobby spilling onto the plaza (G2: own layer, suppressible)
       groundPool(S[0], S[1] - 2, 12, 5, GLOW_COOL);
-    }));
+    });
+    // beacon tip offset from the anchor center, for the live blink pass
+    if (c3mast) c3spr.beacon = { x: -1.5, y: -(HH + 104) };
+    SPR.c3.push(c3spr);
   }
 
   /* ---- industrial ---- */
@@ -633,6 +765,9 @@ function buildSprites() {
     poly(g, [up(W, 22), up(S, 22), up(S, 28), up(W, 28)], "#102e6b");
     g.fillStyle = "#ffd94e";
     g.beginPath(); g.arc(S[0], S[1] - 25, 3.4, 0, 7); g.fill();
+    // G9: service deck + parapet on the precinct roof
+    const [cx, cy] = roofDeck(g, ox, oy, 2, 2, 30, shade("#b9c4d4", 0.6), "rgba(16,18,24,.85)");
+    roofClutter(g, cx, cy, 4, R, 1.8);
   });
 
   SPR.firesta = mkSprite(2, 2, 46, (g, ox, oy) => {
@@ -645,6 +780,9 @@ function buildSprites() {
     }
     poly(g, [up(W, 24), up(S, 24), up(S, 28), up(W, 28)], "#8c2c22");
     poly(g, [up(S, 24), up(E, 24), up(E, 28), up(S, 28)], "#a53328");
+    // G9: hose-drying deck + parapet behind the station front
+    const [cx, cy] = roofDeck(g, ox, oy, 2, 2, 28, shade("#c8574a", 0.55), "rgba(20,12,10,.85)");
+    roofClutter(g, cx, cy, 4, R, 1.8);
   });
 
   SPR.coal = withNight(2, 2, 78, (g, ox, oy) => {
@@ -675,9 +813,23 @@ function buildSprites() {
 
   // School: red-brick block with a white bell tower and a small yard
   SPR.school = withNight(2, 2, 56, (g, ox, oy) => {
-    const { W, S, E, N } = prism(g, ox, oy, 2, 2, 24, "#b5533c");
+    // G9: the brick red would glow neon at 1.3 — the roof drops to 1.1
+    const { W, S, E, N } = prism(g, ox, oy, 2, 2, 24, "#b5533c",
+      { top: shade("#b5533c", 1.1) });
     windows(g, up(W, 0), up(S, 0), 24, 2, 3, 0.7, "#ffe9a0");
     windows(g, up(S, 0), up(E, 0), 24, 2, 3, 0.7, "#ffe9a0");
+    // G9: gravel field behind the parapet, speckled by the seeded RNG
+    const [gx, gy] = roofDeck(g, ox, oy, 2, 2, 24, "#98907e", "rgba(52,40,30,.7)");
+    g.save();
+    g.beginPath();
+    g.moveTo(gx, gy - HH * 2 * 0.82); g.lineTo(gx + HW * 2 * 0.82, gy);
+    g.lineTo(gx, gy + HH * 2 * 0.82); g.lineTo(gx - HW * 2 * 0.82, gy);
+    g.closePath(); g.clip();
+    g.fillStyle = "#aaa290";
+    for (let k = 0; k < 26; k++) g.fillRect(gx - 52 + R() * 104, gy - 24 + R() * 48, 2, 1);
+    g.fillStyle = "#6e6656";
+    for (let k = 0; k < 20; k++) g.fillRect(gx - 52 + R() * 104, gy - 24 + R() * 48, 2, 1);
+    g.restore();
     // double doors on the SE face
     const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
     poly(g, [up(dm(0.42), 2), up(dm(0.58), 2), up(dm(0.58), 14), up(dm(0.42), 14)], "#e8e0d0");
@@ -710,9 +862,10 @@ function buildSprites() {
     const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
     poly(g, [up(dm(0.3), 12), up(dm(0.7), 12), up(dm(0.7), 15), up(dm(0.3), 15)], "#c94040");
     poly(g, [up(dm(0.38), 2), up(dm(0.62), 2), up(dm(0.62), 12), up(dm(0.38), 12)], "#9fd8e8");
-    // helipad + red cross on the roof
+    // helipad + red cross on the roof — the slab's #d8d5ca is the
+    // hospital's signature, separable from the lightened pale R3 decks (G9)
     const cx = ox, cy = oy + HH - 34;
-    g.fillStyle = "#d4d1c6";
+    g.fillStyle = "#d8d5ca";
     g.beginPath(); g.ellipse(cx, cy, 22, 11, 0, 0, 7); g.fill();
     g.strokeStyle = "#a8a498"; g.lineWidth = 1; g.stroke();
     g.fillStyle = "#d02c2c";

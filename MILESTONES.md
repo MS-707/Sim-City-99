@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G9 — Roofscape variety** (graphics audit): beacon discipline (C3-only
-  signature), residential/industrial roof furniture, shade() fix.
-  Criteria: docs/gfx-audit-slate.json.
+- [ ] **G10 — Zone color identity** (graphics audit): constrain R/C/I facade
+  palettes to their minimap hue families, saturation rebalance, per-tile
+  jitter. Criteria: docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G10 — Zone color identity — R/C/I readable from the main view**: End the hue lottery: constrain each zone's procedural palette to its minimap hue family (R warm brick/cream/terracotta, C cool glass blues/teals/grays, I desaturated ochre/rust/concrete), drop facade…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G11 — Civic buildings that players can find**: Give the 2x2 civics skyline presence and identity: raise police/hospital massing to ~50-60px (or add landmark elements clearing the 68px skyline — police comms mast cluster, hospital tower wing behind…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G12 — Road art upgrade — width, curbs, junctions, dash continuity**: Rework roadSprite() in js/sprites.js: widen asphalt from the 0.28-0.72 arm quad to ~0.6-0.7 of the edge with a 1px lighter curb line each side; stop center-line dashes at ~60% of the way to center on…
@@ -48,6 +46,28 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G9 — Roofscape variety — beacon discipline, roof clutter, shade()
+  fix**: the mast + red beacon is now a C3-only signature on exactly 2 of 5
+  variants (v1/v3 gate; rasterized red-tip pixels 0 on every r3, 6 on c3
+  v1/v3 only, was 9/6 on all ten); every r2/r3/c2/c3/police/firesta roof
+  gets a 1px parapet inset around a tar/gravel deck plus seeded clutter —
+  R3s carry residential furniture (water tank, stair bulkhead, planters or
+  clothesline), the rest AC units, vents, hatches, skylights (roof-crop
+  luminance stddev 3.1-11.1x the HEAD crops; police/firesta were flat 0);
+  prism() top faces now use lighten(base, 0.35) — a lerp toward white — so
+  pale bases keep hue (#e6e3da -> rgb(238,236,230), was clipped to pure
+  white), the hospital helipad is the signature #d8d5ca slab (>=124 color
+  distance from every R3 deck) and the school roof drops to shade 1.1 over
+  a speckled gravel field; beacons blink live in the painter loop via
+  spr.beacon with (frame + i*7) % 48 < 24 phase offsets (verified toggle at
+  +24 frames and anti-phase towers in one frame — the bake only holds the
+  lit tip); windows() pane lighting joined the buildSprites mulberry32
+  stream, so double-boot sprite sheets hash byte-identical (HEAD differed);
+  roof furniture draws day-only (0 new night-glow pixels above rooflines),
+  and every sprite's canvas size + anchor is byte-equal to HEAD, keeping
+  painter order and cursor math untouched. Zero page errors; verified
+  against the 5 archived criteria (all pass).
 
 - [x] **G8 — Minimap camera rect, overlay legends & demand zero line**:
   renderMinimap strokes the projected camera viewport as a crisp 1px white

@@ -334,6 +334,13 @@ function renderFrame(city, uiState, clearBG) {
             // G3: burning buildings char — darkened while city.fire[i] is
             // set, reverting the moment the fire ends
             if (city.fire[i]) drawChar(spr, wx, wy);
+            // G9: mast-bearing C3 towers blink their aircraft beacon live,
+            // each tower phase-offset by its tile index — the baked red tip
+            // is only the lit state, overdrawn dark on the off half-cycle
+            if (spr.beacon) {
+              ctx.fillStyle = (frame + i * 7) % 48 < 24 ? "#f33" : "#4a1a1a";
+              ctx.fillRect(wx + spr.beacon.x, wy + spr.beacon.y, 3, 3);
+            }
             // G2: buildings occlude glow behind them; flat roads/wires don't
             if (ng && ov !== OV.ROAD && ov !== OV.WIRE)
               nightPunch(spr, wx, wy);

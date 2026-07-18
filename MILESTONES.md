@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **G11 — Civic buildings that players can find** (graphics audit): raise
-  police/hospital massing or add landmark elements clearing the skyline, plus
-  civic identity cues. Criteria: docs/gfx-audit-slate.json.
+- [ ] **G12 — Road art upgrade** (graphics audit): widen asphalt, add curbs,
+  clean junctions, dash continuity in roadSprite(). Criteria:
+  docs/gfx-audit-slate.json.
 
 ## Open
 
@@ -27,8 +27,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 
-- [ ] **G12 — Road art upgrade — width, curbs, junctions, dash continuity**: Rework roadSprite() in js/sprites.js: widen asphalt from the 0.28-0.72 arm quad to ~0.6-0.7 of the edge with a 1px lighter curb line each side; stop center-line dashes at ~60% of the way to center on…
-  (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G13 — Shoreline & forest naturalization**: Soften the coast and the forests: flatten the beach band (drop/dim the sandHi outer-lip highlight), jitter band width per edge with seeded noise, and add corner wedge fills so the coast curves instead…
   (5 judge-approved criteria in docs/gfx-audit-slate.json)
 - [ ] **G14 — Seasons reach the buildings and every tree**: Stop the city floating on the snow: bake a winter variant per zone/civic sprite overpainting top faces (and tinyHouse roof planes) with pal.snowCap plus an eave drip line — the seasonal bake loop and…
@@ -44,6 +42,20 @@ Queue policy: keep at least 5 open improvements at all times.
   second month rollover onward.
 
 ## Done
+
+- [x] **G11 — Civic buildings that players can find**: police/fire/school/
+  hospital rebuilt with raised massing on set-back paved aprons plus skyline
+  landmarks (police comms mast to 84px, hospital tower-wing 74px, bell tower,
+  schoolhouse) and service-colour roof glyphs (blue shield, red garage door,
+  cyan open book, iso red cross on the helipad — iso-plane, not screen-axis).
+  Massing above footprint: police 30->84, hospital 34->74, all clearing the
+  ~60px skyline; roof-glyph minimap-colour pixels 0->120+. Anchors grew
+  upward only (ox=64, footprints bottom-aligned, OV_SIZE/anchor math
+  untouched); occlusion correct in day+night scenes. G9 beacon gate, G10
+  zone palettes, night bakes and determinism all preserved (coal sprite
+  shifted as a seeded-RNG-stream side-effect — still deterministic and
+  valid; solar/rewards/zones byte-identical). Verified against 5 archived
+  criteria + G9/G10/placement guard (all pass).
 
 - [x] **G10 — Zone color identity**: all nine developed-zone facade palettes
   constrained to their minimap hue family — R warm greige/clay/cream (hue

@@ -59,9 +59,9 @@ function poly(g, pts, fill, stroke) {
 
 const up = (p, ht) => [p[0], p[1] - ht];
 
-// solid iso prism: top + two visible faces
-function prism(g, ox, oy, w, h, ht, base, opts = {}) {
-  const { N, E, S, W } = corners(ox, oy, w, h);
+// solid iso prism from precomputed footprint corners
+function prismFrom(g, cn, ht, base, opts = {}) {
+  const { N, E, S, W } = cn;
   const topC = opts.top || lighten(base, 0.35); // G9: pale tops keep hue
   const leftC = opts.left || shade(base, 0.72);
   const rightC = opts.right || shade(base, 0.92);
@@ -69,6 +69,18 @@ function prism(g, ox, oy, w, h, ht, base, opts = {}) {
   poly(g, [up(S, ht), up(E, ht), E, S], rightC);          // SE face
   poly(g, [up(N, ht), up(E, ht), up(S, ht), up(W, ht)], topC, shade(base, 0.55));
   return { N, E, S, W };
+}
+// solid iso prism: top + two visible faces
+function prism(g, ox, oy, w, h, ht, base, opts = {}) {
+  return prismFrom(g, corners(ox, oy, w, h), ht, base, opts);
+}
+// G11: footprint corners drawn back toward the footprint centre by factor k
+// (< 1) so a civic prism sits set back on its lot and a paved apron ring shows
+function insetCorners(ox, oy, w, h, k) {
+  const { N, E, S, W } = corners(ox, oy, w, h);
+  const cx = (N[0] + E[0] + S[0] + W[0]) / 4, cy = (N[1] + E[1] + S[1] + W[1]) / 4;
+  const ins = (p) => [cx + (p[0] - cx) * k, cy + (p[1] - cy) * k];
+  return { N: ins(N), E: ins(E), S: ins(S), W: ins(W) };
 }
 
 // rows x cols of window parallelograms on a face whose bottom edge runs p0->p1.
@@ -290,13 +302,129 @@ function stack(g, x, y, ht, w, stripes = false) {
 // parapet inset + roof field: fills the top-face diamond scaled to 82%
 // around its center and strokes the 1px parapet line; returns the top-face
 // center so callers can arrange furniture on the deck
-function roofDeck(g, ox, oy, w, h, ht, field, line) {
-  const { N, E, S, W } = corners(ox, oy, w, h);
+function roofDeckFrom(g, cn, ht, field, line) {
+  const { N, E, S, W } = cn;
   const cx = (N[0] + E[0] + S[0] + W[0]) / 4;
   const cy = (N[1] + E[1] + S[1] + W[1]) / 4 - ht;
   const ins = (p) => [cx + (p[0] - cx) * 0.82, cy + (p[1] - ht - cy) * 0.82];
   poly(g, [ins(N), ins(E), ins(S), ins(W)], field, line);
   return [cx, cy];
+}
+function roofDeck(g, ox, oy, w, h, ht, field, line) {
+  return roofDeckFrom(g, corners(ox, oy, w, h), ht, field, line);
+}
+
+/* ---- civic apron + roof-plane glyphs (G11) ----
+   Service civics sit set back on a paved plaza. civicApron() paves the full
+   footprint (pavement, never grass — distinct from a zoned tile's grass lot);
+   the building prism is then drawn on insetCorners on top, leaving a concrete
+   apron ring. Roof glyphs (shield / garage door / book / cross / H) are drawn
+   in the roof plane via isoGlyph so their edges run parallel to the 2:1 tile
+   diamond instead of the screen axes. */
+const PAVE = "#9a978f", PAVE_LO = "#83817a", CURB = "#6f6d67";
+function civicApron(g, ox, oy, w, h) {
+  const { N, E, S, W } = corners(ox, oy, w, h);
+  poly(g, [N, E, S, W], PAVE);
+  const cx = (N[0] + E[0] + S[0] + W[0]) / 4, cy = (N[1] + E[1] + S[1] + W[1]) / 4;
+  const ins = (p, k) => [cx + (p[0] - cx) * k, cy + (p[1] - cy) * k];
+  // curb line just inside the lot edge, then two expansion joints toward front
+  poly(g, [ins(N, 0.985), ins(E, 0.985), ins(S, 0.985), ins(W, 0.985)], null, CURB);
+  g.strokeStyle = PAVE_LO; g.lineWidth = 1;
+  for (const t of [0.34, 0.6]) {
+    g.beginPath();
+    g.moveTo(W[0] + (S[0] - W[0]) * t, W[1] + (S[1] - W[1]) * t);
+    g.lineTo(N[0] + (E[0] - N[0]) * t, N[1] + (E[1] - N[1]) * t);
+    g.stroke();
+    g.beginPath();
+    g.moveTo(W[0] + (N[0] - W[0]) * t, W[1] + (N[1] - W[1]) * t);
+    g.lineTo(S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t);
+    g.stroke();
+  }
+}
+// iso roof basis: eu steps one tile-axis (slope +1/2), ev the other (slope
+// -1/2). ~2px per roof unit — a glyph spanning ~7 units reads ~14px on screen.
+const RUV_U = [2, 1], RUV_V = [-2, 1];
+const ruv = (rc, u, v) => [rc[0] + u * RUV_U[0] + v * RUV_V[0], rc[1] + u * RUV_U[1] + v * RUV_V[1]];
+// filled parallelogram spanning [u0,u1]x[v0,v1] in the roof plane
+function isoQuad(g, rc, u0, u1, v0, v1, fill, stroke) {
+  poly(g, [ruv(rc, u0, v0), ruv(rc, u1, v0), ruv(rc, u1, v1), ruv(rc, u0, v1)], fill, stroke);
+}
+// a roof-plane "+" made of two bars along the two tile axes (arm half-length a,
+// bar half-width wd) — its edges track the diamond, not the screen axes
+function isoCross(g, rc, a, wd, fill, stroke) {
+  isoQuad(g, rc, -a, a, -wd, wd, fill, stroke);
+  isoQuad(g, rc, -wd, wd, -a, a, fill, stroke);
+}
+// roof-plane "H" (helipad marking): two posts along one tile axis + a crossbar
+function isoH(g, rc, a, b, wd, fill) {
+  isoQuad(g, rc, -a, -a + 2 * wd, -b, b, fill);   // left post
+  isoQuad(g, rc, a - 2 * wd, a, -b, b, fill);     // right post
+  isoQuad(g, rc, -a, a, -wd, wd, fill);           // crossbar
+}
+
+/* ---- civic landmark furniture (G11) ---- */
+// police communications mast: a lattice tower + dish + whip antennas that
+// clears the tower skyline, giving the precinct a findable silhouette
+function commsMast(g, bx, by) {
+  const top = by - 44;
+  g.strokeStyle = "#3c4048"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(bx - 5, by); g.lineTo(bx - 1, top); g.stroke();
+  g.beginPath(); g.moveTo(bx + 5, by); g.lineTo(bx + 1, top); g.stroke();
+  g.strokeStyle = "#5a5f68"; g.lineWidth = 1;
+  for (let k = 0; k < 6; k++) {
+    const t0 = k / 6, t1 = (k + 1) / 6;
+    const y0 = by + (top - by) * t0, y1 = by + (top - by) * t1;
+    g.beginPath(); g.moveTo(bx - 5 + 4 * t0, y0); g.lineTo(bx + 5 - 4 * t1, y1); g.stroke();
+    g.beginPath(); g.moveTo(bx + 5 - 4 * t0, y0); g.lineTo(bx - 5 + 4 * t1, y1); g.stroke();
+  }
+  g.fillStyle = "#c8ccd2"; // microwave dish
+  g.beginPath(); g.ellipse(bx + 6, by - 22, 4, 5, -0.3, 0, 7); g.fill();
+  g.strokeStyle = "#8a8f98"; g.lineWidth = 1; g.stroke();
+  g.strokeStyle = "#2b2e34"; g.lineWidth = 1; // whip antennas
+  g.beginPath(); g.moveTo(bx - 2, top + 4); g.lineTo(bx - 7, top - 8); g.stroke();
+  g.beginPath(); g.moveTo(bx + 2, top + 4); g.lineTo(bx + 6, top - 6); g.stroke();
+  g.fillStyle = "#e8524a"; g.fillRect(bx - 1, top - 3, 2, 3); // air-safety tip
+}
+// blue police shield roof glyph (minimap #88f family) with a white star
+function policeShield(g, sx, sy) {
+  poly(g, [[sx - 8, sy - 8], [sx + 8, sy - 8], [sx + 8, sy + 2], [sx, sy + 11], [sx - 8, sy + 2]], "#e7ecf7");
+  poly(g, [[sx - 6, sy - 6], [sx + 6, sy - 6], [sx + 6, sy + 1.5], [sx, sy + 8.5], [sx - 6, sy + 1.5]], "#5f78ee"); // police-blue
+  g.fillStyle = "#f2f5ff";
+  g.beginPath();
+  for (let k = 0; k < 5; k++) {
+    const a = -Math.PI / 2 + k * 2 * Math.PI / 5, a2 = a + Math.PI / 5;
+    g.lineTo(sx + Math.cos(a) * 4, sy - 1 + Math.sin(a) * 4);
+    g.lineTo(sx + Math.cos(a2) * 1.7, sy - 1 + Math.sin(a2) * 1.7);
+  }
+  g.closePath(); g.fill();
+}
+// fire-station hose/training tower — the red-roofed landmark behind the bays
+function fireTower(g, bx, by) {
+  const top = by - 38;
+  g.fillStyle = "#b7ad9a"; g.fillRect(bx - 6, top, 12, by - top);
+  g.fillStyle = "#cdc4b2"; g.fillRect(bx - 6, top, 5, by - top);
+  g.fillStyle = "#5c4030"; g.fillRect(bx - 4, top + 7, 3, 6); g.fillRect(bx + 2, top + 7, 3, 6);
+  poly(g, [[bx - 8, top], [bx + 8, top], [bx, top - 11]], "#c0392b"); // red hip roof
+  poly(g, [[bx, top], [bx + 8, top], [bx, top - 11]], "#8f2a20");
+  g.strokeStyle = "#4a4a52"; g.lineWidth = 1; // finial pole
+  g.beginPath(); g.moveTo(bx, top - 11); g.lineTo(bx, top - 19); g.stroke();
+}
+// bright-red roll-up garage-door roof emblem (fire minimap colour #f55)
+function garageEmblem(g, ex, ey) {
+  const rc = [ex, ey];
+  isoQuad(g, rc, -5, 5, -3, 3, "#f24b4b", "#7a1512");
+  g.strokeStyle = "#c73a34"; g.lineWidth = 1;
+  for (const v of [-1, 1]) {
+    const a = ruv(rc, -4.5, v), b = ruv(rc, 4.5, v);
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  }
+}
+// cyan open-book roof glyph (school minimap colour #0cc family)
+function schoolBook(g, bx, by) {
+  poly(g, [[bx, by - 5], [bx - 9, by - 2], [bx - 9, by + 5], [bx, by + 2]], "#17c6c6", "#0a8f8f");
+  poly(g, [[bx, by - 5], [bx + 9, by - 2], [bx + 9, by + 5], [bx, by + 2]], "#22d2d2", "#0a8f8f");
+  g.strokeStyle = "#0a8f8f"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(bx, by - 5); g.lineTo(bx, by + 2); g.stroke();
 }
 
 // seeded service clutter — AC units, spinning vents, access hatches,
@@ -822,33 +950,45 @@ function buildSprites() {
   }
 
   /* ---- civic 2x2 buildings ---- */
-  SPR.police = withNight(2, 2, 46, (g, ox, oy) => {
-    const { W, S, E } = prism(g, ox, oy, 2, 2, 30, "#b9c4d4");
-    windows(g, up(W, 0), up(S, 0), 30, 2, 4, 0.7, "#dce9ff", "#20242c", GLOW_COOL);
-    windows(g, up(S, 0), up(E, 0), 30, 2, 4, 0.7, "#dce9ff", "#20242c", GLOW_COOL);
-    // blue band + badge
-    poly(g, [up(S, 22), up(E, 22), up(E, 28), up(S, 28)], "#173e8c");
-    poly(g, [up(W, 22), up(S, 22), up(S, 28), up(W, 28)], "#102e6b");
+  // Police precinct: raised massing + a comms-mast landmark clearing the
+  // tower skyline, a blue shield roof glyph (minimap #88f) and a paved apron.
+  SPR.police = withNight(2, 2, 92, (g, ox, oy) => {
+    civicApron(g, ox, oy, 2, 2);
+    const HT = 58, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
+    prismFrom(g, cn, HT, "#b9c4d4");
+    windows(g, up(W, 0), up(S, 0), HT, 4, 4, 0.7, "#dce9ff", "#20242c", GLOW_COOL);
+    windows(g, up(S, 0), up(E, 0), HT, 4, 4, 0.7, "#dce9ff", "#20242c", GLOW_COOL);
+    // blue precinct band + gold badge near the base
+    poly(g, [up(S, 20), up(E, 20), up(E, 27), up(S, 27)], "#173e8c");
+    poly(g, [up(W, 20), up(S, 20), up(S, 27), up(W, 27)], "#102e6b");
     g.fillStyle = "#ffd94e";
-    g.beginPath(); g.arc(S[0], S[1] - 25, 3.4, 0, 7); g.fill();
-    // G9: service deck + parapet on the precinct roof
-    const [cx, cy] = roofDeck(g, ox, oy, 2, 2, 30, shade("#b9c4d4", 0.6), "rgba(16,18,24,.85)");
-    roofClutter(g, cx, cy, 4, R, 1.8);
+    g.beginPath(); g.arc(S[0], S[1] - 23, 3.4, 0, 7); g.fill();
+    // G9: service deck + parapet + seeded clutter on the precinct roof
+    const [rx, ry] = roofDeckFrom(g, cn, HT, shade("#b9c4d4", 0.6), "rgba(16,18,24,.85)");
+    roofClutter(g, rx - 18, ry + 3, 2, R, 1.0);
+    commsMast(g, rx + 2, ry - 6);       // skyline landmark
+    policeShield(g, rx - 4, ry + 10);   // findable blue roof glyph
   });
 
-  SPR.firesta = mkSprite(2, 2, 46, (g, ox, oy) => {
-    const { W, S, E } = prism(g, ox, oy, 2, 2, 28, "#c8574a");
-    // garage doors on SE face
+  // Fire station: apparatus bays, a red-roofed hose tower landmark, a bright
+  // red garage-door roof emblem (minimap #f55) and a paved apron.
+  SPR.firesta = mkSprite(2, 2, 64, (g, ox, oy) => {
+    civicApron(g, ox, oy, 2, 2);
+    const HT = 34, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
+    prismFrom(g, cn, HT, "#c8574a");
+    // three cream apparatus-bay doors on the SE face
     for (let k = 0; k < 3; k++) {
       const t0 = 0.12 + k * 0.28, t1 = t0 + 0.2;
       const p = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
       poly(g, [up(p(t0), 3), up(p(t1), 3), up(p(t1), 18), up(p(t0), 18)], "#e8e2d2");
     }
-    poly(g, [up(W, 24), up(S, 24), up(S, 28), up(W, 28)], "#8c2c22");
-    poly(g, [up(S, 24), up(E, 24), up(E, 28), up(S, 28)], "#a53328");
-    // G9: hose-drying deck + parapet behind the station front
-    const [cx, cy] = roofDeck(g, ox, oy, 2, 2, 28, shade("#c8574a", 0.55), "rgba(20,12,10,.85)");
-    roofClutter(g, cx, cy, 4, R, 1.8);
+    poly(g, [up(W, 26), up(S, 26), up(S, 31), up(W, 31)], "#8c2c22");
+    poly(g, [up(S, 26), up(E, 26), up(E, 31), up(S, 31)], "#a53328");
+    // G9: deck + parapet + clutter behind the station front
+    const [rx, ry] = roofDeckFrom(g, cn, HT, shade("#c8574a", 0.55), "rgba(20,12,10,.85)");
+    roofClutter(g, rx - 16, ry + 2, 2, R, 1.0);
+    fireTower(g, rx + 9, ry + 1);       // hose-drying tower landmark
+    garageEmblem(g, rx - 6, ry + 7);    // findable red roof glyph
   });
 
   SPR.coal = withNight(2, 2, 78, (g, ox, oy) => {
@@ -877,66 +1017,76 @@ function buildSprites() {
     g.restore();
   });
 
-  // School: red-brick block with a white bell tower and a small yard
-  SPR.school = withNight(2, 2, 56, (g, ox, oy) => {
+  // School: red-brick block with a tall white bell-tower landmark, a cyan
+  // book roof glyph (minimap #0cc), a small yard and a paved apron.
+  SPR.school = withNight(2, 2, 72, (g, ox, oy) => {
+    civicApron(g, ox, oy, 2, 2);
+    const HT = 32, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
     // G9: the brick red would glow neon at 1.3 — the roof drops to 1.1
-    const { W, S, E, N } = prism(g, ox, oy, 2, 2, 24, "#b5533c",
-      { top: shade("#b5533c", 1.1) });
-    windows(g, up(W, 0), up(S, 0), 24, 2, 3, 0.7, "#ffe9a0");
-    windows(g, up(S, 0), up(E, 0), 24, 2, 3, 0.7, "#ffe9a0");
+    prismFrom(g, cn, HT, "#b5533c", { top: shade("#b5533c", 1.1) });
+    windows(g, up(W, 0), up(S, 0), HT, 3, 3, 0.7, "#ffe9a0");
+    windows(g, up(S, 0), up(E, 0), HT, 3, 3, 0.7, "#ffe9a0");
     // G9: gravel field behind the parapet, speckled by the seeded RNG
-    const [gx, gy] = roofDeck(g, ox, oy, 2, 2, 24, "#98907e", "rgba(52,40,30,.7)");
+    const [gx, gy] = roofDeckFrom(g, cn, HT, "#98907e", "rgba(52,40,30,.7)");
     g.save();
     g.beginPath();
-    g.moveTo(gx, gy - HH * 2 * 0.82); g.lineTo(gx + HW * 2 * 0.82, gy);
-    g.lineTo(gx, gy + HH * 2 * 0.82); g.lineTo(gx - HW * 2 * 0.82, gy);
+    g.moveTo(gx, gy - HH * 2 * 0.68); g.lineTo(gx + HW * 2 * 0.68, gy);
+    g.lineTo(gx, gy + HH * 2 * 0.68); g.lineTo(gx - HW * 2 * 0.68, gy);
     g.closePath(); g.clip();
     g.fillStyle = "#aaa290";
-    for (let k = 0; k < 26; k++) g.fillRect(gx - 52 + R() * 104, gy - 24 + R() * 48, 2, 1);
+    for (let k = 0; k < 24; k++) g.fillRect(gx - 44 + R() * 88, gy - 20 + R() * 40, 2, 1);
     g.fillStyle = "#6e6656";
-    for (let k = 0; k < 20; k++) g.fillRect(gx - 52 + R() * 104, gy - 24 + R() * 48, 2, 1);
+    for (let k = 0; k < 18; k++) g.fillRect(gx - 44 + R() * 88, gy - 20 + R() * 40, 2, 1);
     g.restore();
     // double doors on the SE face
     const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
     poly(g, [up(dm(0.42), 2), up(dm(0.58), 2), up(dm(0.58), 14), up(dm(0.42), 14)], "#e8e0d0");
     g.strokeStyle = "#6b3020"; g.lineWidth = 1;
     g.beginPath(); g.moveTo(...up(dm(0.5), 2)); g.lineTo(...up(dm(0.5), 14)); g.stroke();
-    // bell tower on the roof center
-    const tx = ox, ty = oy + HH - 24;
-    g.fillStyle = "#ece4d4"; g.fillRect(tx - 6, ty - 22, 12, 19);
-    g.fillStyle = "#d9d0bc"; g.fillRect(tx - 6, ty - 22, 5, 19);
-    g.fillStyle = "#2b2b30"; g.fillRect(tx - 4, ty - 18, 8, 7); // bell arch
+    // cyan open-book roof glyph on the front of the deck (findable)
+    schoolBook(g, gx - 2, gy + 12);
+    // tall white bell tower — the school's skyline landmark
+    const tx = gx + 4, ty = gy - 4;
+    g.fillStyle = "#ece4d4"; g.fillRect(tx - 7, ty - 40, 14, 40);
+    g.fillStyle = "#d9d0bc"; g.fillRect(tx - 7, ty - 40, 6, 40);
+    g.fillStyle = "#b8ad97"; g.fillRect(tx - 7, ty - 22, 14, 2); // string course
+    g.fillStyle = "#2b2b30"; g.fillRect(tx - 5, ty - 34, 10, 9); // belfry arch
     g.fillStyle = "#e0b23c";
-    g.beginPath(); g.arc(tx, ty - 15, 2.6, 0, 7); g.fill();     // the bell
-    g.fillStyle = "#7a3a2a";
-    g.beginPath(); g.moveTo(tx - 8, ty - 22); g.lineTo(tx + 8, ty - 22);
-    g.lineTo(tx, ty - 32); g.closePath(); g.fill();             // tower roof
-    // flag by the entrance
-    g.strokeStyle = "#d8d8e0"; g.lineWidth = 1.5;
-    g.beginPath(); g.moveTo(E[0] - 12, E[1] - 4); g.lineTo(E[0] - 12, E[1] - 34); g.stroke();
-    g.fillStyle = "#3555ff";
-    g.beginPath(); g.moveTo(E[0] - 12, E[1] - 34); g.lineTo(E[0] - 2, E[1] - 31);
-    g.lineTo(E[0] - 12, E[1] - 28); g.closePath(); g.fill();
+    g.beginPath(); g.arc(tx, ty - 29, 3, 0, 7); g.fill();        // the bell
+    poly(g, [[tx - 9, ty - 40], [tx + 9, ty - 40], [tx, ty - 54]], "#7a3a2a"); // tower roof
+    poly(g, [[tx, ty - 40], [tx + 9, ty - 40], [tx, ty - 54]], "#5f2c1f");
+    g.strokeStyle = "#d8d8e0"; g.lineWidth = 1;                   // finial + pennant
+    g.beginPath(); g.moveTo(tx, ty - 54); g.lineTo(tx, ty - 61); g.stroke();
+    poly(g, [[tx, ty - 61], [tx + 8, ty - 58], [tx, ty - 55]], "#3555ff");
   });
 
-  // Hospital: white slab with blue window bands and a red-cross helipad roof
-  SPR.hospital = withNight(2, 2, 62, (g, ox, oy) => {
-    const { W, S, E, N } = prism(g, ox, oy, 2, 2, 34, "#e6e3da");
-    windows(g, up(W, 0), up(S, 0), 34, 3, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
-    windows(g, up(S, 0), up(E, 0), 34, 3, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
+  // Hospital: white slab with a taller tower wing, a #d8d5ca helipad bearing
+  // an iso "H", an iso red cross, and a paved apron.
+  SPR.hospital = withNight(2, 2, 96, (g, ox, oy) => {
+    civicApron(g, ox, oy, 2, 2);
+    const HT = 62, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
+    prismFrom(g, cn, HT, "#e6e3da");
+    windows(g, up(W, 0), up(S, 0), HT, 5, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
+    windows(g, up(S, 0), up(E, 0), HT, 5, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
     // emergency canopy on SE face
     const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
     poly(g, [up(dm(0.3), 12), up(dm(0.7), 12), up(dm(0.7), 15), up(dm(0.3), 15)], "#c94040");
     poly(g, [up(dm(0.38), 2), up(dm(0.62), 2), up(dm(0.62), 12), up(dm(0.38), 12)], "#9fd8e8");
-    // helipad + red cross on the roof — the slab's #d8d5ca is the
-    // hospital's signature, separable from the lightened pale R3 decks (G9)
-    const cx = ox, cy = oy + HH - 34;
+    const [rx, ry] = roofDeckFrom(g, cn, HT, shade("#e6e3da", 0.82), "rgba(40,44,52,.7)");
+    // helipad slab (#d8d5ca signature, G9) with a roof-plane white "H"
+    const hp = [rx - 15, ry + 15];
     g.fillStyle = "#d8d5ca";
-    g.beginPath(); g.ellipse(cx, cy, 22, 11, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(hp[0], hp[1], 18, 9, 0, 0, 7); g.fill();
     g.strokeStyle = "#a8a498"; g.lineWidth = 1; g.stroke();
-    g.fillStyle = "#d02c2c";
-    g.fillRect(cx - 3, cy - 9, 6, 18);
-    g.fillRect(cx - 11, cy - 3, 22, 6);
+    isoH(g, hp, 4, 3.2, 1.1, "#f4f6fb");
+    // roof-plane red cross (sheared to the 2:1 diamond, no screen-axis rects)
+    isoCross(g, [rx + 15, ry + 5], 7, 1.3, "#d8302c", "#7a1512");
+    // tower wing behind the pad — the hospital's skyline landmark
+    const wc = [rx + 4, ry - 13];
+    const wcn = { N: ruv(wc, -6, -3), E: ruv(wc, 6, -3), S: ruv(wc, 6, 3), W: ruv(wc, -6, 3) };
+    prismFrom(g, wcn, 22, "#dfe0d8", { top: "#eef0ea" });
+    windows(g, up(wcn.W, 0), up(wcn.S, 0), 22, 3, 2, 0.7, "#bfe0f2", "#20242c", GLOW_COOL);
+    windows(g, up(wcn.S, 0), up(wcn.E, 0), 22, 3, 2, 0.7, "#bfe0f2", "#20242c", GLOW_COOL);
   });
 
   /* ---- milestone rewards ---- */

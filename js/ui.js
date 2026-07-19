@@ -754,6 +754,17 @@ function bindDialogs() {
     window.addEventListener("mouseup", () => drag = null);
   });
 
+  // M20: About dialog music-credits easter egg — clicking the ♪ reveals the
+  // generative-soundtrack credits (and plays a little fanfare).
+  const musicNote = document.getElementById("about-music-note");
+  if (musicNote) {
+    musicNote.addEventListener("click", () => {
+      const credits = document.getElementById("about-credits");
+      if (credits) credits.classList.remove("hidden");
+      Snd.fanfare();
+    });
+  }
+
   const slider = document.getElementById("tax-slider");
   slider.addEventListener("input", () => {
     city.taxRate = +slider.value;

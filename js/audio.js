@@ -105,45 +105,156 @@ const Snd = {
     this.tone(1046.5, 0.5, "triangle", 0.18, seq.length * 0.11);
   },
 
-  // ---- tiny generative jazz-ish loop (very 90s "city" mood) ----
+  // ---- M20: generative multi-mood soundtrack -------------------------------
+  // Four DISTINCT generative moods, each with its own tempo, note-set,
+  // instrument voices and register. The active mood is chosen from live sim
+  // state (pop / demand / day-night / disaster) and mood changes CROSSFADE via
+  // per-mood GainNodes hanging under musicGain — no hard cuts. All synthesized
+  // live in WebAudio; there are no samples.
+  moods: {
+    // sparse, airy early-build theme — slow, high-ish major pentatonic on soft voices
+    calm: {
+      id: "calm", interval: 2600, base: 110.0, bassOct: 1,
+      scale: [220.0, 246.9, 277.2, 329.6, 370.0],   // A major-pentatonic
+      bassType: "triangle", leadType: "sine",
+      density: 0.24, hats: false, swing: 0, vol: 1.0,
+    },
+    // up-tempo, dense downtown groove — bright square lead, driving saw bass, hats
+    bustling: {
+      id: "bustling", interval: 1450, base: 130.8, bassOct: 1,
+      scale: [261.6, 293.7, 329.6, 392.0, 440.0, 523.3], // C major-pentatonic (higher)
+      bassType: "sawtooth", leadType: "square",
+      density: 0.62, hats: true, swing: 0, vol: 1.0,
+    },
+    // dissonant, low, ominous — tritone-laced set on twin sawtooths, deep register
+    tension: {
+      id: "tension", interval: 1800, base: 65.4, bassOct: 1,
+      scale: [138.6, 146.8, 185.0, 196.0, 233.1],   // C#/D + tritones, tense
+      bassType: "sawtooth", leadType: "sawtooth",
+      density: 0.5, hats: false, swing: 0, vol: 1.0,
+    },
+    // mellow, swung night jazz — minor-7th colours on sine/triangle, lower octave
+    night: {
+      id: "night", interval: 2200, base: 98.0, bassOct: 1,
+      scale: [220.0, 261.6, 311.1, 349.2, 415.3, 466.2], // A dorian-ish w/ b7
+      bassType: "sine", leadType: "triangle",
+      density: 0.4, hats: true, swing: 0.35, vol: 1.0,
+    },
+  },
+  moodGains: null,        // { id: GainNode } — each feeds musicGain
+  activeMood: null,       // id of the mood currently faded up
+  crossfadeTime: 1.2,     // seconds of overlap on a mood switch
+
+  // Pick a mood id from live city state. Disaster ALWAYS wins (tension).
+  selectMood() {
+    const c = (typeof city !== "undefined" && city) ? city
+            : (typeof window !== "undefined" && window.city) || null;
+    if (!c) return "calm";
+    let burning = false;
+    if (c.fire) for (let k = 0; k < c.fire.length; k++) { if (c.fire[k]) { burning = true; break; } }
+    if (c.disaster || burning) return "tension";               // disaster precedence
+    const hour = (((c.tickCount | 0) % 24) + 24) % 24;
+    const night = hour < 6 || hour >= 21;                      // at/near midnight
+    const pop = c.pop || 0;
+    const dem = c.demand || { r: 0, c: 0, i: 0 };
+    const hiDemand = dem.r > 0.6 || dem.c > 0.6 || dem.i > 0.6;
+    const busy = pop >= 4000 || (pop >= 1200 && hiDemand);     // thriving metropolis
+    if (night) return busy ? "bustling" : "night";
+    return busy ? "bustling" : "calm";
+  },
+
+  // Re-evaluate desired mood and crossfade to it if it changed.
+  updateMood() {
+    if (!this.ctx || !this.moodGains) return this.activeMood;
+    const want = this.selectMood();
+    if (want !== this.activeMood) this.crossfadeTo(want);
+    return this.activeMood;
+  },
+
+  ensureMoodGains() {
+    if (this.moodGains) return;
+    this.moodGains = {};
+    for (const id in this.moods) {
+      const g = this.ctx.createGain();
+      g.gain.value = 0;
+      g.connect(this.musicGain);
+      this.moodGains[id] = g;
+    }
+  },
+
+  // Ramp the target mood's gain up and every other mood's gain down, overlapping.
+  crossfadeTo(id) {
+    if (!this.moodGains || !this.moods[id]) return;
+    const now = this.ctx.currentTime;
+    const cf = this.crossfadeTime;
+    for (const k in this.moodGains) {
+      const gp = this.moodGains[k].gain;
+      const target = k === id ? this.moods[id].vol : 0;
+      gp.cancelScheduledValues(now);
+      gp.setValueAtTime(gp.value, now);
+      gp.linearRampToValueAtTime(target, now + cf);
+    }
+    this.activeMood = id;
+  },
+
   startMusic() {
     if (!this.ctx || this.musicTimer) return;
-    const bass  = [110, 110, 146.8, 98, 110, 87.3, 146.8, 164.8];  // A A D G A F D E
-    const scale = [220, 261.6, 293.7, 329.6, 392, 440, 523.3];      // A minor pentatonic-ish
-    let bar = 0;
-    const playBar = () => {
-      if (!this.musicOn || !this.ctx) return;
-      const t0 = this.ctx.currentTime + 0.05;
-      const b = bass[bar % bass.length];
-      // bass
-      for (let beat = 0; beat < 4; beat++) {
-        this.musNote(b / (beat === 2 ? 1 : 2) * 2, t0 + beat * 0.5, 0.4, "triangle", 0.5);
-      }
-      // sparse lead
-      for (let beat = 0; beat < 8; beat++) {
-        if (Math.random() < 0.4) {
-          const f = scale[(Math.random() * scale.length) | 0] * (Math.random() < 0.25 ? 2 : 1);
-          this.musNote(f, t0 + beat * 0.25, 0.22, "square", 0.16);
-        }
-      }
-      // hats
-      for (let beat = 0; beat < 8; beat++) this.musHat(t0 + beat * 0.25, beat % 2 ? 0.02 : 0.045);
-      bar++;
-    };
-    playBar();
-    this.musicTimer = setInterval(playBar, 2000);
+    this.ensureMoodGains();
+    // choose an initial mood and fade it in (from silence, still a ramp)
+    const start = this.selectMood();
+    this.activeMood = null;
+    this.crossfadeTo(start);
+    this.scheduleBar();
   },
-  stopMusic() { clearInterval(this.musicTimer); this.musicTimer = null; },
-  musNote(freq, t, dur, type, vol) {
+
+  // Self-rescheduling bar player: tempo follows the ACTIVE mood, so switching
+  // moods changes the groove without a hard timer restart.
+  scheduleBar() {
+    if (!this.musicOn || !this.ctx) { this.musicTimer = null; return; }
+    this.updateMood();                          // let live state steer the mood
+    const mood = this.moods[this.activeMood] || this.moods.calm;
+    this.playBar(mood);
+    this.musicTimer = setTimeout(() => this.scheduleBar(), mood.interval);
+  },
+
+  playBar(mood) {
+    const t0 = this.ctx.currentTime + 0.05;
+    const dest = this.moodGains[mood.id];
+    const barLen = mood.interval / 1000;
+    const beatLen = barLen / 4;
+    const sc = mood.scale;
+    // walking-ish bass, one hit per beat, occasional octave drop
+    for (let beat = 0; beat < 4; beat++) {
+      const root = mood.base * (beat === 2 ? 2 : 1);
+      this.musNote(root, t0 + beat * beatLen, beatLen * 0.85, mood.bassType, 0.5, dest);
+    }
+    // lead motif, 8 sixteenth slots, density + swing per mood
+    for (let s = 0; s < 8; s++) {
+      if (Math.random() < mood.density) {
+        const oct = Math.random() < 0.22 ? 2 : 1;
+        const f = sc[(Math.random() * sc.length) | 0] * oct;
+        const sw = (s % 2 && mood.swing) ? beatLen * 0.5 * mood.swing : 0;
+        this.musNote(f, t0 + s * (beatLen / 2) + sw, beatLen * 0.9, mood.leadType, 0.16, dest);
+      }
+    }
+    // hats for busier moods
+    if (mood.hats) {
+      for (let s = 0; s < 8; s++) this.musHat(t0 + s * (beatLen / 2), s % 2 ? 0.02 : 0.045, dest);
+    }
+  },
+
+  stopMusic() { clearTimeout(this.musicTimer); this.musicTimer = null; },
+
+  musNote(freq, t, dur, type, vol, dest) {
     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
     o.type = type; o.frequency.value = freq;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(vol, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g); g.connect(this.musicGain);
+    o.connect(g); g.connect(dest || this.musicGain);
     o.start(t); o.stop(t + dur + 0.05);
   },
-  musHat(t, vol) {
+  musHat(t, vol, dest) {
     const len = (this.ctx.sampleRate * 0.05) | 0;
     const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = buf.getChannelData(0);
@@ -153,7 +264,7 @@ const Snd = {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-    src.connect(f); f.connect(g); g.connect(this.musicGain);
+    src.connect(f); f.connect(g); g.connect(dest || this.musicGain);
     src.start(t);
   },
 

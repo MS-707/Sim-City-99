@@ -6,13 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M24 — Water & sewage system** *(next up)*: OV.PIPE/WATERTOWER/PUMP (ids
-  19–21, continuing from WIREROAD=18), `recomputeWater()` run after
-  recomputePower (pumps need power + a water neighbor; towers don't), a
-  watered[] coverage field that **gates density** (unwatered lots capped at lvl
-  1, lvl 3 behind pressure ≥0.9), a Water minimap overlay and budget upkeep.
-  Never conducts electricity. Save v9. Full spec + 8 criteria in
-  `docs/queue-specs.json`.
+- [ ] **M25 — Rail & subway transit** *(next up)*: rail/subway/station on a
+  **separate `city.rail` plane** (over[] untouched), `recomputeRail()` networks +
+  station catchment (power by adjacency), ridership diverting a capped share of
+  trips inside recomputeTraffic (≤0.60, never to zero), tier-gated tools, an 8th
+  minimap mode, transit query rows. Save v9 + legacy back-compat. Full spec + 8
+  criteria in `docs/queue-specs.json`.
 
 ## Open
 
@@ -20,11 +19,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M25 — Rail & subway transit**: rail/subway/station on a **separate
-  `city.rail` plane** (over[] untouched), `recomputeRail()` networks + station
-  catchment (power by adjacency), ridership diverting a capped share of trips
-  inside recomputeTraffic (≤0.60, never to zero), tier-gated tools, an 8th
-  minimap mode, transit query rows. Save v9 + legacy back-compat.
 - [ ] **M20 — Soundtrack expansion**: 3–4 distinct generative music moods
   (calm building, bustling metropolis, disaster tension, night jazz) that
   crossfade on sim state; music-credits easter egg in About. *(Prior workflow
@@ -56,6 +50,25 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M24 — Water & sewage system**: a second utility network. OV.PIPE=19/
+  WATERTOWER=20/PUMP=21 (appended after WIREROAD=18), with an `isWaterOv()`
+  helper that **excludes all three from `recomputePower`'s conductor test and
+  every `t >= OV.ZR` power/census idiom** — so water infrastructure never
+  conducts electricity or counts as a zone (a plant+pipe adjacent to a lot leaves
+  it unpowered; adding pipes/towers leaves the power grid byte-identical). A
+  water tower supplies with no power; a pump is a 2×2 station needing power AND a
+  `TERR.WATER` neighbour (dry or unpowered → 0). `recomputeWater()` runs after
+  recomputePower, producing a `watered[]` catchment + waterSupply/waterDemand/
+  waterPressure. Water **gates density, upgrade-only**: unwatered lots cap at lvl
+  1, lvl 3 needs pressure ≥0.9, and the gate never decrements an existing lvl —
+  so loading a pre-M24 city keeps its full skyline (no shrink). A Water minimap
+  overlay, budget upkeep, procedural pipe/tower/pump sprites, and vitals/query
+  rows. Save stays v9 (over[] carries the ids; watered[]/pressure derived on
+  load). Verified 8/8 + anti-crosstalk and no-shrink hard gates + a 5-agent panel
+  (5/5 confirm; the two panel notes — a wired pump drawing power as a motor
+  without propagating it, and towers/pumps being flammable like plants — are
+  intended, spec-compliant behavior). Zero console errors.
 
 - [x] **M22 — City ordinances**: an ORDINANCES registry (recycling, neighborhood
   watch, carpool incentive, curfew, nostalgia tax, smoke-detector mandate) with

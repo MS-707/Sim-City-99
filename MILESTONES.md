@@ -6,11 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M27 — Neighboring cities & regional connections** *(next up)*: named
-  neighbor cities on the four map edges with per-seed personalities;
-  roads/rail/power reaching a border tile open month-billed deals (sell surplus
-  power, buy during brownouts, commuter demand from highway/rail links).
-  Proposal-stage — design + criteria set fresh by an independent reviewer.
+- [ ] **M28 — Arcologies & wonder landmarks** *(next up)*: the four SC2K
+  arcologies (Plymouth/Forest/Darco/Launch) + placeable wonder landmarks
+  (Liberty/Eiffel/pyramid homages) as tier-unlocked multi-tile OV.*
+  megastructures — big fixed pop/jobs, self-powered, night-lit; landmarks pump
+  land value over a radius. Proposal-stage — design + criteria set fresh by an
+  independent reviewer.
 
 ## Open
 
@@ -18,10 +19,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M28 — Arcologies & wonder landmarks**: the four SC2K arcologies
-  (Plymouth/Forest/Darco/Launch) + placeable wonder landmarks (Liberty/Eiffel/
-  pyramid homages) as tier-unlocked multi-tile OV.* megastructures — big fixed
-  pop/jobs, self-powered, night-lit; landmarks pump land value over a radius.
 - [ ] **M29 — Expanded disaster roster**: earthquake (epicenter ripple → rubble
   + fires), coastal flood (spreads inland from water), riot (spawns on the
   crime hotspot, suppressed by police coverage), and a kaiju monster — each
@@ -41,6 +38,30 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M27 — Neighboring cities & regional connections**: the four map edges
+  gain named neighbor cities whose names/archetypes/prices/dispositions are a
+  **pure function of `city.seed`** (`computeNeighbors(seed)`, never serialized).
+  A road/wire/rail tile touching a border opens a connection to that edge's
+  neighbor; a Win95 deal dialog lets you **sell surplus power** (income), **buy
+  power** during brownouts, and open **commuter links** that raise demand within
+  8 tiles of the border. Power trade folds into `recomputePower` supply and the
+  monthly budget; commuter demand feeds `growthPass` via a per-tile bias that is
+  exactly 0 (bit-inert) with no open link. Save bumps to **v10** (deals + disp);
+  pre-M27 saves load with no connections. Verified 9/9 criteria + a design phase,
+  then the multi-vote panel **caught a real economy exploit** — selling power
+  over a border wire was paid with no check against generation, so a plantless
+  city could mint free § (~+20k/yr) and overselling browned the city out "for
+  free." Fixed: exports and revenue are **capped to actual generation surplus**
+  (`sold = min(committed, max(0, plantSupply − demand))`, revenue scaled by
+  sold/committed), closing the phantom-income and free-power holes and making
+  buy→resell arbitrage net-negative. Re-verified independently: plantless → 0,
+  oversell 300 w/ surplus 297 → exports 297 (never self-browns) paid 2673,
+  arbitrage nets −1326, in-surplus deals unchanged, and a no-connection city is
+  **240-tick byte-identical** to the pre-M27 baseline. Rotation/districts/
+  ordinances/water/rail all intact; zero console errors. (One re-verify lens
+  mislabeled its boolean as a refute while its own evidence and defects list
+  fully confirmed the fix; independently re-tested to be certain.)
 
 - [x] **M20 — Soundtrack expansion**: the single generative bar loop became a
   table of **four distinct WebAudio-synth moods** — calm (sparse, slow, sine/

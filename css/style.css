@@ -266,6 +266,41 @@ input[type=range]::-moz-range-thumb {
   display: inline-block; width: 10px; height: 10px; margin-right: 5px;
   border: 1px solid #404040; vertical-align: middle;
 }
+/* District Manager (M21) */
+#dlg-districts { min-width: 420px; }
+.dist-cols { display: flex; gap: 10px; align-items: flex-start; }
+.dist-left { flex: 0 0 200px; }
+.dist-newrow { display: flex; gap: 4px; margin-bottom: 5px; }
+.dist-newrow input { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 1px 3px; }
+.dist-newrow .btn95 { flex: 0 0 auto; min-width: 44px; }
+.dist-list {
+  height: 150px; overflow-y: auto; background: #fff;
+  border: 1px solid #808080; box-shadow: 1px 1px 0 #404040 inset;
+  padding: 1px;
+}
+.dist-row {
+  display: flex; align-items: center; gap: 5px; padding: 2px 4px;
+  font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden;
+}
+.dist-row:hover { background: #d8e0f0; }
+.dist-row.sel { background: #000080; color: #fff; }
+.dist-row.sel .dim { color: #c8d0e8; }
+.dist-sw {
+  display: inline-block; flex: 0 0 auto; width: 12px; height: 12px;
+  border: 1px solid #404040;
+}
+.dist-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 6px; }
+.dist-btns .btn95 { min-width: 0; font-size: 11px; padding: 2px 0; }
+.dist-btns .btn95:disabled { opacity: .5; cursor: not-allowed; }
+.dist-stats { flex: 1 1 auto; min-width: 170px; }
+.dist-stats .budget-table td:last-child { font-family: Tahoma, sans-serif; text-align: right; }
+.dist-bar {
+  display: inline-block; width: 60px; height: 8px; margin-right: 5px;
+  background: #1e283c; border: 1px solid #404040; vertical-align: middle;
+}
+.dist-bar span { display: block; height: 100%; background: #6adabb; }
+.dist-stats .dim { color: #606060; font-weight: normal; }
+
 /* news chopper traffic report (M18) */
 #dlg-traffic { min-width: 340px; }
 #traffic-table th { text-align: left; font-size: 11px; border-bottom: 1px solid #000; padding: 2px 6px; }

@@ -578,8 +578,15 @@ function renderFrame(city, uiState, clearBG) {
 
   ctx.save();
   worldTransform();
+  // M21: live district wash under the cursor feedback, only while the tool is
+  // active. Uses the same cull window the tile loop computed above.
+  if (uiState.tool === "district") drawDistrictTint(city, minWX, maxWX, minWY, maxWY);
   if (uiState.hover && uiState.tool !== "query") drawCursor(city, uiState);
   ctx.restore();
+
+  // M21: low-zoom neighborhood labels, drawn in SCREEN space (after the world
+  // transform is restored) so text stays upright at every rotation.
+  drawDistrictLabels(city);
 }
 
 /* ---- postcard photo pass (G4) ---- */
@@ -1125,6 +1132,90 @@ function drawCursor(city, uiState) {
   }
 }
 
+/* ---------------- districts (M21) ---------------- */
+// id -> palette hex lookup (index by district id). Built fresh per render pass
+// off districts[] so it never goes stale after an add/delete/recolor.
+function distColLookup(city) {
+  const col = [];
+  for (const d of city.districts) col[d.id] = DISTRICT_COLS[d.col];
+  return col;
+}
+
+// Live paint feedback: wash each districted tile in its color at low alpha, in
+// WORLD space, only while the district tool is active. Bounded to the same cull
+// window the tile loop uses. Reads only district[]/districts — perturbs nothing.
+function drawDistrictTint(city, minWX, maxWX, minWY, maxWY) {
+  if (!city.districts.length) return;
+  const col = distColLookup(city);
+  ctx.globalAlpha = 0.16;
+  for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+    const id = city.district[y * MAP + x];
+    if (!id) continue;
+    const wx = worldX(x, y), wy = worldY(x, y);
+    if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
+    ctx.fillStyle = col[id] || "#fff";
+    ctx.beginPath();
+    ctx.moveTo(wx, wy - HH); ctx.lineTo(wx + HW, wy);
+    ctx.lineTo(wx, wy + HH); ctx.lineTo(wx - HW, wy);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// SCREEN-space neighborhood labels at low zoom (SC2K style). Centroids are
+// recomputed in ONE O(n) pass ONLY when a district edit bumped distRev — never
+// per frame or per tick. Each centroid projects through the rotation-aware
+// worldX/worldY, so labels sit correctly at every cam.r. Hidden when zoomed in
+// (cam.z >= 0.7) so they never clutter detail work; skips districts < 6 tiles.
+// M21: cache the per-district label centroids, recomputed only when the
+// district layer changes. Keyed on the city OBJECT (not just distRev) because
+// distRev inits to 0 on every fresh/loaded city and isn't bumped on load, so
+// keying on distRev alone would collide across cities (load A then B, both at
+// rev 0, would draw A's names on B). The city reference changes on new-game/
+// load/scenario, forcing a recompute — same city-identity discipline the
+// night-layer cache uses.
+let distLabelCache = { city: null, rev: -1, cents: [] };
+function drawDistrictLabels(city) {
+  if (cam.z >= 0.7 || !city.districts.length) return;
+  if (distLabelCache.city !== city || distLabelCache.rev !== (city.distRev | 0)) {
+    const acc = {};
+    for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+      const id = city.district[y * MAP + x];
+      if (!id) continue;
+      const a = acc[id] || (acc[id] = { sx: 0, sy: 0, n: 0 });
+      a.sx += x; a.sy += y; a.n++;
+    }
+    const cents = [];
+    for (const d of city.districts) {
+      const a = acc[d.id];
+      if (a && a.n >= 6) cents.push({ name: d.name, cx: a.sx / a.n, cy: a.sy / a.n });
+    }
+    distLabelCache = { city, rev: city.distRev | 0, cents };
+  }
+  if (!distLabelCache.cents.length) return;
+  // alpha ramps in as z drops below 0.7, full at/below 0.45
+  const alpha = cam.z <= 0.45 ? 1 : Math.max(0, (0.7 - cam.z) / (0.7 - 0.45));
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "bold 13px Tahoma, sans-serif";
+  ctx.lineJoin = "round";
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "2px";
+  for (const c of distLabelCache.cents) {
+    const wx = worldX(c.cx, c.cy), wy = worldY(c.cx, c.cy);
+    const sx = (wx - cam.x) * cam.z + cvs.width / 2;
+    const sy = (wy - cam.y) * cam.z + cvs.height / 2;
+    if (sx < -60 || sx > cvs.width + 60 || sy < -30 || sy > cvs.height + 30) continue;
+    const label = c.name.toUpperCase();
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,12,20,0.85)";
+    ctx.strokeText(label, sx, sy);
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.fillText(label, sx, sy);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 /* ---------------- minimap ---------------- */
 // default City-mode color of one tile — shared by the City view and the
 // overlay modes that keep the district as dimmed context (G8)
@@ -1163,6 +1254,9 @@ function renderMinimap(city, mode) {
   const g = mm.getContext("2d");
   const sc = mm.width / MAP;
   g.fillStyle = "#000"; g.fillRect(0, 0, mm.width, mm.height);
+  // M21: id->color lookup precomputed ONCE (not an O(#districts) find() per
+  // tile) for the "dist" mode; stays north-up like every other minimap mode.
+  const distCol = mode === "dist" ? distColLookup(city) : null;
   for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
     const i = y * MAP + x;
     let col = null;
@@ -1190,6 +1284,11 @@ function renderMinimap(city, mode) {
     } else if (mode === "crime") {
       const v = city.crime[i];
       col = v > 6 ? `rgb(${80 + v},20,${30 + v / 2})` : (city.terr[i] === TERR.WATER ? "#013" : "#121");
+    } else if (mode === "dist") {
+      const dc = city.district[i];
+      // districted tiles paint their palette color; everything else keeps the
+      // dimmed City-mode context (same treatment as the traffic overlay)
+      col = dc ? (distCol[dc] || "#fff") : minimapDim(minimapCityCol(city, i), 0.35);
     } else {
       // default city view
       col = minimapCityCol(city, i);

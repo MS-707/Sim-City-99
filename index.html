@@ -98,7 +98,7 @@
           <!-- M32a: 90° view rotation -->
           <div id="viewrot"><button id="rot-ccw" class="btn95 tiny" title="Rotate view CCW (Q / [)">&#x27f2;</button><button id="rot-cw" class="btn95 tiny" title="Rotate view CW (E / ])">&#x27f3;</button></div>
           <div id="mapmodes">
-            <button class="btn95 tiny mm active" data-mode="all" title="City overview">City</button><button class="btn95 tiny mm" data-mode="power" title="Power grid">Pwr</button><button class="btn95 tiny mm" data-mode="poll" title="Pollution">Pollu</button><button class="btn95 tiny mm" data-mode="value" title="Land value">Val</button><button class="btn95 tiny mm" data-mode="crime" title="Crime">Cri</button><button class="btn95 tiny mm" data-mode="traffic" title="Traffic congestion">Trf</button><button class="btn95 tiny mm" data-mode="svc" title="City services (education &amp; health)">Svc</button>
+            <button class="btn95 tiny mm active" data-mode="all" title="City overview">City</button><button class="btn95 tiny mm" data-mode="power" title="Power grid">Pwr</button><button class="btn95 tiny mm" data-mode="poll" title="Pollution">Pollu</button><button class="btn95 tiny mm" data-mode="value" title="Land value">Val</button><button class="btn95 tiny mm" data-mode="crime" title="Crime">Cri</button><button class="btn95 tiny mm" data-mode="traffic" title="Traffic congestion">Trf</button><button class="btn95 tiny mm" data-mode="svc" title="City services (education &amp; health)">Svc</button><button class="btn95 tiny mm" data-mode="dist" title="Districts / neighborhoods">Dist</button>
           </div>
         </fieldset>
         <fieldset class="fs95"><legend>Vitals</legend>
@@ -160,6 +160,34 @@
         <div id="bond-note" class="bond-note"></div>
         <div class="dlg-buttons"><button id="btn-issue-bond" class="btn95">Issue Bond</button></div>
       </fieldset>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
+  <!-- District Manager (M21) -->
+  <div id="dlg-districts" class="win95 dlg hidden">
+    <div class="titlebar"><span>🏘️ District Manager</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <div class="dist-cols">
+        <div class="dist-left">
+          <div class="dist-newrow">
+            <input type="text" id="dist-name" maxlength="24" placeholder="District name…">
+            <button id="dist-new" class="btn95">New</button>
+          </div>
+          <div id="dist-list" class="dist-list"></div>
+          <div class="dist-btns">
+            <button id="dist-rename" class="btn95">Rename</button>
+            <button id="dist-color" class="btn95">Color</button>
+            <button id="dist-erase" class="btn95">Erase</button>
+            <button id="dist-delete" class="btn95">Delete</button>
+            <button id="dist-jump" class="btn95">Jump</button>
+            <button id="dist-paint" class="btn95">Paint</button>
+          </div>
+        </div>
+        <fieldset class="fs95 dist-stats"><legend>Neighborhood Report</legend>
+          <table id="dist-stats-table" class="budget-table"></table>
+        </fieldset>
+      </div>
       <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
     </div>
   </div>

@@ -5,6 +5,7 @@ const UI = {
   tool: "road",
   hover: null,           // {x, y} tile under mouse
   mapMode: "all",
+  curDistrict: 0,        // M21: active district brush (0 = eraser / unassigned)
   speed: 1,              // 0 pause, 1 normal, 2 fast, 0.5 slow
   painting: false,
   panning: false,
@@ -28,6 +29,9 @@ cam.r = (UI.prefs.viewRot | 0) & 3; // M32a: resume at the player's last view ro
 const TOOLS = [
   { id: "query",    name: "Inspect",   key: "0", icon: "🔍" },
   { id: "bulldoze", name: "Bulldoze",  key: "1", icon: "🚜" },
+  // M21: free metadata paint tool — no COST entry, no tier lock. Paints the
+  // district layer, never the OV building layer.
+  { id: "district", name: "Distrct",   key: "d", icon: "🏘️" },
   { id: "road",     name: "Road",      key: "2", icon: null, spr: () => SPR.road[5] },
   { id: "wire",     name: "Power Ln",  key: "3", icon: null, spr: () => SPR.wire[5] },
   { id: "zr",       name: "Residntl",  key: "4", icon: null, spr: () => SPR.r1[0] },
@@ -117,6 +121,7 @@ function uiInit() {
   bindCanvas();
   bindKeys();
   bindDialogs();
+  bindDistricts();
   bindMinimap();
   bindTicker();
   pickerInit();
@@ -243,6 +248,9 @@ function setTool(id) {
     b.classList.toggle("active", b.dataset.tool === id));
   const cost = COST[id];
   setStatus(`${t.name} selected${cost ? ` — §${cost} each` : ""}`);
+  // M21: first pick of the district tool opens the manager (discoverability),
+  // since a costless metadata tool has no obvious feedback until it has a brush.
+  if (id === "district" && city && city.districts.length === 0) openDistricts();
 }
 
 function setStatus(msg) { document.getElementById("sb-tool").textContent = msg; }
@@ -277,6 +285,7 @@ const MENUS = {
   ],
   windows: () => [
     ["Budget…", openBudget],
+    ["Districts… 🏘️", openDistricts],
     [`${UI.prefs.autoBudget ? "✓ " : ""}Budget Report Monthly`,
       () => { UI.prefs.autoBudget = !UI.prefs.autoBudget; savePrefs(); }],
     ["Graphs…", openGraphs],
@@ -509,6 +518,11 @@ function applyToolAt(e) {
 
   if (UI.tool === "query") { openQuery(x, y); return; }
 
+  // M21: district paint — bypass place()/canPlace()/toolCost() entirely so it
+  // never writes OV.NONE and never charges funds. Sits after the lastPaint
+  // dedupe above (drag swaths dedupe for free) and returns before city.place.
+  if (UI.tool === "district") { city.paintDistrict(x, y, UI.curDistrict); Snd.zone(); return; }
+
   const res = city.place(UI.tool, x, y);
   if (res.ok) {
     switch (UI.tool) {
@@ -564,11 +578,31 @@ const MM_LEGENDS = {
   crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#a5143e)"></i>safe / lawless',
   traffic: '<i class="grad" style="background:linear-gradient(90deg,#3cc828,#dcb428,#ff0028)"></i>free / jammed',
   svc:     '<i class="sw" style="background:#28dc3c"></i>edu <i class="sw" style="background:#dc283c"></i>health <i class="sw" style="background:#dcdc3c"></i>both',
+  // M21: static fallback string (satisfies "MM_LEGENDS.dist is a non-empty
+  // string"); updateMapLegend swaps in live per-district swatches when any exist.
+  dist:    '<i class="sw" style="background:#e04040"></i>neighborhoods — paint with the 🏘️ tool',
 };
 
 function updateMapLegend(mode) {
   const el = document.getElementById("mm-legend");
   if (mode === "all") { el.classList.add("hidden"); return; }
+  if (mode === "dist") {
+    // build live swatches from DISTRICT_COLS via DOM nodes so user names are
+    // inserted as text (never HTML) — safe against name injection
+    el.innerHTML = "";
+    if (city && city.districts.length) {
+      for (const d of city.districts) {
+        const sw = document.createElement("i");
+        sw.className = "sw"; sw.style.background = DISTRICT_COLS[d.col];
+        el.appendChild(sw);
+        el.appendChild(document.createTextNode(d.name + " "));
+      }
+    } else {
+      el.innerHTML = MM_LEGENDS.dist;
+    }
+    el.classList.remove("hidden");
+    return;
+  }
   el.innerHTML = MM_LEGENDS[mode];
   el.classList.remove("hidden");
 }
@@ -815,6 +849,138 @@ function fillBudgetTable() {
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;
+}
+
+/* ================= District Manager (M21) ================= */
+// Auto-suggested 1997 neighborhood names, cycled off the existing ST_NAMES
+// flavor pool so a fresh district gets instant period character.
+const DIST_SUFFIX = ["Heights", "Flats", "Village", "Quarter", "Gardens",
+  "Hollow", "Row", "Commons", "Yards", "Terrace", "Point", "Park"];
+function suggestDistrictName() {
+  const n = city.districts.length;
+  return ST_NAMES[n % ST_NAMES.length] + " " + DIST_SUFFIX[n % DIST_SUFFIX.length];
+}
+
+// centroid (mean tile) of a district over district[] — used by the Jump button.
+// Read-only, O(n); the map-label path keeps its own distRev-cached version.
+function districtCentroid(id) {
+  let sx = 0, sy = 0, n = 0;
+  for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+    if (city.district[y * MAP + x] === id) { sx += x; sy += y; n++; }
+  }
+  return n ? { x: sx / n, y: sy / n } : null;
+}
+
+function openDistricts() { fillDistricts(); showDlg("dlg-districts"); }
+
+// Rebuilt from live state on every open (same on-demand pattern as
+// openBudget/openQuery) — never a per-frame or per-tick cost.
+function fillDistricts() {
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // per-district tile counts in one pass
+  const cnt = {};
+  for (let i = 0; i < city.district.length; i++) {
+    const d = city.district[i]; if (d) cnt[d] = (cnt[d] || 0) + 1;
+  }
+  const list = document.getElementById("dist-list");
+  let html = `<div class="dist-row${UI.curDistrict === 0 ? " sel" : ""}" data-id="0">` +
+    `<i class="dist-sw" style="background:transparent;border-style:dashed"></i>` +
+    `(none / eraser)</div>`;
+  for (const d of city.districts) {
+    html += `<div class="dist-row${UI.curDistrict === d.id ? " sel" : ""}" data-id="${d.id}">` +
+      `<i class="dist-sw" style="background:${DISTRICT_COLS[d.col]}"></i>` +
+      `${esc(d.name)} <span class="dim">(${cnt[d.id] || 0} tiles)</span></div>`;
+  }
+  list.innerHTML = html;
+  list.querySelectorAll(".dist-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      UI.curDistrict = +row.dataset.id;
+      Snd.click();
+      fillDistricts();
+    });
+  });
+  // button enable/disable states
+  const has = UI.curDistrict > 0;
+  document.getElementById("dist-new").disabled = city.districts.length >= DIST_MAX;
+  for (const b of ["dist-rename", "dist-color", "dist-delete", "dist-jump"])
+    document.getElementById(b).disabled = !has;
+  // stats panel
+  fillDistrictStats();
+}
+
+function fillDistrictStats() {
+  const tbl = document.getElementById("dist-stats-table");
+  if (UI.curDistrict === 0) {
+    tbl.innerHTML = `<tr><td class="dim" colspan="2">Eraser selected — paint tiles ` +
+      `to clear their district, or pick a neighborhood above to see its report.</td></tr>`;
+    return;
+  }
+  const d = city.districts.find((x) => x.id === UI.curDistrict);
+  if (!d) { tbl.innerHTML = ""; return; }
+  const s = city.districtStats(UI.curDistrict);
+  // land-value mini-bar (0..255 -> % width), echoing the "value" minimap ramp
+  const lvPct = Math.round((s.landv / 255) * 100);
+  const bar = `<div class="dist-bar"><span style="width:${lvPct}%"></span></div>`;
+  const quip = s.tiles === 0 ? "An empty neighborhood — go paint some tiles."
+    : s.landv >= 170 ? "Prime real estate, Mayor. The tax base loves you."
+    : s.landv <= 60 ? "Rough around the edges. Parks and safety would lift it."
+    : "A solid, workaday neighborhood.";
+  tbl.innerHTML =
+    `<tr><td>Tiles</td><td>${s.tiles} (${s.developed} developed)</td></tr>` +
+    `<tr><td>Population</td><td>${s.pop.toLocaleString()}</td></tr>` +
+    `<tr><td>Jobs</td><td>${s.jobs.toLocaleString()}</td></tr>` +
+    `<tr><td>Dominant zone</td><td>${s.dominant}</td></tr>` +
+    `<tr><td>Avg land value</td><td>${bar}${s.landv}</td></tr>` +
+    `<tr><td>Avg pollution</td><td>${s.poll}</td></tr>` +
+    `<tr><td>Avg crime</td><td>${s.crime}</td></tr>` +
+    `<tr><td>Avg traffic</td><td>${s.traffic}</td></tr>` +
+    `<tr><td>Powered</td><td>${s.powered}%</td></tr>` +
+    `<tr class="total"><td colspan="2" class="dim">${quip}</td></tr>`;
+}
+
+function bindDistricts() {
+  const dlg = document.getElementById("dlg-districts");
+  if (!dlg) return;
+  document.getElementById("dist-new").addEventListener("click", () => {
+    const inp = document.getElementById("dist-name");
+    const name = (inp.value || "").trim() || suggestDistrictName();
+    const id = city.newDistrict(name);
+    if (!id) { Snd.denied(); setStatus(`⛔ District cap reached (${DIST_MAX}).`); return; }
+    Snd.cash(); UI.curDistrict = id; inp.value = "";
+    setTool("district");
+    fillDistricts();
+  });
+  document.getElementById("dist-rename").addEventListener("click", () => {
+    if (!UI.curDistrict) return;
+    const inp = document.getElementById("dist-name");
+    const name = (inp.value || "").trim();
+    if (!name) { Snd.denied(); setStatus("⛔ Type a name first."); return; }
+    city.renameDistrict(UI.curDistrict, name); inp.value = "";
+    Snd.click(); fillDistricts();
+  });
+  document.getElementById("dist-color").addEventListener("click", () => {
+    if (!UI.curDistrict) return;
+    city.recolorDistrict(UI.curDistrict); Snd.click(); fillDistricts();
+  });
+  document.getElementById("dist-erase").addEventListener("click", () => {
+    UI.curDistrict = 0; Snd.click(); setTool("district"); fillDistricts();
+  });
+  document.getElementById("dist-delete").addEventListener("click", () => {
+    if (!UI.curDistrict) return;
+    const id = UI.curDistrict;
+    uiConfirm("Delete this district? Its tiles are cleared (buildings stay).", () => {
+      city.deleteDistrict(id); UI.curDistrict = 0; Snd.bulldoze(); fillDistricts();
+    });
+  });
+  document.getElementById("dist-jump").addEventListener("click", () => {
+    if (!UI.curDistrict) return;
+    const c = districtCentroid(UI.curDistrict);
+    if (!c) { Snd.denied(); setStatus("⛔ That district has no tiles yet."); return; }
+    cam.x = worldX(c.x, c.y); cam.y = worldY(c.x, c.y); clampCam(); Snd.click();
+  });
+  document.getElementById("dist-paint").addEventListener("click", () => {
+    setTool("district"); hideDlg("dlg-districts"); Snd.click();
+  });
 }
 
 /* --------- municipal bonds panel (M13) --------- */

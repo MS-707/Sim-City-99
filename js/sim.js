@@ -46,6 +46,20 @@ const RES_POP = [0, 8, 24, 56];
 const COM_JOB = [0, 6, 18, 40];
 const IND_JOB = [0, 8, 22, 48];
 
+// ---- districts (M21) ----
+// A metadata paint layer, fully orthogonal to OV.*. DIST_MAX matches the fixed
+// palette so a district id (1..DIST_MAX) always has a color; a district's `col`
+// is an INDEX into DISTRICT_COLS, not a color string — tiny to serialize,
+// deterministic, and every viewer (map label, minimap, legend) paints from the
+// same table with zero conversion. 12 saturated, mutually distinct Win95-ish
+// hues so neighbors never read as the same neighborhood.
+const DIST_MAX = 12;
+const DISTRICT_COLS = [
+  "#e04040", "#e08a2a", "#d8c828", "#7cc030",
+  "#30b060", "#28b0b8", "#3878d8", "#5848c8",
+  "#9848c0", "#d84898", "#a86840", "#8890a0",
+];
+
 /* ---- power plant capacity & aging (M19) ----
    POWER_CAP is the NAMEPLATE (young, full-health) output each generator adds
    to the grid supply. Gas is the biggest single plant (well above coal), wind
@@ -296,6 +310,16 @@ class City {
     // Serialized in save v8.
     this.plantYear = new Int32Array(n);
     this.warnedPlants = {};             // anchors already nagged near end-of-life (ephemeral)
+    // M21: district metadata layer, fully orthogonal to over[]/lvl[]/anc[].
+    // district[i] = per-tile id (0 = unassigned, 1..DIST_MAX). districts[] =
+    // metadata [{id, name, col}] where col indexes DISTRICT_COLS. distRev is
+    // ephemeral (like terrRev): bumped on every paint/edit, keys the render
+    // label-centroid cache; never serialized. NONE of these feed the sim update
+    // path — tick()/recompute*/growthPass never read them, so seed determinism
+    // is byte-identical whether or not any tiles are districted.
+    this.district = new Uint8Array(n);
+    this.districts = [];
+    this.distRev = 0;
 
     this.funds = 20000;
     this.taxRate = 7;               // percent
@@ -1354,10 +1378,106 @@ class City {
 
   pushMsg(m) { this.messages.push(m); }
 
+  // ---------- districts (M21) ----------
+  // Paint a district id onto ANY land/water tile. O(1). Never charges funds and
+  // never touches over[]/lvl[]/anc[] — a district co-exists with whatever
+  // zone/road/plant occupies the tile. Neighborhoods deliberately SURVIVE
+  // bulldoze/rezoning (an administrative boundary, like SC2K); only the eraser
+  // swatch (id 0) or deleteDistrict clears a tile. A same-id repaint is a no-op
+  // and does NOT bump distRev, so drag-paint over an already-painted swath is free.
+  paintDistrict(x, y, id) {
+    if (!this.inMap(x, y)) return;
+    const i = y * MAP + x;
+    if (this.district[i] === id) return;
+    this.district[i] = id;
+    this.distRev++;
+  }
+
+  // Allocate the smallest unused id in 1..DIST_MAX (delete+create never leaks
+  // an id and nothing extra needs serializing). Returns the new id, or 0 when
+  // the palette/id space is exhausted (caller shows the denied path).
+  newDistrict(name) {
+    if (this.districts.length >= DIST_MAX) return 0;
+    let id = 0;
+    for (let k = 1; k <= DIST_MAX; k++) {
+      if (!this.districts.some((d) => d.id === k)) { id = k; break; }
+    }
+    if (!id) return 0;
+    const col = (id - 1) % DISTRICT_COLS.length;
+    const nm = String(name == null ? "" : name).trim().slice(0, 24) || `District ${id}`;
+    this.districts.push({ id, name: nm, col });
+    this.distRev++;
+    return id;
+  }
+
+  renameDistrict(id, name) {
+    const d = this.districts.find((d) => d.id === id);
+    if (!d) return;
+    const nm = String(name == null ? "" : name).trim().slice(0, 24);
+    if (nm) d.name = nm;
+    this.distRev++;
+  }
+
+  recolorDistrict(id) {
+    const d = this.districts.find((d) => d.id === id);
+    if (!d) return;
+    d.col = (d.col + 1) % DISTRICT_COLS.length;
+    this.distRev++;
+  }
+
+  deleteDistrict(id) {
+    const idx = this.districts.findIndex((d) => d.id === id);
+    if (idx < 0) return;
+    for (let i = 0; i < this.district.length; i++)
+      if (this.district[i] === id) this.district[i] = 0;
+    this.districts.splice(idx, 1);
+    this.distRev++;
+  }
+
+  // Pure read-only aggregator over the EXISTING sim maps (landv/poll/crime/
+  // traffic/powered/coverage, over/lvl). Called ONLY on dialog open, never in
+  // tick(): mutates nothing and calls no recompute*. avg land value is the mean
+  // of city.landv over exactly the district's tiles (the "integrate with the
+  // land-value map" requirement); pop/jobs are Σ RES_POP/COM_JOB/IND_JOB over
+  // developed zone tiles — the same tables growthPass uses.
+  districtStats(id) {
+    let tiles = 0, developed = 0, pop = 0, jobs = 0, poweredDev = 0;
+    let sumLv = 0, sumPoll = 0, sumCrime = 0;
+    let sumEdu = 0, sumMed = 0, sumPol = 0, sumFire = 0;
+    let sumTraffic = 0, roadTiles = 0;
+    let zr = 0, zc = 0, zi = 0;
+    for (let i = 0; i < this.district.length; i++) {
+      if (this.district[i] !== id) continue;
+      tiles++;
+      const ov = this.over[i], lv = this.lvl[i];
+      sumLv += this.landv[i]; sumPoll += this.poll[i]; sumCrime += this.crime[i];
+      sumEdu += this.eduCov[i]; sumMed += this.medCov[i];
+      sumPol += this.polCov[i]; sumFire += this.fireCov[i];
+      if (ov === OV.ROAD || ov === OV.WIREROAD) { sumTraffic += this.traffic[i]; roadTiles++; }
+      if (ov === OV.ZR) { zr++; if (lv > 0) { pop += RES_POP[lv]; developed++; if (this.powered[i]) poweredDev++; } }
+      else if (ov === OV.ZC) { zc++; if (lv > 0) { jobs += COM_JOB[lv]; developed++; if (this.powered[i]) poweredDev++; } }
+      else if (ov === OV.ZI) { zi++; if (lv > 0) { jobs += IND_JOB[lv]; developed++; if (this.powered[i]) poweredDev++; } }
+    }
+    const avg = (s) => (tiles ? Math.round(s / tiles) : 0);
+    let dominant = "None";
+    if (zr || zc || zi) {
+      dominant = (zr >= zc && zr >= zi) ? "Residential"
+        : (zc >= zi) ? "Commercial" : "Industrial";
+    }
+    return {
+      tiles, developed, pop, jobs,
+      landv: avg(sumLv), poll: avg(sumPoll), crime: avg(sumCrime),
+      edu: avg(sumEdu), med: avg(sumMed), pol: avg(sumPol), fire: avg(sumFire),
+      traffic: roadTiles ? Math.round(sumTraffic / roadTiles) : 0,
+      powered: developed ? Math.round((poweredDev / developed) * 100) : 0,
+      dominant,
+    };
+  }
+
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 8, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 9, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -1376,6 +1496,12 @@ class City {
       terr: Array.from(this.terr), over: Array.from(this.over),
       lvl: Array.from(this.lvl), varnt: Array.from(this.varnt),
       anc: Array.from(this.anc),
+      // M21 (save v9): the per-tile district layer (mostly zeros, same idiom/
+      // footprint as over/lvl/roadWear) plus the tiny district metadata list.
+      // distRev + all districtStats are derived and NOT serialized (same policy
+      // as landv/crime/traffic) — they reproduce exactly from the restored tiles.
+      district: Array.from(this.district),
+      districts: this.districts,
       history: this.history,
     });
   }
@@ -1407,6 +1533,15 @@ class City {
       for (let i = 0; i < c.over.length; i++)
         if (isPlant(c.over[i]) && c.anc[i] === i) c.plantYear[i] = c.year;
     }
+    // M21 (save v9): restore the district layer + metadata. A v8-or-earlier
+    // save has neither field: the ctor's all-zero district[] and empty
+    // districts[] stand, so the city loads with no neighborhoods assigned and
+    // plays identically. distRev starts 0 (ephemeral); the first label draw
+    // rebuilds the centroid cache. Guards are defensive Array.isArray checks —
+    // no hard v===9 test — so any older save force-loads cleanly.
+    if (Array.isArray(d.district)) c.district.set(d.district);
+    c.districts = Array.isArray(d.districts)
+      ? d.districts.map((o) => Object.assign({}, o)) : [];
     c.history = d.history || { pop: [], funds: [] };
     // time-capsule events (M7): restore fired ids + live modifiers with their
     // remaining timers; a pre-M7 (v<=2) save simply has neither field, and

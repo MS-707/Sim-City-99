@@ -6,11 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M20 — Soundtrack expansion** *(next up)*: 3–4 distinct generative music
-  moods (calm building, bustling metropolis, disaster tension, night jazz) that
-  crossfade on sim state; music-credits easter egg in About. Audio milestone —
-  criteria set fresh by an independent reviewer (no archived spec; the original
-  workflow was lost to a worker restart).
+- [ ] **M27 — Neighboring cities & regional connections** *(next up)*: named
+  neighbor cities on the four map edges with per-seed personalities;
+  roads/rail/power reaching a border tile open month-billed deals (sell surplus
+  power, buy during brownouts, commuter demand from highway/rail links).
+  Proposal-stage — design + criteria set fresh by an independent reviewer.
 
 ## Open
 
@@ -18,10 +18,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M27 — Neighboring cities & regional connections**: named neighbor
-  cities on the four map edges with per-seed personalities; roads/rail/power
-  reaching a border tile open month-billed deals (sell surplus power, buy
-  during brownouts, commuter demand from highway/rail links).
 - [ ] **M28 — Arcologies & wonder landmarks**: the four SC2K arcologies
   (Plymouth/Forest/Darco/Launch) + placeable wonder landmarks (Liberty/Eiffel/
   pyramid homages) as tier-unlocked multi-tile OV.* megastructures — big fixed
@@ -45,6 +41,22 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M20 — Soundtrack expansion**: the single generative bar loop became a
+  table of **four distinct WebAudio-synth moods** — calm (sparse, slow, sine/
+  triangle, high register), bustling (fast saw/square metropolis), tension
+  (dissonant low saw), night (mellow jazz) — each on its own GainNode under
+  musicGain. A mood-selection function reads live sim state (low pop/day → calm,
+  high pop+demand/day → bustling, midnight → night) and any **active disaster
+  forces tension with precedence**, reverting when it clears. Switches
+  **crossfade** via overlapping AudioParam gain ramps (~1–2 s, no hard cut or
+  gap). The music toggle still starts/stops cleanly with **zero scheduling when
+  off**, SFX/M6-ambience routing to Snd.master is unchanged, and a music-credits
+  easter egg was added to About. Criteria set fresh by an independent reviewer;
+  verified 7/7 headless (mood distinctness, state-driven selection, disaster
+  precedence, crossfade ramp overlap, zero-cost-when-off + leak-free toggle,
+  About credits, no SFX/ambience regression) + a 4-agent panel (4/4, 0 defects).
+  Zero console errors.
 
 - [x] **M25 — Rail & subway transit**: buildable rail/subway/stations on a
   **separate `city.rail` plane** (RL.TRACK/SUB/STATION) so `over[]` is never

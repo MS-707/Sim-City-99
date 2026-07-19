@@ -96,6 +96,77 @@ function deptFundingLine(dept) {
   return f >= 80 ? t.ok(f) : f >= 40 ? t.grumble(f) : t.mad(f);
 }
 
+/* --------- M22: ordinance advocacy (biased on purpose) ---------
+   Each advisor over-sells the ordinances it champions, IGNORING the cross-
+   department cost — Finance pushes the Nostalgia Tax even as it kneecaps
+   commercial demand; Safety pushes the Curfew ignoring the same commerce hit.
+   For each championed, UNLOCKED ordinance: if already enacted, a short self-
+   congratulatory line; else, only when the advisor's live metric crosses a
+   threshold, one recommend line citing the number and pointing at the panel.
+   Recs self-suppress once enacted (no nag loop) and ride the existing 500ms
+   advisor cadence — never a per-tick cost. All aggregates are ones already
+   computed (advAvg/advRoadTraffic), so no new map scan. */
+const ORD_ADVICE = {
+  watch: {
+    metric: () => advAvg(city.crime), threshold: 45,
+    rec: (v) => "Crime index is running " + Math.round(v) + " out there — enact " +
+      "Neighborhood Watch in the Ordinances panel and my block captains will " +
+      "have the streets quiet by sundown, Mayor.",
+    yes: "Neighborhood Watch is paying off — every porch light's a patrol now. " +
+      "Best ordinance you ever signed.",
+  },
+  curfew: {
+    metric: () => advAvg(city.crime), threshold: 45,
+    rec: (v) => "With crime at " + Math.round(v) + ", a Teen Curfew would clear " +
+      "the streets after dark. Sign it in the Ordinances panel — nightlife can wait.",
+    yes: "Teen Curfew's got the streets calm as a snowed-in Sunday. Textbook, Mayor.",
+  },
+  recycle: {
+    metric: () => advAvg(city.poll), threshold: 45,
+    rec: (v) => "Pollution's hovering around " + Math.round(v) + ", man. Roll out " +
+      "Citywide Recycling from the Ordinances panel — blue bins, cleaner air, good karma.",
+    yes: "Citywide Recycling is working, man — the air's fresher and the land " +
+      "values thank you. Very groovy.",
+  },
+  carpool: {
+    metric: () => advRoadTraffic(), threshold: 70,
+    rec: (v) => "Congestion index " + Math.round(v) + " — enact the Carpool " +
+      "Incentive in the Ordinances panel and I'll get half those cars off my " +
+      "roads with diamond lanes, Mayor.",
+    yes: "Carpool Incentive's thinned the traffic nicely — the mains breathe " +
+      "again. My crews approve.",
+  },
+  nostalgiaTax: {
+    metric: () => city.funds, threshold: 800, below: true,
+    rec: (v) => "Treasury's down to §" + Math.round(v).toLocaleString() + ", dear. " +
+      "The Arcade & Nostalgia Tax in the Ordinances panel is free money off every " +
+      "arcade and Beanie Baby — sign it.",
+    yes: "The Arcade & Nostalgia Tax is padding the ledger nicely — every quarter " +
+      "in every claw machine, ours. I printed the receipt twice.",
+  },
+  smoke: {
+    metric: () => advAvg(city.fireCov), threshold: 48, below: true,
+    rec: (v) => "Fire coverage is thin (" + Math.round(v) + "/255). The Smoke-" +
+      "Detector Mandate in the Ordinances panel catches blazes early — sign it " +
+      "before a VCR takes out a block, Mayor.",
+    yes: "Smoke-Detector Mandate means fires burn out fast now — trucks barely " +
+      "break a sweat. Good call, Mayor.",
+  },
+};
+function adviseOrdinances(champion) {
+  const out = [];
+  for (const o of ORDINANCES) {
+    if (o.champion !== champion || city.tier < o.minTier) continue;
+    const a = ORD_ADVICE[o.id];
+    if (!a) continue;
+    if (city.ordinances[o.id]) { out.push(a.yes); continue; }
+    const v = a.metric();
+    const crosses = a.below ? v < a.threshold : v >= a.threshold;
+    if (crosses) out.push(a.rec(v));
+  }
+  return out;
+}
+
 /* --------- rule engines: each rule picks one line by threshold --------- */
 function adviseFinance() {
   const out = [];
@@ -157,6 +228,7 @@ function adviseFinance() {
       (cr.rateOffered * 100).toFixed(1) + "% interest. Pay something off before they " +
       "repossess the dot-matrix printer.");
   out.push(deptFundingLine("edu")); // M23: Myrna champions the education budget
+  out.push(...adviseOrdinances("finance")); // M22: pushes the Nostalgia Tax
   return out;
 }
 
@@ -184,6 +256,7 @@ function adviseSafety() {
   // M23: the Chief champions BOTH uniformed budgets — police and fire
   out.push(deptFundingLine("police"));
   out.push(deptFundingLine("fire"));
+  out.push(...adviseOrdinances("safety")); // M22: pushes Watch / Curfew / Smoke
   return out;
 }
 
@@ -217,6 +290,7 @@ function adviseEnvironment() {
   else
     out.push("Roads flow free, like a Sunday morning paper route.");
   out.push(deptFundingLine("health")); // M23: Dr. Greenfield champions health
+  out.push(...adviseOrdinances("environment")); // M22: pushes Recycling
   return out;
 }
 
@@ -248,6 +322,7 @@ function adviseTransport() {
   else
     out.push("All " + rs.roads + " road tiles in good repair — mean wear " +
       Math.round(rs.meanWear) + "/255. The pavement gods smile upon us.");
+  out.push(...adviseOrdinances("transport")); // M22: pushes Carpool Incentive
   return out;
 }
 

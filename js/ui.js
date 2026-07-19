@@ -285,6 +285,7 @@ const MENUS = {
   ],
   windows: () => [
     ["Budget…", openBudget],
+    ["City Ordinances… 📋", openOrdinances],
     ["Districts… 🏘️", openDistricts],
     [`${UI.prefs.autoBudget ? "✓ " : ""}Budget Report Monthly`,
       () => { UI.prefs.autoBudget = !UI.prefs.autoBudget; savePrefs(); }],
@@ -751,6 +752,24 @@ function bindDialogs() {
     });
   });
 
+  // M22: ordinance checkboxes — delegated on #ord-list so the handler survives
+  // every fillOrdList() re-render. On toggle: enactOrdinance rebuilds ordMods,
+  // then recomputeMaps/Traffic/Demand react so crime/pollution/traffic overlays
+  // and demand update within a frame EVEN WHILE PAUSED; the row cells + footer
+  // refresh, and any open budget dialog picks up the new ordinance line.
+  document.getElementById("ord-list").addEventListener("change", (e) => {
+    const cb = e.target.closest(".ord-check");
+    if (!cb) return;
+    Snd.ensure();
+    const id = cb.dataset.id;
+    const ok = city.enactOrdinance(id, cb.checked);
+    if (!ok) { Snd.denied(); cb.checked = false; fillOrdList(); return; }
+    Snd.click();
+    city.recomputeMaps(); city.recomputeTraffic(); city.recomputeDemand();
+    fillOrdList();
+    if (!document.getElementById("dlg-budget").classList.contains("hidden")) fillBudgetTable();
+  });
+
   // M13: issue-bond button — refusal at the cap is handled by issueBond()
   document.getElementById("btn-issue-bond").addEventListener("click", () => {
     Snd.ensure();
@@ -846,9 +865,50 @@ function fillBudgetTable() {
     <tr><td>Education (${fd.edu}%)</td><td>${f(-dc.edu)}</td></tr>
     <tr><td>Health (${fd.health}%)</td><td>${f(-dc.health)}</td></tr>
     <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
+    <tr><td>City ordinances</td><td>${f(city.ordinanceBudget().net)}</td></tr>
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;
+}
+
+/* ================= City Ordinances (M22) ================= */
+// One row per ORDINANCES entry, generated from the registry exactly like the
+// toolbar is from TOOLS. Whole row is a <label> (full tap target); locked rows
+// (city.tier<minTier) are disabled with an unlock hint, same idiom as a locked
+// tool. Rebuilt on open and after every toggle so the live §/mo cells + footer
+// net track the current pop/comJobs — even while the sim is paused.
+function openOrdinances() { fillOrdList(); showDlg("dlg-ordinances"); }
+
+function fillOrdList() {
+  const list = document.getElementById("ord-list");
+  const money = (n) => (n < 0 ? "-§" : "§") + Math.abs(n).toLocaleString();
+  list.innerHTML = "";
+  for (const o of ORDINANCES) {
+    const locked = city.tier < o.minTier;
+    const on = !!city.ordinances[o.id];
+    const row = document.createElement("label");
+    row.className = "ord-row" + (locked ? " locked" : "") + (on ? " on" : "");
+    // per-month figure: revenue shows as +, cost as - ; 0 for locked rows
+    let cell;
+    if (locked) {
+      cell = `<span class="ord-cost locked">🔒 Unlocks at ${TIERS[o.minTier].name}</span>`;
+    } else if (o.revenue) {
+      cell = `<span class="ord-cost rev">+${money(o.revenue(city))}/mo</span>`;
+    } else {
+      cell = `<span class="ord-cost">−${money(o.cost ? o.cost(city) : 0)}/mo</span>`;
+    }
+    row.innerHTML =
+      `<input type="checkbox" class="ord-check"${on ? " checked" : ""}` +
+      `${locked ? " disabled" : ""} data-id="${o.id}">` +
+      `<span class="ord-icon">${o.icon}</span>` +
+      `<span class="ord-text"><b>${o.name}</b><small>${o.blurb}</small></span>` +
+      cell;
+    list.appendChild(row);
+  }
+  const ob = city.ordinanceBudget();
+  document.getElementById("ord-footer").innerHTML =
+    `Net effect on budget: <b>${(ob.net < 0 ? "-§" : "+§")}` +
+    `${Math.abs(ob.net).toLocaleString()}/mo</b>`;
 }
 
 /* ================= District Manager (M21) ================= */
@@ -1272,7 +1332,9 @@ function showNewspaper(k) {
     `${MONTHS[city.month]} ${city.year} — Pop. ${city.pop.toLocaleString()}`;
   document.getElementById("np-headline").textContent =
     `${city.cityName.toUpperCase()} IS NOW A ${t.name.toUpperCase()}!`;
-  const unlocks = TOOLS.filter(x => x.minTier === k).map(x => x.name);
+  const unlocks = TOOLS.filter(x => x.minTier === k).map(x => x.name)
+    // M22: newly unlocked ordinances share the promotion headline's unlock line
+    .concat(ORDINANCES.filter(o => o.minTier === k).map(o => o.name + " ordinance"));
   document.getElementById("np-sub").textContent = unlocks.length
     ? `City hall unlocks: ${unlocks.join(", ")} — check your toolbar, Mayor!`
     : (NP_SUBHEADS[k] || "Experts stunned; property values 'through the roof'");

@@ -250,6 +250,32 @@ input[type=range]::-moz-range-thumb {
 .budget-table td { padding: 2px 6px; font-size: 12px; }
 .budget-table td:last-child { text-align: right; font-family: "Courier New", monospace; }
 .budget-table tr.total td { border-top: 1px solid #000; font-weight: bold; }
+
+/* city ordinances (M22) */
+#dlg-ordinances { max-width: 420px; }
+#dlg-ordinances .dlg-body { max-height: 80vh; overflow-y: auto; }
+.ord-intro { font-size: 11px; color: #303030; margin: 0 0 8px; line-height: 1.35; }
+#ord-list { display: flex; flex-direction: column; gap: 3px; }
+.ord-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  min-height: 44px; padding: 6px 8px; cursor: pointer;
+  border: 1px solid #b0b0b0; background: #f4f4f4;
+}
+.ord-row:hover { background: #e6ecf6; }
+.ord-row.on { background: #e2eede; border-color: #7ba070; }
+.ord-row.locked { cursor: not-allowed; opacity: .72; background: #ececec; }
+.ord-check { width: 16px; height: 16px; flex: 0 0 auto; }
+.ord-icon { font-size: 20px; flex: 0 0 auto; }
+.ord-text { flex: 1 1 120px; display: flex; flex-direction: column; line-height: 1.25; }
+.ord-text b { font-size: 12px; }
+.ord-text small { font-size: 10px; color: #505050; }
+.ord-cost {
+  flex: 0 0 auto; font-family: "Courier New", monospace; font-size: 11px;
+  color: #833; white-space: nowrap;
+}
+.ord-cost.rev { color: #176017; }
+.ord-cost.locked { color: #555; font-family: Tahoma, sans-serif; }
+.ord-footer { margin-top: 10px; padding-top: 6px; border-top: 1px solid #000; font-size: 12px; text-align: right; }
 .budget-row { margin-bottom: 4px; }
 .budget-row input[type=range] { width: 100%; }
 /* department funding sliders (M23) */

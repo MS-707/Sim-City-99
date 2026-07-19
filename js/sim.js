@@ -118,6 +118,55 @@ const TIERS = [
 // reward tools gated behind a minimum tier (index into TIERS)
 const TOOL_TIER = { mayor: 2, stadium: 3 }; // Town / City
 
+/* ---- city ordinances (M22) ----
+   Citywide policy booleans the mayor toggles from the #dlg-ordinances panel.
+   An ordinance is NOT a placed tile — it is a scalar policy whose effect is
+   FOLDED into passes that already run (recomputeMaps/Traffic/Demand + fireTick)
+   via the pop-INDEPENDENT cache city.ordMods, rebuilt only on toggle/load by
+   recomputeOrdinances(). With nothing enacted every mul is 1 and every additive
+   0, so the sim is byte-identical to the pre-M22 baseline.
+
+   Each entry declares:
+     minTier   index into TIERS gating BOTH the enact validator and the effect
+               fold (a hand-edited save that flips a locked flag applies nothing
+               until the monotonic tier ratchet legitimately reaches it — same
+               sticky-reward idiom as TOOL_TIER).
+     champion  the advisor key (M23) that recommends it — ordinances are policy,
+               not real departments, so the champion IS the advisor, no mapping.
+     cost/revenue  optional c=>§ functions read at rollover with LIVE pop/comJobs/
+               resTiles so the monthly figure scales with the city.
+     mods      the static scalars folded into ordMods: muls (pollMul/trafficMul)
+               multiply, additives (crimeCut/fireBurn/demR/demC/demI) sum.
+   Adding a 7th ordinance is a one-row change — dialog, advisors and budget all
+   iterate this registry. */
+const ORDINANCES = [
+  { id: "watch", name: "Neighborhood Watch", icon: "👁️", champion: "safety", minTier: 1,
+    blurb: "Block captains with walkie-talkies — cuts street crime.",
+    cost: (c) => Math.round(c.pop * 0.03), mods: { crimeCut: 14 } },
+  { id: "recycle", name: "Citywide Recycling", icon: "♻️", champion: "environment", minTier: 1,
+    blurb: "Curbside blue bins curb industrial & roadway pollution.",
+    cost: (c) => Math.round(c.pop * 0.045), mods: { pollMul: 0.72 } },
+  { id: "nostalgiaTax", name: "Arcade & Nostalgia Tax", icon: "🕹️", champion: "finance", minTier: 1,
+    blurb: "Sin-tax on arcades & Beanie Babies: revenue, but dents commercial demand.",
+    revenue: (c) => Math.round(c.comJobs * 0.9), mods: { demC: -0.06 } },
+  { id: "curfew", name: "Teen Curfew", icon: "🌙", champion: "safety", minTier: 2,
+    blurb: "Quiet streets after dark — safer, but the mall & arcade nightlife suffers.",
+    cost: (c) => Math.round(c.pop * 0.03), mods: { crimeCut: 18, demC: -0.06 } },
+  { id: "carpool", name: "Carpool Incentive", icon: "🚗", champion: "transport", minTier: 2,
+    blurb: "Diamond lanes & rideshare boards ease road congestion citywide.",
+    cost: (c) => Math.round(c.pop * 0.025), mods: { trafficMul: 0.80 } },
+  { id: "smoke", name: "Smoke-Detector Mandate", icon: "🚨", champion: "safety", minTier: 2,
+    blurb: "Fires are caught early — they burn out faster.",
+    cost: (c) => Math.round(c.resTiles * 1.5), mods: { fireBurn: 1 } },
+];
+const ORD = (id) => ORDINANCES.find((o) => o.id === id);
+// identity effect cache — the shape city.ordMods always takes; folded muls
+// default to 1 (no change), additives to 0. recomputeOrdinances rebuilds from
+// this, so nothing-enacted === pre-M22 arithmetic exactly.
+function identityOrdMods() {
+  return { pollMul: 1, trafficMul: 1, crimeCut: 0, fireBurn: 0, demR: 0, demC: 0, demI: 0 };
+}
+
 function tierForPop(pop) {
   let k = 0;
   for (let t = 1; t < TIERS.length; t++) if (pop >= TIERS[t].pop) k = t;
@@ -330,10 +379,12 @@ class City {
     this.month = 0; this.year = 1997;
     this.tickCount = 0;
     this.pop = 0; this.jobs = 0;
+    this.comJobs = 0; this.resTiles = 0; // M22: cached counts for ordinance §
     this.demand = { r: 0.4, c: 0.1, i: 0.5 };
     this.powerDemand = 0; this.powerSupply = 0;
     this.history = { pop: [], funds: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, debt: 0, net: 0,
+      ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
       dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0 } };
     this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
     this.disastersEnabled = true;
@@ -344,6 +395,11 @@ class City {
     this.messages = [];             // ticker event queue
     this.cityName = "Llamaville";
     this.tier = 0;                  // index into TIERS, only ever rises
+    // M22: enacted-ordinance flags (id->true only when on; absent = off) plus
+    // the DERIVED effect cache. ordinances is serialized (save v9); ordMods is
+    // rebuilt by recomputeOrdinances() on toggle/load and NEVER serialized.
+    this.ordinances = {};
+    this.ordMods = identityOrdMods();
     this.announcedTier = 0;         // highest tier already announced (newspaper)
     this.newsQueue = [];            // pending newspaper editions (tier indices or event editions)
     this.firedEvents = [];          // time-capsule event ids already fired/passed (M7)
@@ -690,7 +746,9 @@ class City {
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       if ((t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0) continue;
-      const trips = 4 + this.lvl[i] * 9;      // busier at higher development
+      // M22: Carpool Incentive scales trips at the SOURCE (trafficMul), so fewer
+      // trips deposit everywhere the random walk lands — no 2nd pass. 1 when off.
+      const trips = (4 + this.lvl[i] * 9) * this.ordMods.trafficMul; // busier at higher development
       let cur = this.nearestRoad(i);
       if (cur < 0) continue;
       let prev = -1;
@@ -782,12 +840,17 @@ class City {
       ? Math.max(0, Math.min(1, this.powerDemand / this.powerSupply)) : 0;
     const coalSmog = 40 + 120 * load; // idle 40 → full-load 160
     const gasSmog  = 30 + 90 * load;  // moderate: idle 30 → full-load 120 (below coal)
+    // M22: Citywide Recycling scales the two CURBSIDE waste sources (industry &
+    // roads) by ordMods.pollMul — combustion smog from the plants is untouched
+    // (recycling is waste, not fuel). pollMul === 1 when off => arithmetic
+    // identical to pre-M22.
+    const pm = this.ordMods.pollMul;
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
-      if (t === OV.ZI) src[i] += 30 + this.lvl[i] * 35;
+      if (t === OV.ZI) src[i] += (30 + this.lvl[i] * 35) * pm;
       if (t === OV.COAL) src[i] += coalSmog;
       if (t === OV.GAS) src[i] += gasSmog;   // gas smokes; solar & wind stay clean
-      if (t === OV.ROAD || t === OV.WIREROAD) src[i] += 8; // M26: crossing pollutes like a road
+      if (t === OV.ROAD || t === OV.WIREROAD) src[i] += 8 * pm; // M26: crossing pollutes like a road
       if (this.fire[i]) src[i] += 100;
     }
     this.diffuse(src, this.poll, 3, 0.24);
@@ -828,7 +891,9 @@ class City {
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       const density = (t === OV.ZR || t === OV.ZC) ? this.lvl[i] * 40 : (t === OV.ZI ? this.lvl[i] * 20 : 0);
-      const v = density - this.polCov[i] - this.landv[i] * 0.2;
+      // M22: Neighborhood Watch / Teen Curfew add a flat crimeCut, behaving like
+      // extra police coverage; the existing [0,255] clamp bounds it (0 when off).
+      const v = density - this.polCov[i] - this.landv[i] * 0.2 - this.ordMods.crimeCut;
       this.crime[i] = Math.max(0, Math.min(255, v));
     }
   }
@@ -881,9 +946,9 @@ class City {
 
   // ---------- demand ----------
   recomputeDemand() {
-    let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0, schools = 0, hospitals = 0;
+    let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0, schools = 0, hospitals = 0, resTiles = 0;
     for (let i = 0; i < this.over.length; i++) {
-      if (this.over[i] === OV.ZR) pop += RES_POP[this.lvl[i]];
+      if (this.over[i] === OV.ZR) { pop += RES_POP[this.lvl[i]]; resTiles++; }
       else if (this.over[i] === OV.ZC) cJobs += COM_JOB[this.lvl[i]];
       else if (this.over[i] === OV.ZI) iJobs += IND_JOB[this.lvl[i]];
       else if (this.over[i] === OV.STADIUM && this.anc[i] === i) stadiums++;
@@ -891,6 +956,10 @@ class City {
       else if (this.over[i] === OV.HOSPITAL && this.anc[i] === i && this.powered[i]) hospitals++;
     }
     this.pop = pop; this.jobs = cJobs + iJobs;
+    // M22: cache the live counts the ordinance §-functions read (nostalgiaTax
+    // revenue scales with comJobs, smoke-detector cost with resTiles). Runs every
+    // tick before the monthly collectBudget, so figures are current at rollover.
+    this.comJobs = cJobs; this.resTiles = resTiles;
     const taxMod = (7 - this.taxRate) * 0.05;         // low taxes juice demand
     const stadMod = Math.min(2, stadiums) * 0.06;     // a stadium makes people move in
     // good schools & hospitals attract families (and the workers follow)
@@ -903,10 +972,69 @@ class City {
       else if (m.type === "demandI") evI += m.add || 0;
     }
     const jobsAvail = this.jobs + 40 - pop * 0.62;    // 40 = external commuters
-    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR);
-    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC);
-    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI);
+    // M22: ordinance demand deltas fold into the SAME additive slot as the
+    // time-capsule event mods (evR/evC/evI), so they compose and clamp
+    // identically through clampD [-1,1]. All zero when nothing is enacted.
+    const om = this.ordMods;
+    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR);
+    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC);
+    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI);
     function clampD(v) { return Math.max(-1, Math.min(1, v)); }
+  }
+
+  // ---------- city ordinances (M22) ----------
+  /* Rebuild the pop-INDEPENDENT effect cache from the enacted flags. Starts at
+     identity, folds each enacted-AND-unlocked ordinance's mods (muls multiply,
+     additives sum), then floors the muls defensively at 0.5 so no stack of
+     policies can drive a field to zero. Called ONLY on toggle and on load — the
+     per-tick passes just read the cached scalars. The this.tier>=minTier gate
+     here mirrors the enact validator: a locked-but-set flag contributes nothing
+     until the tier ratchet legitimately reaches it. */
+  recomputeOrdinances() {
+    const m = identityOrdMods();
+    for (const o of ORDINANCES) {
+      if (!this.ordinances[o.id] || this.tier < o.minTier) continue;
+      const d = o.mods || {};
+      if (d.pollMul != null) m.pollMul *= d.pollMul;
+      if (d.trafficMul != null) m.trafficMul *= d.trafficMul;
+      if (d.crimeCut != null) m.crimeCut += d.crimeCut;
+      if (d.fireBurn != null) m.fireBurn += d.fireBurn;
+      if (d.demR != null) m.demR += d.demR;
+      if (d.demC != null) m.demC += d.demC;
+      if (d.demI != null) m.demI += d.demI;
+    }
+    m.pollMul = Math.max(0.5, m.pollMul);
+    m.trafficMul = Math.max(0.5, m.trafficMul);
+    this.ordMods = m;
+  }
+
+  /* Enact/repeal an ordinance. Validates the tier unlock (refuses at tier<minTier,
+     returning false so the UI can play the denied cue), sets/deletes the flag,
+     and rebuilds ordMods. Unknown ids are refused. Does NOT itself recompute the
+     maps — the caller refreshes overlays so a toggle reacts even while paused. */
+  enactOrdinance(id, on) {
+    const o = ORD(id);
+    if (!o) return false;
+    if (on && this.tier < o.minTier) return false;
+    if (on) this.ordinances[id] = true;
+    else delete this.ordinances[id];
+    this.recomputeOrdinances();
+    return true;
+  }
+
+  /* O(1) over the 6-entry registry: sum the LIVE monthly cost/revenue of every
+     enacted-AND-unlocked ordinance, using cached pop/comJobs/resTiles so the
+     figures scale with the city. net === rev - cost exactly. Routed into the
+     monthly budget via lastBudget.ord (see collectBudget) and shown live in the
+     ordinances dialog + the budget table. */
+  ordinanceBudget() {
+    let cost = 0, rev = 0;
+    for (const o of ORDINANCES) {
+      if (!this.ordinances[o.id] || this.tier < o.minTier) continue;
+      if (o.cost) cost += o.cost(this);
+      if (o.revenue) rev += o.revenue(this);
+    }
+    return { cost, rev, net: rev - cost };
   }
 
   // ---------- growth ----------
@@ -965,7 +1093,9 @@ class City {
     for (let i = 0; i < this.fire.length; i++) if (this.fire[i]) burning.push(i);
     for (const i of burning) {
       const cov = this.fireCov[i];
-      this.fire[i] = Math.max(0, this.fire[i] - 1 - (cov > 40 ? 2 : 0));
+      // M22: Smoke-Detector Mandate adds fireBurn to the decrement (same shape as
+      // the coverage bonus) so fires burn out faster; 0 when off, floored at 0.
+      this.fire[i] = Math.max(0, this.fire[i] - 1 - (cov > 40 ? 2 : 0) - this.ordMods.fireBurn);
       if (this.fire[i] === 0) {
         // burnt out -> rubble (or scorched earth)
         if (this.over[i] !== OV.NONE) {
@@ -1187,9 +1317,14 @@ class City {
           `fully repaid — the ledger sighs with relief.`);
       }
     }
-    const net = taxes - roadCost - serviceCost - plantCost - debt;
+    // M22: ordinance costs/revenue — O(1) over the registry with the live
+    // pop/comJobs/resTiles cached by recomputeDemand (run earlier this tick).
+    const ob = this.ordinanceBudget();
+    const net = taxes - roadCost - serviceCost - plantCost - debt + ob.net;
     this.funds += net;
     this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost, debt, net,
+      // M22: the ordinance line (net = revenue - cost) charged this month
+      ord: ob.net, ordCost: ob.cost, ordRev: ob.rev,
       // M23: the per-department breakdown actually charged this month
       dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
               edu: dc.edu, health: dc.health } };
@@ -1337,6 +1472,12 @@ class City {
     const nt = tierForPop(this.pop);
     if (nt > this.tier) {
       this.tier = nt;
+      // M22: a tier rise can unlock a tier-gated ordinance — refresh the effect
+      // cache so its bonus applies the moment the ratchet reaches it (matching
+      // the budget, which already reads the live tier). A no-op that rebuilds
+      // identity mods when nothing tier-eligible is enacted, so no-ordinance
+      // ticks stay byte-identical.
+      this.recomputeOrdinances();
       if (nt > this.announcedTier) {
         this.announcedTier = nt;
         this.newsQueue.push(nt);
@@ -1502,6 +1643,10 @@ class City {
       // as landv/crime/traffic) — they reproduce exactly from the restored tiles.
       district: Array.from(this.district),
       districts: this.districts,
+      // M22 (still save v9): the enacted-ordinance boolean map — a small flat
+      // id->true object. ordMods and the § figures are DERIVED and never saved.
+      // A v9 save from before M22 simply lacks this field and loads all-off.
+      ordinances: this.ordinances,
       history: this.history,
     });
   }
@@ -1542,6 +1687,13 @@ class City {
     if (Array.isArray(d.district)) c.district.set(d.district);
     c.districts = Array.isArray(d.districts)
       ? d.districts.map((o) => Object.assign({}, o)) : [];
+    // M22 (still save v9): restore the enacted-ordinance map. A v9-from-before-
+    // M22 save (or any pre-v9 save) has no ordinances field => {} => everything
+    // off => ordMods identity => the city plays byte-identically to pre-M22.
+    // Unknown/removed ids survive harmlessly (recomputeOrdinances/ordinanceBudget
+    // iterate the registry and read this.ordinances[id], never the reverse).
+    c.ordinances = (d.ordinances && typeof d.ordinances === "object")
+      ? Object.assign({}, d.ordinances) : {};
     c.history = d.history || { pop: [], funds: [] };
     // time-capsule events (M7): restore fired ids + live modifiers with their
     // remaining timers; a pre-M7 (v<=2) save simply has neither field, and
@@ -1558,6 +1710,14 @@ class City {
       ? d.activeMods.map((m) => Object.assign({}, m)) : [];
     c.markPassedEvents();
     c.powerDirty = true;
+    // M22: restore the tier (pure data, safe to set early) and rebuild ordMods
+    // BEFORE the recompute cascade — those passes read this.ordMods, and the
+    // ordinance unlock gate reads this.tier, so both must be warm first. Legacy
+    // saves with no numeric tier keep tier=0 here (their empty ordinances map
+    // yields identity regardless), and the post-cascade line below infers the
+    // real rank from the now-computed population.
+    if (typeof d.tier === "number") c.tier = d.tier;
+    c.recomputeOrdinances();
     c.recomputePower(); c.recomputeAccess(); c.recomputeTraffic();
     c.recomputeMaps(); c.recomputeDemand();
     // milestone state: restore, or (legacy v1 save) infer rank from population

@@ -258,6 +258,18 @@ function screenToTile(sx, sy) {
   return unrot(u, v, cam.r);
 }
 
+// M32a: FLOAT (unrounded) inverse. The G8 minimap viewport rect needs sub-tile
+// precision for its bounding box — rounding to whole tiles (screenToTile) shifts
+// the camera box ~1px for off-centre cameras. unrot is linear, so it is exact on
+// float u,v; at r=0 this reduces to the pre-rotation inline float inverse exactly,
+// keeping the minimap byte-identical to HEAD at orientation 0.
+function screenToTileF(sx, sy) {
+  const wx = (sx - cvs.width / 2) / cam.z + cam.x;
+  const wy = (sy - cvs.height / 2) / cam.z + cam.y;
+  const A = wx / HW, B = (wy - HH) / HH;
+  return unrot((A + B) / 2, (B - A) / 2, cam.r);
+}
+
 /* ---- flat-terrain layer cache (M11) ----
    Grass / water / shore diamonds are flat and tile the plane exactly, so
    they can be pre-composited once per (camera, water-frame, terrain-rev,
@@ -808,6 +820,21 @@ function flushCarLights() {
 // G16: a 2-puff industrial plume — a lead puff and a younger trailing puff
 // just below it — so a stack emits a connected rising column instead of one
 // lone dot. Guards the shared budget.
+// M32a: the screen-back (argmin view-depth) footprint corner a building's
+// sprite is positioned from — the SAME corner the painter loop draws from
+// (render.js ~488), so overlays pinned to a building (smoke plumes) stay on the
+// sprite at every rotation instead of detaching by up to a tile. A 1x1 building
+// returns its own tile, so its plume is unchanged at every r. At r=0 the min
+// (u+v) corner is the anchor (ax,ay), so r=0 output is byte-identical to HEAD.
+function backCorner(ax, ay, size) {
+  let bx = ax, by = ay, minD = Infinity;
+  for (let cy = 0; cy < size; cy++) for (let cx = 0; cx < size; cx++) {
+    const q = rot(ax + cx, ay + cy, cam.r), d = q.u + q.v;
+    if (d < minD) { minD = d; bx = ax + cx; by = ay + cy; }
+  }
+  return { x: bx, y: by };
+}
+
 function pushPlume(x, y, drift) {
   if (smoke.length >= SMOKE_MAX) return;
   smoke.push({ x, y, age: 0, drift });
@@ -837,14 +864,16 @@ function updateSmoke(city) {
                        age: 0, drift: Math.random() * 0.5 - 0.25, fire: true });
         }
       } else if (t === OV.COAL && city.anc[i] === i && Math.random() < 0.5) {
-        const x = i % MAP, y = (i / MAP) | 0;
-        pushPlume(worldX(x, y) - 18, worldY(x, y) + HH - 78, Math.random() * 0.4 - 0.1);
+        // M32a: anchor the plume to the sprite's screen-back corner so it stays
+        // on the stack when the view is rotated (the 2x2 sprite moves corners).
+        const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
+        pushPlume(worldX(b.x, b.y) - 18, worldY(b.x, b.y) + HH - 78, Math.random() * 0.4 - 0.1);
       } else if (t === OV.GAS && city.anc[i] === i && Math.random() < 0.42) {
         // M19: gas plants smoke from their short stacks (coal-level smog)
-        const x = i % MAP, y = (i / MAP) | 0;
-        pushPlume(worldX(x, y) - 14, worldY(x, y) + HH - 62, Math.random() * 0.4 - 0.1);
+        const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
+        pushPlume(worldX(b.x, b.y) - 14, worldY(b.x, b.y) + HH - 62, Math.random() * 0.4 - 0.1);
       } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && Math.random() < 0.28) {
-        const x = i % MAP, y = (i / MAP) | 0;
+        const x = i % MAP, y = (i / MAP) | 0; // ZI is 1x1 — its own tile at every r
         pushPlume(worldX(x, y) - 12, worldY(x, y) - 68, Math.random() * 0.3);
       }
     }
@@ -1178,11 +1207,12 @@ function renderMinimap(city, mode) {
   // rect. Tracks every pan/zoom at every map size since sc = canvas / MAP.
   if (cvs) {
     let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity;
-    // M32a: route the four screen corners through the rotation-aware
-    // screenToTile (not an inline r=0 inverse) so the box bounds the rotated
-    // visible region in tile space at every camera rotation.
+    // M32a: route the four screen corners through the rotation-aware FLOAT
+    // inverse (screenToTileF, not the rounding screenToTile) so the box bounds
+    // the rotated visible region in tile space at every rotation AND stays
+    // byte-identical to HEAD's float inverse at r=0.
     for (const [sx, sy] of [[0, 0], [cvs.width, 0], [0, cvs.height], [cvs.width, cvs.height]]) {
-      const { x: tx, y: ty } = screenToTile(sx, sy);
+      const { x: tx, y: ty } = screenToTileF(sx, sy);
       tx0 = Math.min(tx0, tx); tx1 = Math.max(tx1, tx);
       ty0 = Math.min(ty0, ty); ty1 = Math.max(ty1, ty);
     }

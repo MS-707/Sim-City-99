@@ -64,6 +64,18 @@ const TOOLS = [
     minTier: TOOL_TIER.mayor },
   { id: "stadium",  name: "Stadium",   key: "b", icon: null, spr: () => SPR.stadium,
     minTier: TOOL_TIER.stadium },
+  // M28: arcologies (self-powered mega-housing that keeps a maxed city growing)
+  // gate up the tier ladder via TOOL_TIER — Plymouth/Forest at City, the endgame
+  // Darco/Launch at Metropolis; the buttons dim with a padlock until unlocked.
+  // Wonder landmarks are ungated prestige objects that pump land value. Keys
+  // a/f/j/l/y/v/x are all free (q/e are reserved for view rotation).
+  { id: "plymouth", name: "Plymouth",  key: "a", icon: null, spr: () => SPR.plymouth, minTier: TOOL_TIER.plymouth },
+  { id: "forest",   name: "Forest Arc", key: "f", icon: null, spr: () => SPR.forestArc, minTier: TOOL_TIER.forest },
+  { id: "darco",    name: "Darco Arc",  key: "j", icon: null, spr: () => SPR.darco,    minTier: TOOL_TIER.darco },
+  { id: "launch",   name: "Launch Arc", key: "l", icon: null, spr: () => SPR.launch,   minTier: TOOL_TIER.launch },
+  { id: "statue",   name: "Statue",    key: "y", icon: null, spr: () => SPR.statue },
+  { id: "eiffel",   name: "Eiffel",    key: "v", icon: null, spr: () => SPR.eiffel },
+  { id: "pyramid",  name: "Pyramid",   key: "x", icon: null, spr: () => SPR.pyramid },
 ];
 
 /* --------- 1997 newswire --------- */
@@ -1368,7 +1380,10 @@ function openQuery(x, y) {
     "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
     "Mayor's House", "Stadium", "School", "Hospital", "Gas plant", "Wind farm",
     "Road + power line", // M26: index 18 = WIREROAD crossing
-    "Water pipe", "Water tower", "Water pump"][city.over[i]]; // M24: indices 19/20/21
+    "Water pipe", "Water tower", "Water pump", // M24: indices 19/20/21
+    // M28: indices 22..28 — arcologies then wonder landmarks
+    "Plymouth Arcology", "Forest Arcology", "Darco Arcology", "Launch Arcology",
+    "Statue of Liberty", "Eiffel Tower", "Great Pyramid"][city.over[i]];
   // M19: for a power-plant anchor, surface its age and aged output vs nameplate
   let plantRow = "";
   if (isPlant(city.over[i]) && city.anc[i] === i) {
@@ -1384,6 +1399,17 @@ function openQuery(x, y) {
     const t = city.over[i], energized = t === OV.WATERTOWER || city.powered[i];
     waterProvRow = `<tr><td>Water supply</td><td>${energized
       ? "💧 " + WATER_CAP[t] + " tiles" : (t === OV.PUMP ? "off (needs power)" : "off")}</td></tr>`;
+  }
+  // M28: for a mega-structure anchor, surface what it houses. An arcology shows
+  // its fixed residents + jobs (self-powered); a landmark shows its pride radius.
+  let megaRow = "";
+  if (isMega(city.over[i]) && city.anc[i] === i) {
+    const t = city.over[i];
+    if (isArco(t))
+      megaRow = `<tr><td>Residents</td><td>🏙️ ${ARCO_POP[t].toLocaleString()} (self-powered)</td></tr>` +
+        `<tr><td>Jobs</td><td>${ARCO_JOB[t].toLocaleString()}</td></tr>`;
+    else
+      megaRow = `<tr><td>Landmark</td><td>🗽 pride radius ${LANDMARK_R[t]}</td></tr>`;
   }
   // M25: transit rows. A rail tile names its feature; a station also shows its
   // line number, station count, open/needs-2/no-power status, and diverted trips.
@@ -1413,6 +1439,7 @@ function openQuery(x, y) {
     <tr><td>Zone/Building</td><td>${ovName}${city.lvl[i] ? " (level " + city.lvl[i] + ")" : ""}</td></tr>
     ${plantRow}
     ${waterProvRow}
+    ${megaRow}
     ${transitRow}
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
     ${transitAccessRow}

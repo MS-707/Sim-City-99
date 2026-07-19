@@ -33,6 +33,14 @@ const OV = {
   // isWaterOv + the recomputePower/startDisaster guards) — a pipe must never
   // conduct electricity.
   PIPE: 19, WATERTOWER: 20, PUMP: 21,
+  // M28: arcologies & wonder landmarks — large SELF-POWERED mega-structures that
+  // continue the contiguous id run after PUMP=21 (over[] is a Uint8Array, so
+  // 22..28 round-trip for free with NO save change). Arcologies 22..25 house a
+  // big fixed pop/jobs; landmarks 26..28 stamp land value. Keeping arcos in the
+  // 22..25 block and landmarks in 26..28 makes isArco/isLandmark/isMega cheap
+  // range tests that can never mislabel an existing 0..21 type.
+  PLYMOUTH: 22, FOREST: 23, DARCO: 24, LAUNCH: 25,
+  STATUE: 26, EIFFEL: 27, PYRAMID: 28,
 };
 
 // M25: RAIL — a THIRD network, but on a SEPARATE PLANE (city.rail, a Uint8Array)
@@ -52,6 +60,11 @@ const OV_SIZE = {
   [OV.STADIUM]: 2, [OV.SCHOOL]: 2, [OV.HOSPITAL]: 2,
   [OV.GAS]: 2, [OV.WIND]: 2, // M19
   [OV.PUMP]: 2,              // M24: the pump is a 2x2 station (tower is 1x1)
+  // M28: arcologies & landmarks are LARGE footprints (all > 2), driven by the
+  // same anc[] anchor pattern the 2x2 civics use — every footprint tile stores
+  // anc = the min-corner index, and census/render/power key on anc === i.
+  [OV.PLYMOUTH]: 3, [OV.FOREST]: 3, [OV.DARCO]: 4, [OV.LAUNCH]: 4,
+  [OV.STATUE]: 3, [OV.EIFFEL]: 3, [OV.PYRAMID]: 4,
 };
 const sizeOf = (t) => OV_SIZE[t] || 1;
 
@@ -68,10 +81,33 @@ const isPlant = (t) => t === OV.COAL || t === OV.SOLAR || t === OV.GAS || t === 
 const isWaterOv = (t) => t === OV.PIPE || t === OV.WATERTOWER || t === OV.PUMP;
 const isWaterSrc = (t) => t === OV.WATERTOWER || t === OV.PUMP;
 
+// M28: mega-structure predicates — the SINGLE source of truth each, mirroring
+// isPlant/isWaterOv. isArco (22..25) are the pop/jobs carriers counted once per
+// anchor in recomputeDemand. isLandmark (26..28) are the land-value stampers.
+// isMega spans BOTH (arco+landmark) and is the POWER-ISLAND guard appended to
+// every recomputePower "t >= OV.ZR" idiom (conducts/seed/demand/brownout/y2k):
+// a mega footprint is always internally lit, never draws grid demand, and never
+// conducts/bridges power across itself. Every predicate returns false for all
+// existing 0..21 types, so a city that places none is byte-identical to pre-M28.
+const isArco = (t) => t >= OV.PLYMOUTH && t <= OV.LAUNCH;
+const isLandmark = (t) => t >= OV.STATUE && t <= OV.PYRAMID;
+const isMega = (t) => t >= OV.PLYMOUTH && t <= OV.PYRAMID;
+
 // population / jobs per developed zone level (index 0 unused)
 const RES_POP = [0, 8, 24, 56];
 const COM_JOB = [0, 6, 18, 40];
 const IND_JOB = [0, 8, 22, 48];
+
+// M28: fixed population / jobs each arcology houses. Counted EXACTLY ONCE per
+// structure in recomputeDemand (keyed anc === i), so a 4x4 Launch Arco adds its
+// 3000 once, never ×16. Jobs all land in the industrial (iJobs) bucket. These
+// magnitudes are balance knobs; the Launch Arco alone can push a city up a tier.
+const ARCO_POP = { [OV.PLYMOUTH]: 900, [OV.FOREST]: 600, [OV.DARCO]: 2400, [OV.LAUNCH]: 3000 };
+const ARCO_JOB = { [OV.PLYMOUTH]: 300, [OV.FOREST]: 200, [OV.DARCO]: 800, [OV.LAUNCH]: 1000 };
+// M28: manhattan radius each wonder landmark radiates civic-pride land value.
+// stampLandmarkPride() peaks the potency via a base-1.5 falloff, max-combined
+// across landmarks, into the derived landmarkCov array (rebuilt every pass).
+const LANDMARK_R = { [OV.STATUE]: 14, [OV.EIFFEL]: 16, [OV.PYRAMID]: 18 };
 
 // ---- districts (M21) ----
 // A metadata paint layer, fully orthogonal to OV.*. DIST_MAX matches the fixed
@@ -153,6 +189,9 @@ const COST = {
   rail: 20, subway: 45, station: 300, // M25: rail network (station is the pricey node)
   school: 400, hospital: 600,
   mayor: 0, stadium: 500, // milestone rewards — gifts (or nearly so)
+  // M28: arcologies (endgame vertical growth) + wonder landmarks (prestige).
+  plymouth: 15000, forest: 12000, darco: 60000, launch: 100000,
+  statue: 8000, eiffel: 12000, pyramid: 20000,
 };
 
 // ---- city milestones (M2) ----
@@ -169,7 +208,12 @@ const TIERS = [
 // M25: mass transit is gated behind Town (tier 2) — the city "grows into" rail,
 // matching the mayor/stadium reward-unlock pacing. place() already refuses a
 // tool with TOOL_TIER>tier as {ok:false,reason:"locked"}, and the toolbar dims it.
-const TOOL_TIER = { mayor: 2, stadium: 3, rail: 2, subway: 2, station: 2 }; // Town / City
+// M28: arcologies stagger their unlocks up the ladder — Plymouth/Forest at City
+// (tier 3), the endgame Darco/Launch at Metropolis (tier 4). place() already
+// returns {ok:false,reason:"locked"} when TOOL_TIER[tool] > city.tier, and the
+// toolbar dims the button with a padlock via minTier. Landmarks stay ungated.
+const TOOL_TIER = { mayor: 2, stadium: 3, rail: 2, subway: 2, station: 2, // Town / City
+  plymouth: 3, forest: 3, darco: 4, launch: 4 }; // M28: City / Metropolis
 
 /* ---- city ordinances (M22) ----
    Citywide policy booleans the mayor toggles from the #dlg-ordinances panel.
@@ -477,6 +521,11 @@ class City {
     this.fireCov = new Uint8Array(n);   // fire dept coverage
     this.eduCov  = new Uint8Array(n);   // school (education) coverage
     this.medCov  = new Uint8Array(n);   // hospital (health) coverage
+    // M28: wonder-landmark civic-pride land-value stamp. DERIVED — rebuilt from
+    // over[] by stampLandmarkPride() every recomputeMaps and NEVER serialized
+    // (same policy as polCov/watered/railCov), so bulldozing a landmark fully
+    // reverts its land-value halo on the next pass with zero bookkeeping.
+    this.landmarkCov = new Uint8Array(n);
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
     // M19: build year of the power plant anchored at each tile (0 = no plant
     // here). Only meaningful at anchor tiles; drives the aging capacity curve.
@@ -771,7 +820,7 @@ class City {
     // non-NONE/non-ROAD/non-RUBBLE, so without this exclusion they would WRONGLY
     // conduct electricity like a wire. A pipe carries water, never power.
     const conducts = (i) => this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD
-      && this.over[i] !== OV.RUBBLE && !isWaterOv(this.over[i]);
+      && this.over[i] !== OV.RUBBLE && !isWaterOv(this.over[i]) && !isMega(this.over[i]); // M28: a mega footprint never routes power THROUGH itself (an arco can't bridge a wire across)
     for (let i = 0; i < this.over.length; i++) {
       if (isPlant(this.over[i]) && this.anc[i] === i) {
         // M19: a plant contributes its AGED effective capacity, not its raw
@@ -781,6 +830,10 @@ class City {
       if (isPlant(this.over[i])) {
         this.powered[i] = 1; q.push(i);
       }
+      // M28: a mega-structure is a power ISLAND — always internally lit, but it
+      // is NOT pushed to the flood queue, so it powers itself yet seeds NO
+      // neighbor (conducts() also excludes it, so the flood can't enter it).
+      if (isMega(this.over[i])) this.powered[i] = 1;
     }
     while (q.length) {
       const i = q.pop();
@@ -797,7 +850,7 @@ class City {
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (this.powered[i] && t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
-          && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t)) demand++; // M26: crossing is not a consumer; M24: water infra never draws power
+          && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t)) demand++; // M26: crossing is not a consumer; M24: water infra never draws power; M28: a self-powered mega adds ZERO net demand
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -816,19 +869,23 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t) &&
-            !isWaterOv(t) && Math.random() < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer
+            !isWaterOv(t) && !isMega(t) && Math.random() < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
       this.powered.fill(0);
+      // M28: the "empty grid" cleanup must NOT extinguish self-powered islands —
+      // an arco/landmark on a plant-less map stays lit. No-op with no mega present
+      // (isMega false everywhere), so the pre-M28 baseline is byte-identical.
+      for (let i = 0; i < this.over.length; i++) if (isMega(this.over[i])) this.powered[i] = 1;
     }
     // Y2K bug (Dec '99): systems flicker at random, grid capacity be damned
     if (this.y2kActive()) {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
-            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && Math.random() < 0.3)
-          this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer
+            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && Math.random() < 0.3)
+          this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer; M28: a power island doesn't flicker
       }
     }
     // M24: a water PUMP is excluded from conducts() above, so it never CARRIES
@@ -850,7 +907,7 @@ class City {
           const X = fx + nx, Y = fy + ny;
           if (!this.inMap(X, Y)) continue;
           const j = this.idx(X, Y);
-          if (this.powered[j] && !isWaterOv(this.over[j])) { fed = true; break; }
+          if (this.powered[j] && !isWaterOv(this.over[j]) && !isMega(this.over[j])) { fed = true; break; } // M28: a self-powered mega island must not feed a pump (it never bridges the grid)
         }
       }
       this.powered[i] = fed ? 1 : 0;
@@ -1254,6 +1311,7 @@ class City {
       if (this.over[i] === OV.PARK) lv[i] = 90;
       if (this.over[i] === OV.MAYOR) lv[i] = 130;    // the mayor's manicured lawns
       if (this.over[i] === OV.STADIUM) lv[i] = 110;  // stadium pride (all 4 tiles)
+      if (isLandmark(this.over[i])) lv[i] = 120;     // M28: the wonder's own lot is premium (all footprint tiles)
     }
     const lvOut = new Uint8Array(n);
     this.diffuse(lv, lvOut, 4, 0.3);
@@ -1271,10 +1329,14 @@ class City {
     this.stampCoverage(OV.FIRESTA, this.fireCov, 12, this.funding.fire / 100);
     this.stampCoverage(OV.SCHOOL, this.eduCov, 14, this.funding.edu / 100);
     this.stampCoverage(OV.HOSPITAL, this.medCov, 14, this.funding.health / 100);
+    // M28: wonder-landmark civic pride — a wide-radius land-value stamp rebuilt
+    // fresh from over[] every pass, so removal fully reverts on the next call.
+    this.stampLandmarkPride();
 
     for (let i = 0; i < n; i++) {
       let v = 40 + lvOut[i] - this.poll[i] * 0.7 - trOut[i] * 0.4  // traffic penalty
-            + this.eduCov[i] * 0.1 + this.medCov[i] * 0.1;         // good schools sell houses
+            + this.eduCov[i] * 0.1 + this.medCov[i] * 0.1          // good schools sell houses
+            + this.landmarkCov[i] * 0.6;                           // M28: wonder-landmark pride
       this.landv[i] = Math.max(0, Math.min(255, v));
     }
 
@@ -1335,6 +1397,34 @@ class City {
     }
   }
 
+  /* M28: wonder-landmark "civic pride" land-value stamp. Mirrors stampCoverage's
+     body but keyed on the landmark anchors (isLandmark && anc === i) with the
+     per-type radius LANDMARK_R and a base-1.5 falloff, max-combined across all
+     landmarks into the DERIVED landmarkCov array. Because it .fill(0)s and
+     rebuilds purely from the current over[] every recomputeMaps, bulldozing a
+     landmark (which clears its over[] tiles) makes the next recomputeMaps
+     produce a landv array byte-identical to before the landmark existed — a
+     full revert with zero persisted bookkeeping. Needs no power (a monument
+     radiates pride whether the grid is up or not). */
+  stampLandmarkPride() {
+    const out = this.landmarkCov;
+    out.fill(0);
+    for (let i = 0; i < this.over.length; i++) {
+      const t = this.over[i];
+      if (!isLandmark(t) || this.anc[i] !== i) continue;
+      const R = LANDMARK_R[t];
+      const x = i % MAP, y = (i / MAP) | 0;
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+        const X = x + dx, Y = y + dy;
+        if (!this.inMap(X, Y)) continue;
+        const d = Math.abs(dx) + Math.abs(dy);
+        if (d > R) continue;
+        const j = this.idx(X, Y);
+        out[j] = Math.max(out[j], Math.min(255, Math.round((R - d) * 1.5)));
+      }
+    }
+  }
+
   // ---------- demand ----------
   recomputeDemand() {
     let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0, schools = 0, hospitals = 0, resTiles = 0;
@@ -1345,6 +1435,11 @@ class City {
       else if (this.over[i] === OV.STADIUM && this.anc[i] === i) stadiums++;
       else if (this.over[i] === OV.SCHOOL && this.anc[i] === i && this.powered[i]) schools++;
       else if (this.over[i] === OV.HOSPITAL && this.anc[i] === i && this.powered[i]) hospitals++;
+      // M28: an arcology contributes its fixed pop/jobs EXACTLY ONCE per anchor
+      // (keyed anc === i), so a 4x4 Launch Arco adds its 3000 once, never ×16.
+      // this.pop then feeds tierForPop + growth unchanged — an arco genuinely
+      // pushes the city up the tier ladder. Jobs go in the industrial bucket.
+      else if (isArco(this.over[i]) && this.anc[i] === i) { pop += ARCO_POP[this.over[i]]; iJobs += ARCO_JOB[this.over[i]]; }
     }
     this.pop = pop; this.jobs = cJobs + iJobs;
     // M22: cache the live counts the ordinance §-functions read (nostalgiaTax
@@ -2341,5 +2436,8 @@ function toolOverlay(tool) {
     pipe: OV.PIPE, watertower: OV.WATERTOWER, pump: OV.PUMP, // M24
     school: OV.SCHOOL, hospital: OV.HOSPITAL,
     mayor: OV.MAYOR, stadium: OV.STADIUM,
+    // M28: arcologies + wonder landmarks
+    plymouth: OV.PLYMOUTH, forest: OV.FOREST, darco: OV.DARCO, launch: OV.LAUNCH,
+    statue: OV.STATUE, eiffel: OV.EIFFEL, pyramid: OV.PYRAMID,
   })[tool] ?? OV.NONE;
 }

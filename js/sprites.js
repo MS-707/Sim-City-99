@@ -1209,6 +1209,9 @@ function buildSprites() {
     };
 
     let park, police, firesta, coal, solar, gas, wind, school, hospital, mayor, stadium, bset;
+    // M28: arcology + wonder-landmark mega-structures (large self-powered
+    // footprints). forestArc (not "forest") avoids clobbering SPR.forest terrain.
+    let plymouth, forestArc, darco, launch, statue, eiffel, pyramid;
     const r1 = [], r2 = [], r3 = [], c1 = [], c2 = [], c3 = [], i1 = [], i2 = [], i3 = [];
 
   // ---- park ----
@@ -1697,6 +1700,175 @@ function buildSprites() {
     }
   });
 
+  /* ---- M28: arcologies & wonder landmarks ----
+     Seven large self-powered mega-structures, baked in the per-facing family
+     exactly like coal/stadium so cam.r rotation + the billboard pin apply for
+     free, and the size-agnostic multi-tile render path (render.js) draws the
+     3x3/4x4 footprints with zero render-loop change. Each carries a withNight
+     glow bake so city.powered[anchor]===1 lights arco windows / landmark
+     floodlights after dark. Wrapped in a DEDICATED seeded stream (gas-plant
+     idiom) so their windows() pane-lighting never shifts the shared ART_RNG —
+     every sprite baked before/after (and every prior facing) stays byte-
+     identical. prismFrom() records SNOWSPEC, so makeWinter() snow-caps them. */
+  {
+    const megaRng = mulberry32((0x2AC0DE ^ (BR * 0x9E3779B1)) >>> 0);
+    const prevRng = ART_RNG; ART_RNG = megaRng;
+    // stacked-tier + face helpers (g passed in — GLOWG/up/windows are module-level)
+    const raise = (cn, ht) => ({ N: up(cn.N, ht), E: up(cn.E, ht), S: up(cn.S, ht), W: up(cn.W, ht) });
+    const facewin = (g, cn, ht, rows, cols, col, glow, gf) => {
+      windows(g, cn.W, cn.S, ht, rows, cols, 0.55, col, "#20242c", glow, gf);
+      windows(g, cn.S, cn.E, ht, rows, cols, 0.55, col, "#20242c", glow, gf);
+    };
+    const glowDot = (x, y, r, col) => {
+      if (!GLOWG) return;
+      GLOWG.fillStyle = col; GLOWG.beginPath(); GLOWG.arc(x, y, r, 0, 7); GLOWG.fill();
+    };
+
+    // ---- Plymouth Arcology (3x3): a stepped residential ziggurat, warm lights ----
+    plymouth = withNight(3, 3, 150, (g, ox, oy) => {
+      const foot = corners(ox, oy, 3, 3);
+      prismFrom(g, foot, 44, "#8b90a0");
+      facewin(g, foot, 44, 4, 6, "#ffe9a0", GLOW_WARM, 0.5);
+      const t2 = raise(insetCorners(ox, oy, 3, 3, 0.7), 44);
+      prismFrom(g, t2, 40, "#989dad");
+      facewin(g, t2, 40, 3, 5, "#ffe9a0", GLOW_WARM, 0.5);
+      const t3 = raise(insetCorners(ox, oy, 3, 3, 0.42), 84);
+      prismFrom(g, t3, 30, "#a6abbb");
+      facewin(g, t3, 30, 2, 3, "#ffe9a0", GLOW_WARM, 0.5);
+      const tx = t3.N[0], ty = t3.N[1] - 30;
+      g.strokeStyle = "#c4c8d2"; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(tx, ty); g.lineTo(tx, ty - 22); g.stroke();
+      g.fillStyle = "#ff5a5a"; g.beginPath(); g.arc(tx, ty - 22, 2.4, 0, 7); g.fill();
+      glowDot(tx, ty - 22, 4, "#ff8a8a");
+    });
+
+    // ---- Forest Arcology (3x3): a green glass biodome full of trees ----
+    forestArc = withNight(3, 3, 130, (g, ox, oy) => {
+      const foot = corners(ox, oy, 3, 3);
+      prismFrom(g, foot, 30, "#6f7a68");
+      facewin(g, foot, 30, 2, 6, "#bfeecc", GLOW_COOL, 0.4);
+      const cx = ox, cy = (foot.N[1] + foot.S[1]) / 2 - 30 - 4, rx = 66, ry = 40;
+      g.fillStyle = "#3f7d55";
+      g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI, true); g.closePath(); g.fill();
+      g.strokeStyle = "rgba(180,240,200,.5)"; g.lineWidth = 1;
+      for (let k = 1; k <= 3; k++) { g.beginPath(); g.ellipse(cx, cy, k * 16, ry, 0, 0, Math.PI, true); g.stroke(); }
+      g.beginPath(); g.moveTo(cx - rx, cy); g.lineTo(cx + rx, cy); g.stroke();
+      drawTree(g, cx - 24, cy - 4, 12, 1); drawTree(g, cx + 4, cy - 14, 14, 1.1); drawTree(g, cx + 26, cy - 2, 11, 0.9);
+      glowDot(cx, cy - 10, 24, "#8fe0a8");
+    });
+
+    // ---- Darco Arcology (4x4): a dark brutalist megatower, sodium windows ----
+    darco = withNight(4, 4, 190, (g, ox, oy) => {
+      const foot = corners(ox, oy, 4, 4);
+      prismFrom(g, foot, 60, "#3a3d47");
+      facewin(g, foot, 60, 6, 8, "#ffcf6e", GLOW_SODIUM, 0.5);
+      const t2 = raise(insetCorners(ox, oy, 4, 4, 0.62), 60);
+      prismFrom(g, t2, 70, "#444753");
+      facewin(g, t2, 70, 6, 5, "#ffcf6e", GLOW_SODIUM, 0.5);
+      const t3 = raise(insetCorners(ox, oy, 4, 4, 0.3), 130);
+      prismFrom(g, t3, 24, "#50535f");
+      for (const p of [t3.E, t3.W]) {
+        const x = p[0], y = p[1] - 24;
+        g.fillStyle = "#ff4a4a"; g.beginPath(); g.arc(x, y, 2.4, 0, 7); g.fill();
+        glowDot(x, y, 4, "#ff8a8a");
+      }
+    });
+
+    // ---- Launch Arcology (4x4): rooftop launch pad + rocket (the SC2K icon) ----
+    launch = withNight(4, 4, 210, (g, ox, oy) => {
+      const foot = corners(ox, oy, 4, 4);
+      prismFrom(g, foot, 46, "#9aa2ae");
+      facewin(g, foot, 46, 4, 8, "#dce9ff", GLOW_COOL, 0.55);
+      const cx = ox, cy = (foot.N[1] + foot.S[1]) / 2 - 46;
+      g.fillStyle = "#6b7078"; g.beginPath(); g.ellipse(cx, cy, 54, 26, 0, 0, 7); g.fill();
+      g.strokeStyle = "#3a3d44"; g.lineWidth = 2; g.stroke();
+      g.strokeStyle = "#8a9098"; g.lineWidth = 2;
+      for (const sx of [-30, 30]) { g.beginPath(); g.moveTo(cx + sx, cy + 6); g.lineTo(cx + sx * 0.5, cy - 70); g.stroke(); }
+      const ry0 = cy - 4, H = 96;
+      g.fillStyle = "#eef2f6"; g.beginPath();
+      g.moveTo(cx - 9, ry0); g.lineTo(cx - 9, ry0 - H + 22);
+      g.quadraticCurveTo(cx, ry0 - H - 8, cx + 9, ry0 - H + 22);
+      g.lineTo(cx + 9, ry0); g.closePath(); g.fill();
+      g.fillStyle = "#c9d2da"; g.fillRect(cx - 9, ry0 - H + 22, 4, H - 22);
+      g.fillStyle = "#d23b3b"; g.fillRect(cx - 9, ry0 - 24, 18, 8);
+      g.fillStyle = "#b7bec6";
+      g.beginPath(); g.moveTo(cx - 9, ry0 - 4); g.lineTo(cx - 20, ry0 + 6); g.lineTo(cx - 9, ry0 - 16); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(cx + 9, ry0 - 4); g.lineTo(cx + 20, ry0 + 6); g.lineTo(cx + 9, ry0 - 16); g.closePath(); g.fill();
+      glowDot(cx, ry0 + 4, 10, "#ff9a3a");
+      g.fillStyle = "#ff5a5a"; g.beginPath(); g.arc(cx, ry0 - H - 2, 2.4, 0, 7); g.fill();
+      glowDot(cx, ry0 - H - 2, 4, "#ff8a8a");
+    });
+
+    // ---- Statue of Liberty (3x3): pedestal + verdigris figure + glowing torch ----
+    statue = withNight(3, 3, 160, (g, ox, oy) => {
+      const foot = corners(ox, oy, 3, 3);
+      prismFrom(g, foot, 30, "#7d7360");
+      const ped = raise(insetCorners(ox, oy, 3, 3, 0.5), 30);
+      prismFrom(g, ped, 40, "#9a8f78");
+      const cx = ox, ty = ped.N[1] - 40;
+      g.fillStyle = "#6fbfa6";
+      g.beginPath(); g.moveTo(cx - 10, ty); g.lineTo(cx + 10, ty);
+      g.lineTo(cx + 6, ty - 46); g.lineTo(cx - 6, ty - 46); g.closePath(); g.fill();
+      g.fillStyle = "#5fae95"; g.fillRect(cx, ty - 46, 4, 46);
+      g.fillStyle = "#6fbfa6"; g.beginPath(); g.arc(cx, ty - 52, 5, 0, 7); g.fill();
+      g.strokeStyle = "#6fbfa6"; g.lineWidth = 1.5;
+      for (let k = -2; k <= 2; k++) { g.beginPath(); g.moveTo(cx, ty - 56); g.lineTo(cx + k * 4, ty - 64); g.stroke(); }
+      g.lineWidth = 3;
+      g.beginPath(); g.moveTo(cx + 4, ty - 42); g.lineTo(cx + 16, ty - 64); g.stroke();
+      g.fillStyle = "#ffd24a"; g.beginPath(); g.arc(cx + 16, ty - 68, 4, 0, 7); g.fill();
+      glowDot(cx + 16, ty - 68, 8, "#ffe08a");
+    });
+
+    // ---- Eiffel Tower (3x3): tapering lattice with a beacon + floodlit wash ----
+    eiffel = withNight(3, 3, 200, (g, ox, oy) => {
+      const foot = corners(ox, oy, 3, 3);
+      poly(g, [foot.N, foot.E, foot.S, foot.W], "#6f7a5f");
+      const baseY = (foot.N[1] + foot.S[1]) / 2 + 18, apexY = baseY - 150, legHalf = 44;
+      const col = "#8a6a3a", colS = "#6f5730";
+      g.fillStyle = col;
+      g.beginPath();
+      g.moveTo(ox - legHalf, baseY); g.lineTo(ox + legHalf, baseY);
+      g.lineTo(ox + 7, apexY); g.lineTo(ox - 7, apexY); g.closePath(); g.fill();
+      g.save(); g.clip();
+      g.strokeStyle = colS; g.lineWidth = 1;
+      for (let yy = 0; yy < 1; yy += 0.08) {
+        const w0 = legHalf * (1 - yy) + 7 * yy, y0 = baseY + (apexY - baseY) * yy;
+        const y1 = baseY + (apexY - baseY) * Math.min(1, yy + 0.08);
+        g.beginPath(); g.moveTo(ox - w0, y0); g.lineTo(ox + w0, y1); g.stroke();
+        g.beginPath(); g.moveTo(ox + w0, y0); g.lineTo(ox - w0, y1); g.stroke();
+      }
+      g.restore();
+      g.fillStyle = "#7a5f34";
+      g.fillRect(ox - 30, baseY - 48, 60, 5);
+      g.fillRect(ox - 16, baseY - 94, 32, 4);
+      g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.moveTo(ox, apexY); g.lineTo(ox, apexY - 16); g.stroke();
+      g.fillStyle = "#ffd24a"; g.beginPath(); g.arc(ox, apexY - 18, 2.6, 0, 7); g.fill();
+      glowDot(ox, apexY - 18, 5, "#ffe08a");
+      glowDot(ox, baseY - 70, 30, "#ffcf7a");
+    });
+
+    // ---- Great Pyramid (4x4): stone pyramid with a gilded, glowing capstone ----
+    pyramid = withNight(4, 4, 150, (g, ox, oy) => {
+      const foot = corners(ox, oy, 4, 4);
+      const apex = [ox, (foot.N[1] + foot.S[1]) / 2 - 120];
+      poly(g, [foot.W, foot.S, apex], "#c9a86a");
+      poly(g, [foot.S, foot.E, apex], "#e0c184");
+      g.strokeStyle = "rgba(120,90,40,.35)"; g.lineWidth = 1;
+      for (let k = 1; k < 8; k++) {
+        const t = k / 8;
+        const lw = [foot.W[0] + (apex[0] - foot.W[0]) * t, foot.W[1] + (apex[1] - foot.W[1]) * t];
+        const ls = [foot.S[0] + (apex[0] - foot.S[0]) * t, foot.S[1] + (apex[1] - foot.S[1]) * t];
+        const le = [foot.E[0] + (apex[0] - foot.E[0]) * t, foot.E[1] + (apex[1] - foot.E[1]) * t];
+        g.beginPath(); g.moveTo(lw[0], lw[1]); g.lineTo(ls[0], ls[1]); g.lineTo(le[0], le[1]); g.stroke();
+      }
+      g.fillStyle = "#f0e6c8";
+      g.beginPath(); g.moveTo(apex[0], apex[1]); g.lineTo(apex[0] - 8, apex[1] + 16); g.lineTo(apex[0] + 8, apex[1] + 16); g.closePath(); g.fill();
+      glowDot(apex[0], apex[1] + 6, 10, "#ffe9a0");
+    });
+
+    ART_RNG = prevRng;
+  }
+
   /* ---- seasonal building lookup (G14) ----
      spriteFor picks a building set by season. summer & spring reuse the bake
      above (byte-identical to HEAD). winter derives a snow-capped, cool-graded
@@ -1714,6 +1886,10 @@ function buildSprites() {
     police: police, firesta: firesta, coal: coal, solar: solar,
     gas: gas, wind: wind,
     school: school, hospital: hospital, mayor: mayor, stadium: stadium,
+    // M28: mega-structures (season-invariant art, but included in every set so
+    // spriteFor's B.<name> lookup resolves regardless of the month)
+    plymouth: plymouth, forestArc: forestArc, darco: darco, launch: launch,
+    statue: statue, eiffel: eiffel, pyramid: pyramid,
   };
   const winterSet = {
     r1: seasonR1("winter"),
@@ -1726,6 +1902,11 @@ function buildSprites() {
     gas: makeWinter(gas), wind: makeWinter(wind),
     school: makeWinter(school), hospital: makeWinter(hospital),
     mayor: makeWinter(mayor), stadium: makeWinter(stadium),
+    // M28: snow-capped mega-structures (prismFrom recorded SNOWSPEC, so the
+    // ziggurat/tower tops + pyramid faces cap; night glow shared by reference)
+    plymouth: makeWinter(plymouth), forestArc: makeWinter(forestArc),
+    darco: makeWinter(darco), launch: makeWinter(launch),
+    statue: makeWinter(statue), eiffel: makeWinter(eiffel), pyramid: makeWinter(pyramid),
   };
   const autumnSet = Object.assign({}, summerSet, {
     r1: seasonR1("autumn"), park: mkSprite(1, 1, 22, parkDraw("autumn")),
@@ -1736,7 +1917,9 @@ function buildSprites() {
     return {
       bset,
       fams: { park, r1, r2, r3, c1, c2, c3, i1, i2, i3, police, firesta, coal,
-              solar, gas, wind, school, hospital, mayor, stadium },
+              solar, gas, wind, school, hospital, mayor, stadium,
+              // M28: exposed as SPR.plymouth / SPR.forestArc / … for the toolbar
+              plymouth, forestArc, darco, launch, statue, eiffel, pyramid },
     };
   } // end bakeBuildingSet
 
@@ -1917,6 +2100,15 @@ function spriteFor(city, i) {
     case OV.HOSPITAL: return B.hospital;
     case OV.MAYOR:   return B.mayor;
     case OV.STADIUM: return B.stadium;
+    // M28: arcologies + wonder landmarks (large footprints; the size-agnostic
+    // multi-tile render path draws them with no render-loop change)
+    case OV.PLYMOUTH: return B.plymouth;
+    case OV.FOREST:   return B.forestArc;
+    case OV.DARCO:    return B.darco;
+    case OV.LAUNCH:   return B.launch;
+    case OV.STATUE:   return B.statue;
+    case OV.EIFFEL:   return B.eiffel;
+    case OV.PYRAMID:  return B.pyramid;
   }
   return null;
 }

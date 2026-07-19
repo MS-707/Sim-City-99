@@ -1738,8 +1738,11 @@ class City {
     // in progress. recCur.year === this.year at every call site (the only
     // window where they differ is inside the rollover tick itself, before
     // updateRecords() runs, and nothing starts disasters there).
-    this.recCur.disasters++;
+    // M29: the counter is bumped inside each SUCCESSFUL branch, NOT
+    // unconditionally at the top — so a disaster that legitimately cannot
+    // start (a flood on a waterless map) neither counts nor sets state.
     if (kind === "fire") {
+      this.recCur.disasters++;
       // torch a random developed tile
       const cand = [];
       for (let i = 0; i < this.over.length; i++)
@@ -1752,28 +1755,103 @@ class City {
       this.pushMsg("🔥 FIRE breaks out downtown! Firefighters scramble.");
       return;
     }
-    this.disaster = {
-      kind,
-      x: 5 + Math.random() * (MAP - 10),
-      y: 5 + Math.random() * (MAP - 10),
-      vx: Math.random() - 0.5, vy: Math.random() - 0.5,
-      ticks: kind === "ufo" ? 70 : 90,
-    };
-    this.pushMsg(kind === "ufo"
-      ? "👽 UNIDENTIFIED FLYING OBJECT over the city! (Roswell was 50 years ago... coincidence?)"
-      : "🌪️ TORNADO WARNING! A twister is tearing through town!");
+    if (kind === "tornado" || kind === "ufo") {
+      this.recCur.disasters++;
+      this.disaster = {
+        kind,
+        x: 5 + Math.random() * (MAP - 10),
+        y: 5 + Math.random() * (MAP - 10),
+        vx: Math.random() - 0.5, vy: Math.random() - 0.5,
+        ticks: kind === "ufo" ? 70 : 90,
+      };
+      this.pushMsg(kind === "ufo"
+        ? "👽 UNIDENTIFIED FLYING OBJECT over the city! (Roswell was 50 years ago... coincidence?)"
+        : "🌪️ TORNADO WARNING! A twister is tearing through town!");
+      return;
+    }
+    // ---- M29 expanded roster: earthquake, flood, riot, monster ----
+    if (kind === "quake") {
+      // stationary epicenter at a random in-bounds tile; ripples out ring by ring
+      this.recCur.disasters++;
+      this.disaster = {
+        kind: "quake",
+        x: (1 + Math.random() * (MAP - 2)) | 0,
+        y: (1 + Math.random() * (MAP - 2)) | 0,
+        ticks: 24, r: 0,
+      };
+      this.pushMsg("🌎 EARTHQUAKE! The ground buckles and towers crack across the city!");
+      return;
+    }
+    if (kind === "flood") {
+      // coast front = land tiles orthogonally adjacent to a TERR.WATER tile.
+      // On a landlocked (waterless) map the front is EMPTY → abort WITHOUT
+      // counting and WITHOUT setting this.disaster.
+      const front = [];
+      for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+        const i = this.idx(x, y);
+        if (this.terr[i] === TERR.WATER) continue;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (this.inMap(nx, ny) && this.terr[this.idx(nx, ny)] === TERR.WATER) { front.push(i); break; }
+        }
+      }
+      if (!front.length) return; // landlocked interior: nothing to flood
+      const seed = front[(Math.random() * front.length) | 0];
+      this.recCur.disasters++;
+      this.disaster = {
+        kind: "flood",
+        x: seed % MAP, y: (seed / MAP) | 0,
+        ticks: 40,
+        flooded: [seed], frontier: [seed], depth: 0,
+      };
+      this.pushMsg("🌊 FLOOD! Rising water breaches the coastline!");
+      return;
+    }
+    if (kind === "riot") {
+      // epicenter = argmax over the crime map (single pass, first-max wins)
+      let best = 0, bi = 0;
+      for (let i = 0; i < this.crime.length; i++)
+        if (this.crime[i] > best) { best = this.crime[i]; bi = i; }
+      this.recCur.disasters++;
+      this.disaster = {
+        kind: "riot",
+        x: bi % MAP, y: (bi / MAP) | 0,
+        ticks: 30,
+      };
+      this.pushMsg("🔥 RIOTS erupt in the worst neighborhoods! Send in the police!");
+      return;
+    }
+    if (kind === "monster") {
+      // moving kaiju — reuses the tornado motion template exactly
+      this.recCur.disasters++;
+      this.disaster = {
+        kind: "monster",
+        x: 5 + Math.random() * (MAP - 10),
+        y: 5 + Math.random() * (MAP - 10),
+        vx: Math.random() - 0.5, vy: Math.random() - 0.5,
+        ticks: 110,
+      };
+      this.pushMsg("🦖 A colossal MONSTER rises from the depths and rampages!");
+      return;
+    }
   }
 
   disasterTick() {
     const d = this.disaster;
     if (!d) return;
     d.ticks--;
-    d.vx += (Math.random() - 0.5) * 0.4; d.vy += (Math.random() - 0.5) * 0.4;
-    const sp = Math.hypot(d.vx, d.vy) || 1;
-    d.vx = d.vx / sp * 0.8; d.vy = d.vy / sp * 0.8;
-    d.x = Math.max(1, Math.min(MAP - 2, d.x + d.vx));
-    d.y = Math.max(1, Math.min(MAP - 2, d.y + d.vy));
-    const cx = d.x | 0, cy = d.y | 0;
+    // M29: only the MOVING kinds (tornado / ufo / monster) random-walk; the
+    // stationary kinds (quake / flood / riot) keep their fixed epicenter.
+    const moving = d.kind === "tornado" || d.kind === "ufo" || d.kind === "monster";
+    let cx, cy;
+    if (moving) {
+      d.vx += (Math.random() - 0.5) * 0.4; d.vy += (Math.random() - 0.5) * 0.4;
+      const sp = Math.hypot(d.vx, d.vy) || 1;
+      d.vx = d.vx / sp * 0.8; d.vy = d.vy / sp * 0.8;
+      d.x = Math.max(1, Math.min(MAP - 2, d.x + d.vx));
+      d.y = Math.max(1, Math.min(MAP - 2, d.y + d.vy));
+      cx = d.x | 0; cy = d.y | 0;
+    }
     if (d.kind === "tornado") {
       // destroy what's underneath
       for (const [dx, dy] of [[0,0],[1,0],[0,1]]) {
@@ -1795,8 +1873,120 @@ class City {
     } else if (d.kind === "ufo") {
       // the saucer zaps things with fire
       if (Math.random() < 0.35) this.ignite(cx, cy);
+    } else if (d.kind === "quake") {
+      // expand the shock ring; convert buildings on the current Chebyshev ring
+      // to rubble (same anchor→footprint idiom as the tornado) + scatter fire.
+      const QUAKE_MAX = 12;
+      d.r += 1;
+      const ex = d.x | 0, ey = d.y | 0, ring = d.r | 0;
+      for (let dy = -ring; dy <= ring; dy++) for (let dx = -ring; dx <= ring; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue; // ring perimeter only
+        const X = ex + dx, Y = ey + dy;
+        if (!this.inMap(X, Y)) continue;
+        const i = this.idx(X, Y);
+        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && Math.random() < 0.55) {
+          const a = this.anc[i] >= 0 ? this.anc[i] : i;
+          const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
+          for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
+            const j = this.idx(ax + ddx, ay + ddy);
+            this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+          }
+          this.powerDirty = true;
+        }
+        if (Math.random() < 0.08) this.ignite(X, Y);
+      }
+      if (d.r > QUAKE_MAX || d.ticks <= 0) {
+        this.disaster = null;
+        this.pushMsg("🌎 The earth stills. Aftershocks fade — rebuild, Mayor.");
+      }
+      return;
+    } else if (d.kind === "flood") {
+      // BFS one ring per tick: new tiles are ONLY those orthogonally adjacent
+      // to an already-flooded-or-WATER tile, bounded by an inland depth cap.
+      // Never rewrites terr to WATER, so the coastline / water network is intact.
+      const FLOOD_DEPTH = 8;
+      const next = [];
+      for (const fi of d.frontier) {
+        const fx = fi % MAP, fy = (fi / MAP) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = fx + dx, ny = fy + dy;
+          if (!this.inMap(nx, ny)) continue;
+          const ni = this.idx(nx, ny);
+          if (this.terr[ni] === TERR.WATER) continue; // real water stays water
+          if (d.flooded.indexOf(ni) !== -1) continue;
+          d.flooded.push(ni);
+          next.push(ni);
+          // damage any structure on the newly-wetted tile (rubble idiom); the
+          // whole footprint is marked flooded so it stays connected-to-water.
+          if (this.over[ni] !== OV.NONE && this.over[ni] !== OV.RUBBLE) {
+            const a = this.anc[ni] >= 0 ? this.anc[ni] : ni;
+            const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
+            for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
+              const j = this.idx(ax + ddx, ay + ddy);
+              this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+              if (d.flooded.indexOf(j) === -1) d.flooded.push(j);
+            }
+            this.powerDirty = true;
+          }
+        }
+      }
+      d.frontier = next;
+      d.depth += 1;
+      if (!d.frontier.length || d.depth >= FLOOD_DEPTH || d.ticks <= 0) {
+        this.disaster = null;
+        this.pushMsg("🌊 The floodwaters recede. Survey the damage, Mayor.");
+      }
+      return;
+    } else if (d.kind === "riot") {
+      // torch buildings within a small radius of the epicenter; police coverage
+      // at the epicenter drains ticks faster → high coverage = shorter riot.
+      const ex = d.x | 0, ey = d.y | 0, R = 2;
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+        const X = ex + dx, Y = ey + dy;
+        if (!this.inMap(X, Y)) continue;
+        const i = this.idx(X, Y);
+        if (Math.random() < 0.15) this.ignite(X, Y);
+        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && Math.random() < 0.05) {
+          const a = this.anc[i] >= 0 ? this.anc[i] : i;
+          const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
+          for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
+            const j = this.idx(ax + ddx, ay + ddy);
+            this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+          }
+          this.powerDirty = true;
+        }
+      }
+      d.ticks -= Math.floor(this.polCov[this.idx(ex, ey)] / 24); // suppression
+      if (d.ticks <= 0) {
+        this.disaster = null;
+        this.pushMsg("🚓 Order is restored. The riots burn themselves out.");
+      }
+      return;
+    } else if (d.kind === "monster") {
+      // like the tornado, but a wider/higher-probability stomp footprint (2x2)
+      // + occasional ignite along the path.
+      for (let ddx = 0; ddx <= 1; ddx++) for (let ddy = 0; ddy <= 1; ddy++) {
+        const X = cx + ddx, Y = cy + ddy;
+        if (!this.inMap(X, Y)) continue;
+        const i = this.idx(X, Y);
+        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && Math.random() < 0.7) {
+          const a = this.anc[i] >= 0 ? this.anc[i] : i;
+          const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
+          for (let ddy2 = 0; ddy2 < s; ddy2++) for (let ddx2 = 0; ddx2 < s; ddx2++) {
+            const j = this.idx(ax + ddx2, ay + ddy2);
+            this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+          }
+          this.powerDirty = true;
+        }
+      }
+      if (Math.random() < 0.3) this.ignite(cx, cy);
+      if (d.ticks <= 0) {
+        this.disaster = null;
+        this.pushMsg("🦖 The monster retreats to the sea, leaving ruin in its wake.");
+      }
+      return;
     }
-    if (d.ticks <= 0) {
+    if (d.ticks <= 0 && (d.kind === "tornado" || d.kind === "ufo")) {
       this.disaster = null;
       this.pushMsg(d.kind === "ufo" ? "👽 The saucer departs. The truth is out there."
                                     : "🌪️ The tornado dissipates. Assess the damage, Mayor.");
@@ -2116,7 +2306,17 @@ class City {
 
     // random misfortune
     if (this.disastersEnabled && Math.random() < 0.0009 && this.pop > 200) {
-      this.startDisaster(Math.random() < 0.75 ? "fire" : (Math.random() < 0.6 ? "tornado" : "ufo"));
+      // M29: the expanded roster rides INSIDE the same disablement guard, so
+      // disastersEnabled=false suppresses every kind (old and new) alike.
+      const roll = Math.random();
+      const kind = roll < 0.55 ? "fire"
+                 : roll < 0.68 ? "tornado"
+                 : roll < 0.78 ? "ufo"
+                 : roll < 0.86 ? "quake"
+                 : roll < 0.93 ? "flood"
+                 : roll < 0.985 ? "riot"
+                 : "monster";
+      this.startDisaster(kind);
     }
 
     // a month passes every 24 ticks
@@ -2289,6 +2489,10 @@ class City {
       deals: this.deals.map((d) => ({ mode: d.mode, mw: d.mw, commute: d.commute })),
       disp: Array.from(this.disp),
       history: this.history,
+      // M29: an in-progress disaster (plain JSON-safe {kind,x,y,...}) is emitted
+      // ONLY when one is active. Omitting the field when this.disaster===null
+      // preserves byte-identity with the pre-M29 baseline and keeps v:10.
+      ...(this.disaster ? { disaster: this.disaster } : {}),
     });
   }
 
@@ -2423,6 +2627,9 @@ class City {
     c.recCur = d.recCur && typeof d.recCur === "object"
       ? Object.assign({}, d.recCur)
       : { year: c.year, taxes: 0, net: 0, disasters: 0 };
+    // M29: restore an in-progress disaster, or null (legacy v10 saves and every
+    // no-disaster save simply lack the field → loads identical to pre-M29).
+    c.disaster = d.disaster || null;
     return c;
   }
 }

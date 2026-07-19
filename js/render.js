@@ -674,6 +674,20 @@ function drawNightLights(city, ns) {
       // lightning flicker around the funnel
       ctx.globalAlpha = ns * (0.35 + 0.65 * Math.abs(Math.sin(frame * 0.31)));
       ctx.drawImage(SPR.stormGlow.c, wx - SPR.stormGlow.ox, wy - SPR.stormGlow.oy - 24);
+    } else if (d.kind === "riot") {
+      // M29: the fires cast a warm restless glow over the neighborhood
+      ctx.globalAlpha = ns * (0.4 + 0.4 * Math.abs(Math.sin(frame * 0.2)));
+      const gr = ctx.createRadialGradient(wx, wy, 0, wx, wy, 46);
+      gr.addColorStop(0, "rgba(255,150,40,0.9)"); gr.addColorStop(1, "rgba(255,120,20,0)");
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.ellipse(wx, wy, 46, 24, 0, 0, 7); ctx.fill();
+    } else if (d.kind === "monster") {
+      // M29: the kaiju's eye throws a lurid glow above the skyline
+      ctx.globalAlpha = ns * 0.7;
+      const gr = ctx.createRadialGradient(wx, wy - 40, 0, wx, wy - 40, 30);
+      gr.addColorStop(0, "rgba(120,255,120,0.5)"); gr.addColorStop(1, "rgba(80,200,80,0)");
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(wx, wy - 40, 30, 0, 7); ctx.fill();
     }
     ctx.restore();
   }
@@ -1112,7 +1126,7 @@ function drawDisaster(city) {
       ctx.fillStyle = "#241f18";
       ctx.fillRect(wx + Math.cos(a) * rr, wy - 8 + Math.sin(a) * rr * 0.42, 3, 3);
     }
-  } else { // ufo
+  } else if (d.kind === "ufo") {
     // G16: hoist the saucer above the skyline (~140px, HEAD sat at ~64px,
     // below the towers), run the abduction beam all the way to the ground with
     // a moving shadow, and slow/enlarge the marker blink (frame%32, 3px).
@@ -1143,6 +1157,95 @@ function drawDisaster(city) {
       ctx.fillStyle = (frame + k * 6) % 32 < 16 ? "#ff5b5b" : "#ffe95b";
       ctx.beginPath(); ctx.arc(sx - 18 + k * 9, sy + 2, 3, 0, 7); ctx.fill();
     }
+  } else if (d.kind === "quake") {
+    // M29: expanding concentric ground-crack ripple rings centered on the
+    // epicenter's projected screen point, radius keyed to d.r, plus jagged
+    // crack spokes racing outward.
+    ctx.strokeStyle = "rgba(92,72,56,0.7)";
+    ctx.lineWidth = 2;
+    for (let k = 0; k < 3; k++) {
+      const rad = (d.r + k * 0.6) * HW * 0.9;
+      if (rad <= 0) continue;
+      ctx.globalAlpha = Math.max(0, 0.7 - k * 0.22);
+      ctx.beginPath(); ctx.ellipse(wx, wy, rad, rad * 0.5, 0, 0, 7); ctx.stroke();
+    }
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = "rgba(38,28,22,0.85)";
+    const rr = d.r * HW * 0.9;
+    for (let k = 0; k < 6; k++) {
+      const a = k * (Math.PI / 3) + Math.sin(frame * 0.2) * 0.05;
+      ctx.beginPath(); ctx.moveTo(wx, wy);
+      ctx.lineTo(wx + Math.cos(a) * rr, wy + Math.sin(a) * rr * 0.5); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  } else if (d.kind === "flood") {
+    // M29: translucent blue diamond over EACH flooded tile, projected through
+    // worldX/worldY so the sheet rotates correctly under cam.r.
+    ctx.fillStyle = "rgba(40,110,200,0.4)";
+    for (const fi of d.flooded) {
+      const fx = fi % MAP, fy = (fi / MAP) | 0;
+      const fwx = worldX(fx, fy), fwy = worldY(fx, fy);
+      ctx.beginPath();
+      ctx.moveTo(fwx, fwy - HH); ctx.lineTo(fwx + HW, fwy);
+      ctx.lineTo(fwx, fwy + HH); ctx.lineTo(fwx - HW, fwy);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = "rgba(150,200,255,0.3)"; // shimmer on the leading edge
+    for (const fi of (d.frontier || [])) {
+      const fx = fi % MAP, fy = (fi / MAP) | 0;
+      const fwx = worldX(fx, fy), fwy = worldY(fx, fy);
+      ctx.beginPath();
+      ctx.moveTo(fwx, fwy - HH); ctx.lineTo(fwx + HW, fwy);
+      ctx.lineTo(fwx, fwy + HH); ctx.lineTo(fwx - HW, fwy);
+      ctx.closePath(); ctx.fill();
+    }
+  } else if (d.kind === "riot") {
+    // M29: flame/smoke plumes + small rioter figures ringing the epicenter's
+    // projected point.
+    for (let k = 0; k < 7; k++) {
+      const a = k * (Math.PI * 2 / 7) + frame * 0.02;
+      const rr = 10 + (k % 3) * 12;
+      const px = wx + Math.cos(a) * rr, py = wy + Math.sin(a) * rr * 0.5;
+      const fl = 6 + (Math.sin(frame * 0.3 + k) + 1) * 3;
+      ctx.fillStyle = "rgba(255,140,30,0.75)";
+      ctx.beginPath(); ctx.ellipse(px, py - fl * 0.5, 3, fl, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,220,60,0.8)";
+      ctx.beginPath(); ctx.ellipse(px, py - fl * 0.3, 1.6, fl * 0.5, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(60,55,55,0.3)"; // smoke
+      ctx.beginPath(); ctx.arc(px, py - fl - 6, 4, 0, 7); ctx.fill();
+      ctx.fillStyle = "#20242c"; // rioter figure
+      ctx.fillRect(px - 1, py, 2, 5);
+    }
+  } else if (d.kind === "monster") {
+    // M29: a dark reptilian kaiju silhouette hoisted above the tile with a
+    // stomp-dust skirt.
+    ctx.fillStyle = "rgba(120,110,95,0.28)"; // stomp dust
+    ctx.beginPath(); ctx.ellipse(wx, wy + 4, 34, 12, 0, 0, 7); ctx.fill();
+    const bob = Math.sin(frame * 0.12) * 3;
+    const bx = wx, by = wy - 40 + bob;
+    ctx.fillStyle = "#243027";
+    ctx.fillRect(bx - 11, by + 18, 8, 26); ctx.fillRect(bx + 3, by + 18, 8, 26); // legs
+    ctx.beginPath(); // tail
+    ctx.moveTo(bx + 6, by + 20); ctx.quadraticCurveTo(bx + 40, by + 30, bx + 46, by + 8);
+    ctx.lineTo(bx + 40, by + 6); ctx.quadraticCurveTo(bx + 30, by + 22, bx + 4, by + 12);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(bx, by + 6, 15, 22, 0, 0, 7); ctx.fill(); // body
+    ctx.fillStyle = "#3a4d3a"; // dorsal spikes
+    for (let k = 0; k < 4; k++) {
+      ctx.beginPath();
+      ctx.moveTo(bx - 6 + k * 4, by - 12 + k * 6);
+      ctx.lineTo(bx - 2 + k * 4, by - 20 + k * 6);
+      ctx.lineTo(bx + 2 + k * 4, by - 12 + k * 6);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = "#243027"; // head + snout
+    ctx.beginPath(); ctx.ellipse(bx - 4, by - 20, 10, 9, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(bx - 14, by - 22); ctx.lineTo(bx - 22, by - 18);
+    ctx.lineTo(bx - 12, by - 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = (frame % 20 < 10) ? "#ff5b3b" : "#ffd23b"; // glowing eye
+    ctx.beginPath(); ctx.arc(bx - 10, by - 22, 2, 0, 7); ctx.fill();
+    ctx.fillStyle = "#243027"; // arms
+    ctx.fillRect(bx - 14, by, 7, 4); ctx.fillRect(bx + 8, by, 7, 4);
   }
 }
 

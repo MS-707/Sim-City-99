@@ -6,31 +6,68 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M20 — Soundtrack expansion**: 3-4 distinct generative music moods
-  (calm building, bustling metropolis, disaster tension, night jazz) that
-  crossfade based on sim state; music credits easter egg in About.
+- [ ] **M26 — Power lines cross roads** *(user request)*: implemented and
+  committed (981b5c6). A wire laid on a road (or a road laid on a wire) fuses
+  into a single **OV.WIREROAD** crossing that BOTH conducts power AND carries
+  road access/traffic; it renders as the road sprite with the overhead line
+  composited on top, wears/pollutes/jams like a road, is non-flammable and
+  never misclassified by the `t >= OV.ZR` zone idiom, and bulldozes as one.
+  Save v8 unchanged. Independent Opus criteria; **8/8 workflow-verified** with
+  a clean HEAD-baseline regression and zero console errors. An independent
+  multi-vote adversarial panel is confirming before the artifact is refreshed.
 
 ## Open
 
-- [ ] **M26 — Power lines cross roads** *(user request — next up)*: let a
-  power line and a road share a tile. Placing a wire across a road (or a road
-  across a wire) makes a combined crossing tile that BOTH conducts power and
-  carries road/traffic; it renders as the road with an overhead power line;
-  recomputePower conducts through it while recomputeAccess/traffic still treat
-  it as road; bulldoze clears the whole crossing. Removes the need to route
-  power around the street grid.
-- [ ] **M21 — Land value visualization & districts**: named districts painted
-  by the player, per-district stats in a dialog, district names on the map at
-  low zoom (SC2K-style neighborhood labels).
-- [ ] **M22 — Ordinances**: city ordinances dialog (curfew, recycling,
-  carpool incentive, arcade tax) with monthly costs/benefits wired into the
-  sim, unlocked by tier; advisors recommend relevant ordinances.
-- [ ] **M24 — Water & sewage system**: water towers/pumps + pipe network with
-  a coverage map (stampCoverage pattern), water required for zones to reach
-  higher density like power; a Water minimap overlay and budget upkeep.
-- [ ] **M25 — Rail & subway transit**: buildable rail/subway lines that carry
-  trips off the roads, measurably lowering congestion near stations (wired to
-  the M1 traffic model); station coverage draws riders; budget upkeep.
+> Full designs + independent 8-criteria specs for M21/M22/M24/M25 are archived
+> in `docs/queue-specs.json` (ultracode design workflow, judge-approved).
+
+- [ ] **M21 — Land value visualization & districts**: a district paint layer
+  in its own `city.district` Uint8 channel (co-exists with OV.*, never charges
+  funds, never touches the sim update path — determinism-safe), a Win95
+  District Manager dialog with read-only `districtStats()` aggregating the
+  existing landv/poll/crime/coverage maps, a 7th minimap mode, and SC2K
+  low-zoom neighborhood labels. Save v9 + v8 back-compat.
+- [ ] **M22 — Ordinances**: a `#dlg-ordinances` dialog over an ORDINANCES
+  registry; `enactOrdinance()` rebuilds a pop-independent `ordMods` scalar
+  cache folded into the *existing* recomputeMaps/demand/traffic/fire formulas
+  (no new pass), tier-gated, month-billed through the budget; M23 advisors
+  recommend ones matching their department bias. Save v9 (booleans only).
+- [ ] **M24 — Water & sewage system**: OV.PIPE/WATERTOWER/PUMP (ids 19–21),
+  `recomputeWater()` run after recomputePower (pumps need power + a water
+  neighbor; towers don't), a watered[] coverage field that **gates density**
+  (unwatered lots capped at lvl 1, lvl 3 behind pressure ≥0.9), a Water
+  minimap overlay and budget upkeep. Never conducts electricity. Save v9.
+- [ ] **M25 — Rail & subway transit**: rail/subway/station on a **separate
+  `city.rail` plane** (over[] untouched), `recomputeRail()` networks + station
+  catchment (power by adjacency), ridership diverting a capped share of trips
+  inside recomputeTraffic (≤0.60, never to zero), tier-gated tools, an 8th
+  minimap mode, transit query rows. Save v9 + legacy back-compat.
+- [ ] **M20 — Soundtrack expansion**: 3–4 distinct generative music moods
+  (calm building, bustling metropolis, disaster tension, night jazz) that
+  crossfade on sim state; music-credits easter egg in About. *(Prior workflow
+  was lost to a worker restart; re-queued.)*
+- [ ] **M27 — Neighboring cities & regional connections**: named neighbor
+  cities on the four map edges with per-seed personalities; roads/rail/power
+  reaching a border tile open month-billed deals (sell surplus power, buy
+  during brownouts, commuter demand from highway/rail links).
+- [ ] **M28 — Arcologies & wonder landmarks**: the four SC2K arcologies
+  (Plymouth/Forest/Darco/Launch) + placeable wonder landmarks (Liberty/Eiffel/
+  pyramid homages) as tier-unlocked multi-tile OV.* megastructures — big fixed
+  pop/jobs, self-powered, night-lit; landmarks pump land value over a radius.
+- [ ] **M29 — Expanded disaster roster**: earthquake (epicenter ripple → rubble
+  + fires), coastal flood (spreads inland from water), riot (spawns on the
+  crime hotspot, suppressed by police coverage), and a kaiju monster — each
+  reading a sim system you already maintain, with its own sprite + ticker
+  flavor and the yearly disaster counter.
+- [ ] **M30 — City history charts & trend graphs**: a Win95 Graphs window
+  plotting pop / cash flow / tax / pollution / crime / land value over time
+  (1yr / 10yr / 100yr zoom) on canvas, backed by the almanac records[] plus a
+  monthly ring-buffer of diffuse-map aggregates; survives save/load.
+- [ ] **M31 — Garbage & waste management**: zones generate garbage by activity;
+  dispose via a paint-style Landfill (scars land value/pollution as it
+  saturates) or a tier-gated Waste-to-Energy incinerator (2×2, eats garbage,
+  trickles power); a recycling ordinance cuts the stream; overflow becomes a
+  growing pollution + complaint source.
 
 ### Graphics & UI audit slate (judge-approved, ultracode audit)
 

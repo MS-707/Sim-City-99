@@ -463,7 +463,7 @@ function renderFrame(city, uiState, clearBG) {
               ctx.fillRect(wx + spr.beacon.x, wy + spr.beacon.y, 3, 3);
             }
             // G2: buildings occlude glow behind them; flat roads/wires don't
-            if (ng && ov !== OV.ROAD && ov !== OV.WIRE && ov !== OV.WIREROAD) // M26: crossing is flat road+wire, doesn't punch
+            if (ng && ov !== OV.ROAD && ov !== OV.WIRE && ov !== OV.WIREROAD && ov !== OV.PIPE) // M26: crossing is flat road+wire, doesn't punch; M24: a flat pipe doesn't punch either
               nightPunch(spr, wx, wy);
           }
           // pothole tint (M23): unmaintained roads visibly darken with wear
@@ -1227,6 +1227,8 @@ function minimapCityCol(city, i) {
   if (t === OV.ROAD) return "#888";
   if (t === OV.WIREROAD) return "#9a8"; // M26: crossing — road grey with a wire-tan tint
   if (t === OV.WIRE) return "#ba8";
+  if (t === OV.PIPE) return "#2ad"; // M24: water main — blue
+  if (t === OV.WATERTOWER || t === OV.PUMP) return "#0cf"; // M24: water provider — bright cyan
   if (t === OV.ZR) return city.lvl[i] ? "#2d2" : "#141";
   if (t === OV.ZC) return city.lvl[i] ? "#46f" : "#114";
   if (t === OV.ZI) return city.lvl[i] ? "#dc2" : "#441";
@@ -1286,6 +1288,15 @@ function renderMinimap(city, mode) {
     } else if (mode === "crime") {
       const v = city.crime[i];
       col = v > 6 ? `rgb(${80 + v},20,${30 + v / 2})` : (city.terr[i] === TERR.WATER ? "#013" : "#121");
+    } else if (mode === "water") {
+      // M24: providers bright, dry pipe dark, served tiles cyan scaled by the
+      // citywide pressure, everything else dimmed City-mode district context
+      if (isWaterSrc(city.over[i])) col = "#0cf";
+      else if (city.over[i] === OV.PIPE && !city.watered[i]) col = "#234";
+      else if (city.watered[i]) {
+        const p = Math.max(0.35, city.waterPressure); // strained mains read darker
+        col = `rgb(${20 * p | 0},${(120 + city.watered[i] * 0.5) * p | 0},${(150 + city.watered[i] * 0.4) * p | 0})`;
+      } else col = minimapDim(minimapCityCol(city, i), 0.35);
     } else if (mode === "dist") {
       const dc = city.district[i];
       // districted tiles paint their palette color; everything else keeps the

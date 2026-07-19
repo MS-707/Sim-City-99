@@ -25,6 +25,14 @@ const OV = {
   // wire with a road) — never any other way. It lets power lines cross roads
   // without routing around the street grid.
   WIREROAD: 18,
+  // M24: a SECOND utility network — water. PIPE is the strict analog of WIRE
+  // (a flooded conductor of "water" laid FLAT in the street), WATERTOWER and
+  // PUMP are the two providers. They append after WIREROAD=18 and NEVER
+  // renumber 0..18 (v9 pins these ids in over[]). Because they are all >= ZR,
+  // the power flood + every "developed zone" idiom MUST exclude them (see
+  // isWaterOv + the recomputePower/startDisaster guards) — a pipe must never
+  // conduct electricity.
+  PIPE: 19, WATERTOWER: 20, PUMP: 21,
 };
 
 // footprint (w,h) per overlay type
@@ -32,6 +40,7 @@ const OV_SIZE = {
   [OV.POLICE]: 2, [OV.FIRESTA]: 2, [OV.COAL]: 2, [OV.SOLAR]: 2,
   [OV.STADIUM]: 2, [OV.SCHOOL]: 2, [OV.HOSPITAL]: 2,
   [OV.GAS]: 2, [OV.WIND]: 2, // M19
+  [OV.PUMP]: 2,              // M24: the pump is a 2x2 station (tower is 1x1)
 };
 const sizeOf = (t) => OV_SIZE[t] || 1;
 
@@ -40,6 +49,13 @@ const sizeOf = (t) => OV_SIZE[t] || 1;
 // power CONSUMER by the demand scan). One predicate used everywhere so the
 // four generator types stay perfectly in sync.
 const isPlant = (t) => t === OV.COAL || t === OV.SOLAR || t === OV.GAS || t === OV.WIND;
+
+// M24: the water-network overlays. isWaterOv is the ANTI-CROSSTALK predicate —
+// used at every recomputePower conducts()/demand/brownout/y2k site so a pipe,
+// tower or pump never carries electricity nor counts as a power consumer.
+// isWaterSrc is the two providers (a tower/pump that seeds the water flood).
+const isWaterOv = (t) => t === OV.PIPE || t === OV.WATERTOWER || t === OV.PUMP;
+const isWaterSrc = (t) => t === OV.WATERTOWER || t === OV.PUMP;
 
 // population / jobs per developed zone level (index 0 unused)
 const RES_POP = [0, 8, 24, 56];
@@ -79,6 +95,18 @@ const DISTRICT_COLS = [
    rebuilding resets the build year (fresh nameplate). From PLANT_WARN_AGE on,
    a "the old plant is failing — rebuild it" notice hits the ticker. */
 const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120, [OV.GAS]: 450, [OV.WIND]: 80 };
+
+/* ---- water network capacity & reach (M24) ----
+   WATER_CAP is the number of SERVED consumer tiles each energized provider can
+   support: the always-on tower is the smaller/pricier-per-tile gravity fallback
+   (buildable anywhere, needs no power), the coast-only pump is the cheap-per-tile
+   workhorse (needs POWER + a water neighbour). WATER_REACH is the manhattan
+   radius the pipe/source coverage stamp reaches, so a building near the mains
+   taps in WITHOUT a pipe on its own lot (the SC2000 coverage model). All are
+   first-pass balance knobs: single named constants, none touch the save format. */
+const WATER_CAP = { [OV.WATERTOWER]: 150, [OV.PUMP]: 400 };
+const WATER_REACH = 3;
+const WATER_LABEL = { [OV.WATERTOWER]: "water tower", [OV.PUMP]: "water pump" };
 const PLANT_PRIME_AGE = 30;   // full nameplate through this age
 const PLANT_EOL_AGE   = 45;   // decayed to the floor by here
 const PLANT_MIN_FACTOR = 0.5; // end-of-life output = 50% of nameplate
@@ -101,6 +129,7 @@ const COST = {
   park: 50, tree: 25, waterfill: 50,
   police: 500, firesta: 500, coal: 3000, solar: 5000,
   gas: 4500, wind: 2500, // M19
+  pipe: 8, watertower: 500, pump: 2000, // M24: water network
   school: 400, hospital: 600,
   mayor: 0, stadium: 500, // milestone rewards — gifts (or nearly so)
 };
@@ -343,6 +372,14 @@ class City {
     this.varnt   = new Uint8Array(n);   // sprite variant
     this.anc     = new Int32Array(n).fill(-1); // anchor index for multi-tile
     this.powered = new Uint8Array(n);
+    // M24: DERIVED water state, all rebuilt by recomputeWater() (never
+    // serialized — exactly like powered[]/access[]). watered[] is the graded
+    // coverage/pressure stamp (0 = dry, up to 255 right on the mains);
+    // _waterReach is the BFS reached-tile scratch, allocated once & .fill(0)
+    // reused each pass (no per-tick GC, like _trafficLoad).
+    this.watered = new Uint8Array(n);
+    this._waterReach = new Uint8Array(n);
+    this.waterSupply = 0; this.waterDemand = 0; this.waterPressure = 1;
     this.access  = new Uint8Array(n);   // 1 = road within reach
     this.fire    = new Uint8Array(n);   // burning ticks remaining
     this.unpow   = new Uint8Array(n);   // consecutive unpowered growth passes
@@ -383,9 +420,9 @@ class City {
     this.demand = { r: 0.4, c: 0.1, i: 0.5 };
     this.powerDemand = 0; this.powerSupply = 0;
     this.history = { pop: [], funds: [] };
-    this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, debt: 0, net: 0,
+    this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
-      dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0 } };
+      dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0, water: 0 } }; // M24: water upkeep
     this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
     this.disastersEnabled = true;
     this.disaster = null;           // {kind:'tornado'|'ufo', x, y, ticks}
@@ -475,6 +512,21 @@ class City {
         if (tool !== "road" && tool !== "wire") return false;
       }
       if (this.terr[i] === TERR.FOREST && (tool === "tree")) return false;
+    }
+    // M24: a water PUMP is a hard terrain gate — the 2x2 footprint (all land +
+    // empty, enforced above) must have >=1 orthogonal TERR.WATER neighbour, else
+    // it can't be built at all (a dry pump would be useless). The always-buildable
+    // tower is the landlocked fallback so water is never un-buildable on a map.
+    if (tool === "pump") {
+      let adj = false;
+      for (let dy = 0; dy < 2 && !adj; dy++) for (let dx = 0; dx < 2 && !adj; dx++) {
+        const X = x + dx, Y = y + dy;
+        for (const [nx, ny] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const NX = X + nx, NY = Y + ny;
+          if (this.inMap(NX, NY) && this.terr[this.idx(NX, NY)] === TERR.WATER) { adj = true; break; }
+        }
+      }
+      if (!adj) return false;
     }
     return true;
   }
@@ -569,8 +621,11 @@ class City {
     const q = [];
     // M26: OV.WIREROAD (a road+wire crossing) satisfies this predicate, so it
     // conducts and is flooded exactly like a plain wire — the whole point.
+    // M24 ANTI-CROSSTALK: the water overlays (PIPE/WATERTOWER/PUMP) are all
+    // non-NONE/non-ROAD/non-RUBBLE, so without this exclusion they would WRONGLY
+    // conduct electricity like a wire. A pipe carries water, never power.
     const conducts = (i) => this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD
-      && this.over[i] !== OV.RUBBLE;
+      && this.over[i] !== OV.RUBBLE && !isWaterOv(this.over[i]);
     for (let i = 0; i < this.over.length; i++) {
       if (isPlant(this.over[i]) && this.anc[i] === i) {
         // M19: a plant contributes its AGED effective capacity, not its raw
@@ -596,7 +651,7 @@ class City {
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (this.powered[i] && t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
-          && t !== OV.WIREROAD && !isPlant(t)) demand++; // M26: crossing is not a consumer
+          && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t)) demand++; // M26: crossing is not a consumer; M24: water infra never draws power
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -610,7 +665,7 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t) &&
-            Math.random() < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out
+            !isWaterOv(t) && Math.random() < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -621,11 +676,104 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
-            t !== OV.WIREROAD && !isPlant(t) && Math.random() < 0.3)
-          this.powered[i] = 0; // M26: crossing isn't a consumer
+            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && Math.random() < 0.3)
+          this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer
       }
     }
+    // M24: a water PUMP is excluded from conducts() above, so it never CARRIES
+    // the grid (no crosstalk — a pump can't bridge power to a zone), but it
+    // still needs electricity to run its motor. Energize a pump anchor as a
+    // terminal RECEIVER — a non-propagating read that does NOT re-enter the
+    // flood — when any tile orthogonally touching its 2x2 footprint is on the
+    // powered grid and is itself a real conductor (not another pump). So a pump
+    // genuinely needs a WIRE run to it: a lone/coastal pump with no wire stays
+    // unpowered (and therefore dry). Runs last so brownout/y2k cuts (which skip
+    // water infra) can't perturb it; recomputeWater then reads powered[anchor].
+    for (let i = 0; i < this.over.length; i++) {
+      if (this.over[i] !== OV.PUMP || this.anc[i] !== i) continue;
+      const s = sizeOf(OV.PUMP), ax = i % MAP, ay = (i / MAP) | 0;
+      let fed = false;
+      for (let dy = 0; dy < s && !fed; dy++) for (let dx = 0; dx < s && !fed; dx++) {
+        const fx = ax + dx, fy = ay + dy;
+        for (const [nx, ny] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = fx + nx, Y = fy + ny;
+          if (!this.inMap(X, Y)) continue;
+          const j = this.idx(X, Y);
+          if (this.powered[j] && !isWaterOv(this.over[j])) { fed = true; break; }
+        }
+      }
+      this.powered[i] = fed ? 1 : 0;
+    }
     this.powerDirty = false;
+  }
+
+  /* ---------- water network (M24) ----------
+     A second utility, a strict analog of recomputePower: seed the energized
+     providers, flood their capacity through the PIPE network (4-connected),
+     then STAMP a graded coverage radius so zones near the mains are served
+     without a pipe on every lot (the SC2000 coverage model). Pure/deterministic
+     — no Math.random anywhere — so save→load→recompute reproduces watered[]
+     bit-for-bit from over[]. MUST run AFTER recomputePower(): a PUMP is
+     energized only when this.powered[anchor] is already fresh, so a pump
+     genuinely needs BOTH a wire (for power) AND water terrain adjacency. A
+     WATERTOWER is gravity-fed and ignores power entirely (works in a blackout). */
+  recomputeWater() {
+    const n = this.over.length;
+    this.watered.fill(0);
+    this._waterReach.fill(0);
+    let supply = 0;
+    const q = [];
+    // 1. seed energized source footprints (tower always on; pump needs power)
+    for (let i = 0; i < n; i++) {
+      if (!isWaterSrc(this.over[i]) || this.anc[i] !== i) continue;
+      const t = this.over[i];
+      const energized = t === OV.WATERTOWER || (t === OV.PUMP && this.powered[i]);
+      if (!energized) continue;
+      supply += WATER_CAP[t];
+      const s = sizeOf(t), ax = i % MAP, ay = (i / MAP) | 0;
+      for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
+        const j = this.idx(ax + dx, ay + dy);
+        if (!this._waterReach[j]) { this._waterReach[j] = 1; q.push(j); }
+      }
+    }
+    // 2. flood 4-connected through PIPE tiles (identical shape to the power flood)
+    while (q.length) {
+      const i = q.pop();
+      const x = i % MAP, y = (i / MAP) | 0;
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const X = x + dx, Y = y + dy;
+        if (!this.inMap(X, Y)) continue;
+        const j = this.idx(X, Y);
+        if (!this._waterReach[j] && this.over[j] === OV.PIPE) { this._waterReach[j] = 1; q.push(j); }
+      }
+    }
+    // 3. graded manhattan coverage stamp (stampCoverage shape, max-combine):
+    // every reached tile serves lots within WATER_REACH, brightest on the mains
+    const R = WATER_REACH;
+    for (let i = 0; i < n; i++) {
+      if (!this._waterReach[i]) continue;
+      const x = i % MAP, y = (i / MAP) | 0;
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+        const d = Math.abs(dx) + Math.abs(dy);
+        if (d > R) continue;
+        const X = x + dx, Y = y + dy;
+        if (!this.inMap(X, Y)) continue;
+        const j = this.idx(X, Y);
+        const v = Math.min(255, (R - d) * 40);
+        if (v > this.watered[j]) this.watered[j] = v;
+      }
+    }
+    // 4. demand = served consumer tiles; pressure is a deterministic scalar
+    let demand = 0;
+    for (let i = 0; i < n; i++) {
+      const t = this.over[i];
+      if ((t === OV.ZR || t === OV.ZC || t === OV.ZI) && this.lvl[i] >= 1 && this.watered[i] > 0) demand++;
+    }
+    this.waterSupply = supply;
+    this.waterDemand = demand;
+    this.waterPressure = supply >= demand ? 1 : (demand ? supply / demand : 1);
+    if (demand > supply)
+      this.pushMsg("💧 LOW WATER PRESSURE — mains over capacity; build another tower or pump.");
   }
 
   /* ---- plant aging (M19) ----
@@ -1072,9 +1220,20 @@ class City {
         // schools & hospitals raise the growth cap: coverage speeds upgrades…
         const svc = (this.eduCov[i] + this.medCov[i]) / 510; // 0..1
         fit *= 0.7 + svc * 1.1;
+        // M24: water gates DENSITY. A strained system (low pressure) damps EVERY
+        // upgrade citywide without ever forcing anyone down; full pressure is a
+        // no-op (0.55 + 0.45*1 = 1). The gate below is UPGRADE-ONLY — it never
+        // decrements lvl, so a pre-M24 save (waterPressure defaults to 1, all
+        // watered[]===0) keeps every loaded skyline and only pauses lots trying
+        // to rise above level 1 until the player lays pipe from a tower/pump.
+        fit *= 0.55 + 0.45 * this.waterPressure;
         // …and top-tier development flat-out requires a school OR hospital in reach
-        if (this.lvl[i] === 2 && this.eduCov[i] < 8 && this.medCov[i] < 8) {
+        if (this.lvl[i] >= 1 && !this.watered[i]) {
+          // M24: no water → hard-capped at level 1 (a shack has a well; density needs mains)
+        } else if (this.lvl[i] === 2 && this.eduCov[i] < 8 && this.medCov[i] < 8) {
           // capped at level 2 — nobody builds towers without services
+        } else if (this.lvl[i] === 2 && this.waterPressure < 0.9) {
+          // M24: strained mains → no level-3 towers until pressure recovers
         } else if (road && Math.random() < dem * fit * 0.42) {
           this.lvl[i]++; this.varnt[i] = (Math.random() * 5) | 0;
         }
@@ -1120,6 +1279,7 @@ class City {
         if (this.fire[j]) continue;
         const flammable = (this.over[j] !== OV.NONE && this.over[j] !== OV.ROAD &&
                            this.over[j] !== OV.WIREROAD && // M26: crossing is a road, non-flammable
+                           this.over[j] !== OV.PIPE &&      // M24: a buried pipe doesn't burn (towers/pumps do)
                            this.over[j] !== OV.RUBBLE) || this.terr[j] === TERR.FOREST;
         if (!flammable) continue;
         const chance = 0.09 * (1 - this.fireCov[j] / 300);
@@ -1133,6 +1293,7 @@ class City {
     const i = this.idx(x, y);
     const flammable = (this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD &&
                        this.over[i] !== OV.WIREROAD && // M26: crossing is a road, non-flammable
+                       this.over[i] !== OV.PIPE &&      // M24: a buried pipe doesn't burn (towers/pumps do)
                        this.over[i] !== OV.RUBBLE) || this.terr[i] === TERR.FOREST;
     if (flammable) { this.fire[i] = 10 + ((Math.random() * 8) | 0); this.devRev++; }
   }
@@ -1149,7 +1310,8 @@ class City {
       const cand = [];
       for (let i = 0; i < this.over.length; i++)
         if (this.over[i] >= OV.ZR && this.over[i] !== OV.RUBBLE &&
-            this.over[i] !== OV.WIREROAD) cand.push(i); // M26: crossing is a road, not flammable
+            this.over[i] !== OV.WIREROAD && // M26: crossing is a road, not flammable
+            this.over[i] !== OV.PIPE) cand.push(i); // M24: a buried pipe isn't a fire candidate (towers/pumps, like plants, are)
       const i = cand.length ? cand[(Math.random() * cand.length) | 0]
                             : (Math.random() * this.over.length) | 0;
       this.ignite(i % MAP, (i / MAP) | 0);
@@ -1263,11 +1425,14 @@ class City {
      dialog for its live per-department projection. */
   deptCosts() {
     let roads = 0, wires = 0, police = 0, fireSt = 0, schools = 0,
-        hospitals = 0, plants = 0;
+        hospitals = 0, plants = 0, towers = 0, pumps = 0, pipeTiles = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (t === OV.ROAD || t === OV.WIREROAD) roads++; // M26: a crossing is counted as road infrastructure
       else if (t === OV.WIRE) wires++;
+      else if (t === OV.PIPE) pipeTiles++;                              // M24
+      else if (t === OV.WATERTOWER && this.anc[i] === i) towers++;      // M24
+      else if (t === OV.PUMP && this.anc[i] === i) pumps++;             // M24
       else if (t === OV.POLICE && this.anc[i] === i) police++;
       else if (t === OV.FIRESTA && this.anc[i] === i) fireSt++;
       else if (t === OV.SCHOOL && this.anc[i] === i) schools++;
@@ -1282,6 +1447,8 @@ class City {
       health: Math.round(hospitals * 25 * f.health / 100),
       roads:  Math.round((roads * 0.4 + wires * 0.15) * f.roads / 100),
       plants: plants * 40,
+      // M24: flat water-network upkeep (no funding slider — mirrors "plants*40").
+      water:  Math.round(towers * 15 + pumps * 40 + pipeTiles * 0.15),
     };
   }
 
@@ -1292,6 +1459,7 @@ class City {
     const roadCost = dc.roads;
     const serviceCost = dc.police + dc.fire + dc.edu + dc.health;
     const plantCost = dc.plants;
+    const waterCost = dc.water; // M24: flat water-network upkeep
     // ---- debt service (M13) ----
     // Each active bond charges one payment per month rollover. The payment is
     // the fixed amortized `monthly` stamped at issue (annuity formula — see
@@ -1320,14 +1488,15 @@ class City {
     // M22: ordinance costs/revenue — O(1) over the registry with the live
     // pop/comJobs/resTiles cached by recomputeDemand (run earlier this tick).
     const ob = this.ordinanceBudget();
-    const net = taxes - roadCost - serviceCost - plantCost - debt + ob.net;
+    const net = taxes - roadCost - serviceCost - plantCost - waterCost - debt + ob.net;
     this.funds += net;
-    this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost, debt, net,
+    this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost,
+      water: waterCost, debt, net, // M24: water upkeep line
       // M22: the ordinance line (net = revenue - cost) charged this month
       ord: ob.net, ordCost: ob.cost, ordRev: ob.rev,
       // M23: the per-department breakdown actually charged this month
       dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
-              edu: dc.edu, health: dc.health } };
+              edu: dc.edu, health: dc.health, water: dc.water } };
     if (this.funds < 0) this.pushMsg("💸 The city is BROKE. Raise taxes or cut back, Mayor!");
     this.history.pop.push(this.pop);
     this.history.funds.push(this.funds);
@@ -1463,6 +1632,7 @@ class City {
     if (this.powerDirty || this.tickCount % 10 === 0) {
       this.recomputePower();
       this.recomputeAccess();
+      this.recomputeWater(); // M24: AFTER power — a pump reads fresh powered[]
     }
     if (this.tickCount % 5 === 0) this.recomputeTraffic();
     if (this.tickCount % 14 === 0) this.recomputeMaps();
@@ -1718,7 +1888,15 @@ class City {
     // real rank from the now-computed population.
     if (typeof d.tier === "number") c.tier = d.tier;
     c.recomputeOrdinances();
-    c.recomputePower(); c.recomputeAccess(); c.recomputeTraffic();
+    c.recomputePower(); c.recomputeAccess();
+    // M24: rebuild the DERIVED water state from the loaded over[] (PIPE/WATERTOWER/
+    // PUMP ride in over[]/anc[] — no new serialized array). Runs after
+    // recomputePower so a loaded pump reads fresh powered[]. A pre-M24 save has
+    // no 19..21 tiles, so this yields watered[] all-zero + waterPressure=1
+    // (supply 0/demand 0 → the demand?…:1 branch); because the density gate is
+    // UPGRADE-ONLY and never decrements lvl, every existing skyline loads intact.
+    c.recomputeWater();
+    c.recomputeTraffic();
     c.recomputeMaps(); c.recomputeDemand();
     // milestone state: restore, or (legacy v1 save) infer rank from population
     // so loading never fires a promotion newspaper
@@ -1751,6 +1929,7 @@ function toolOverlay(tool) {
     road: OV.ROAD, wire: OV.WIRE, zr: OV.ZR, zc: OV.ZC, zi: OV.ZI,
     park: OV.PARK, police: OV.POLICE, firesta: OV.FIRESTA,
     coal: OV.COAL, solar: OV.SOLAR, gas: OV.GAS, wind: OV.WIND,
+    pipe: OV.PIPE, watertower: OV.WATERTOWER, pump: OV.PUMP, // M24
     school: OV.SCHOOL, hospital: OV.HOSPITAL,
     mayor: OV.MAYOR, stadium: OV.STADIUM,
   })[tool] ?? OV.NONE;

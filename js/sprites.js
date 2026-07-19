@@ -990,6 +990,76 @@ function buildSprites() {
     }));
   }
 
+  // ---- water pipes (M24) — 16 connection masks, drawn FLAT at ground level ----
+  // Blue-grey mains laid in the street, the strict visual analog of a wire but
+  // flat (extraTop 0, like a road) rather than overhead. Autotiled by pipeMask.
+  const pipeSprite = (m) => mkSprite(1, 1, 0, (g, ox, oy) => {
+    const C = [ox, oy];
+    // dark pipe arms toward each connected edge midpoint (m===0 = isolated hub)
+    g.strokeStyle = "#31627f"; g.lineWidth = 3.6; g.lineCap = "round";
+    for (let b = 0; b < 4; b++) {
+      if (!(m & (1 << b))) continue;
+      const [P0, P1] = EDGE[b];
+      const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
+      g.beginPath(); g.moveTo(C[0], C[1]); g.lineTo(mid[0], mid[1]); g.stroke();
+    }
+    // lighter highlight ridge on top of each arm
+    g.strokeStyle = "#6fb4da"; g.lineWidth = 1.2;
+    for (let b = 0; b < 4; b++) {
+      if (!(m & (1 << b))) continue;
+      const [P0, P1] = EDGE[b];
+      const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
+      g.beginPath(); g.moveTo(C[0], C[1]); g.lineTo(mid[0], mid[1]); g.stroke();
+    }
+    // access-hatch hub at the junction
+    g.fillStyle = "#274f68";
+    g.beginPath(); g.arc(C[0], C[1], m === 0 ? 4.5 : 3.2, 0, 7); g.fill();
+    g.fillStyle = "#6fb4da";
+    g.beginPath(); g.arc(C[0] - 0.8, C[1] - 0.8, 1.4, 0, 7); g.fill();
+  });
+  SPR.pipe = [];
+  for (let m = 0; m < 16; m++) SPR.pipe.push(pipeSprite(m));
+
+  // ---- water tower (M24) — a 1x1 silver/blue tank on braced legs ----
+  SPR.watertower = mkSprite(1, 1, 30, (g, ox, oy) => {
+    const cx = ox, baseY = oy + 5, topY = baseY - 26; // tank-bottom elevation
+    g.fillStyle = "rgba(0,0,0,.18)";                  // ground shadow
+    g.beginPath(); g.ellipse(cx, baseY, 14, 6, 0, 0, 7); g.fill();
+    g.strokeStyle = "#6b7379"; g.lineWidth = 1;       // cross-braces (behind legs)
+    g.beginPath(); g.moveTo(cx - 9, baseY - 4); g.lineTo(cx + 9, baseY - 12); g.stroke();
+    g.beginPath(); g.moveTo(cx + 9, baseY - 4); g.lineTo(cx - 9, baseY - 12); g.stroke();
+    g.strokeStyle = "#949ca3"; g.lineWidth = 2;       // four splayed legs
+    for (const dx of [-9, -4, 4, 9]) {
+      g.beginPath(); g.moveTo(cx + dx * 0.42, topY + 9); g.lineTo(cx + dx, baseY); g.stroke();
+    }
+    // cylindrical tank: bottom cap, body, blue band, domed top cap, highlight
+    g.fillStyle = "#97a6b0"; g.beginPath(); g.ellipse(cx, topY + 11, 12, 5, 0, 0, 7); g.fill();
+    g.fillStyle = "#aab6bf"; g.fillRect(cx - 12, topY, 24, 11);
+    g.fillStyle = "#31627f"; g.fillRect(cx - 12, topY + 3, 24, 3.4); // blue band
+    g.fillStyle = "#c9d4dc"; g.beginPath(); g.ellipse(cx, topY, 12, 5.2, 0, 0, 7); g.fill();
+    g.fillStyle = "#e6edf2"; g.beginPath(); g.ellipse(cx - 3.5, topY - 1, 4.5, 2, 0, 0, 7); g.fill();
+  });
+
+  // ---- water pump (M24) — a 2x2 coastal pumping station ----
+  SPR.pump = mkSprite(2, 2, 32, (g, ox, oy) => {
+    const cn = corners(ox, oy, 2, 2);
+    poly(g, [cn.N, cn.E, cn.S, cn.W], "#6d747a", "rgba(0,0,0,.28)"); // concrete pad
+    const hc = insetCorners(ox, oy, 2, 2, 0.62);                     // pump housing
+    prismFrom(g, hc, 15, "#59707e");
+    const tN = up(hc.N, 15), tS = up(hc.S, 15);
+    const rx = (tN[0] + tS[0]) / 2, ry = (tN[1] + tS[1]) / 2;
+    // blue pump cylinder squatting on the roof
+    g.fillStyle = "#2a5570"; g.beginPath(); g.ellipse(rx, ry + 3, 11, 5, 0, 0, 7); g.fill();
+    g.fillStyle = "#31627f"; g.fillRect(rx - 11, ry - 5, 22, 8);
+    g.fillStyle = "#4a86ac"; g.beginPath(); g.ellipse(rx, ry - 5, 11, 5, 0, 0, 7); g.fill();
+    g.fillStyle = "#7fc2e4"; g.beginPath(); g.ellipse(rx - 3.5, ry - 6, 3.2, 1.5, 0, 0, 7); g.fill();
+    // fat intake main running off the SW (water-facing) corner
+    g.strokeStyle = "#274f68"; g.lineWidth = 4.5; g.lineCap = "round";
+    g.beginPath(); g.moveTo(rx, ry + 2); g.lineTo(hc.W[0] - 7, hc.W[1] + 7); g.stroke();
+    g.strokeStyle = "#6fb4da"; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(rx, ry + 2); g.lineTo(hc.W[0] - 7, hc.W[1] + 7); g.stroke();
+  });
+
   // ---- undeveloped zone markers ----
   const zoneDef = [["zoneR", "#22c522", "R"], ["zoneC", "#3555ff", "C"], ["zoneI", "#e6c619", "I"]];
   for (const [key, col, letter] of zoneDef) {
@@ -1725,6 +1795,12 @@ function spriteFor(city, i) {
     case OV.WIREROAD:
       return (season === "winter" ? SPR.roadWinter : SPR.road)[rot4(roadMask(city, i), cam.r)];
     case OV.WIRE:  return SPR.wire[rot4(wireMask(city, i), cam.r)];
+    // M24: water mains draw FLAT through this normal ground path (SPR.pipe is
+    // baked at elevation 0, so it renders like a road, NOT overhead like a wire);
+    // the tower/pump are static single sprites (not per-facing/season bakes).
+    case OV.PIPE:  return SPR.pipe[rot4(pipeMask(city, i), cam.r)];
+    case OV.WATERTOWER: return SPR.watertower;
+    case OV.PUMP:  return SPR.pump;
     case OV.PARK:  return B.park;
     case OV.RUBBLE: return SPR.rubble;
     case OV.ZR:    return zone([B.r1, B.r2, B.r3], SPR.zoneR);
@@ -1827,7 +1903,27 @@ function wireMask(city, i) {
   const conn = (X, Y) => {
     if (!city.inMap(X, Y)) return false;
     const t = city.over[city.idx(X, Y)];
-    return t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE;
+    // M24: exclude the water overlays so a power line never draws an arm toward
+    // a pipe/tower/pump (the two utilities are visually separate networks).
+    return t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE && !isWaterOv(t);
+  };
+  if (conn(x, y - 1)) m |= 1;
+  if (conn(x + 1, y)) m |= 2;
+  if (conn(x, y + 1)) m |= 4;
+  if (conn(x - 1, y)) m |= 8;
+  return m;
+}
+
+// M24: pipe autotile mask — the water analog of wireMask. A pipe connects to
+// adjacent PIPE tiles and to the two providers (a tower/pump the main plugs
+// into), never to a wire/road, so the water grid autotiles independently.
+function pipeMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let m = 0;
+  const conn = (X, Y) => {
+    if (!city.inMap(X, Y)) return false;
+    const t = city.over[city.idx(X, Y)];
+    return t === OV.PIPE || isWaterSrc(t);
   };
   if (conn(x, y - 1)) m |= 1;
   if (conn(x + 1, y)) m |= 2;

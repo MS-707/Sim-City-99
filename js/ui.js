@@ -48,6 +48,11 @@ const TOOLS = [
   { id: "solar",    name: "Solar Pwr", key: "+", icon: null, spr: () => SPR.solar },
   { id: "gas",      name: "Gas Pwr",   key: "g", icon: null, spr: () => SPR.gas },
   { id: "wind",     name: "Wind Pwr",  key: "i", icon: null, spr: () => SPR.wind },
+  // M24: water network — a contiguous trio right after the power plants. Keys
+  // p/t/u are free. Cost chips render automatically from COST.
+  { id: "pipe",       name: "Water Pipe", key: "p", icon: null, spr: () => SPR.pipe[5] },
+  { id: "watertower", name: "Watr Twr",   key: "t", icon: null, spr: () => SPR.watertower },
+  { id: "pump",       name: "Watr Pump",  key: "u", icon: null, spr: () => SPR.pump },
   // milestone rewards — locked until the city earns its rank
   { id: "mayor",    name: "Mayor Hse", key: "m", icon: null, spr: () => SPR.mayor,
     minTier: TOOL_TIER.mayor },
@@ -537,6 +542,9 @@ function applyToolAt(e) {
     Snd.denied(); setStatus("⛔ Not enough funds!");
   } else if (res.reason === "locked") {
     Snd.denied(); setStatus("🔒 That reward isn't unlocked yet.");
+  } else if (res.reason === "blocked" && UI.tool === "pump") {
+    // M24: the commonest pump refusal is the water-adjacency gate
+    Snd.denied(); setStatus("💧 Pumps must sit next to water.");
   }
 }
 
@@ -579,6 +587,8 @@ const MM_LEGENDS = {
   crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#a5143e)"></i>safe / lawless',
   traffic: '<i class="grad" style="background:linear-gradient(90deg,#3cc828,#dcb428,#ff0028)"></i>free / jammed',
   svc:     '<i class="sw" style="background:#28dc3c"></i>edu <i class="sw" style="background:#dc283c"></i>health <i class="sw" style="background:#dcdc3c"></i>both',
+  // M24: water network — providers, dry pipe, and a served-pressure gradient
+  water:   '<i class="sw" style="background:#0cf"></i>tower/pump <i class="sw" style="background:#234"></i>dry pipe <i class="grad" style="background:linear-gradient(90deg,#146078,#28c8f0)"></i>served',
   // M21: static fallback string (satisfies "MM_LEGENDS.dist is a non-empty
   // string"); updateMapLegend swaps in live per-district swatches when any exist.
   dist:    '<i class="sw" style="background:#e04040"></i>neighborhoods — paint with the 🏘️ tool',
@@ -865,6 +875,7 @@ function fillBudgetTable() {
     <tr><td>Education (${fd.edu}%)</td><td>${f(-dc.edu)}</td></tr>
     <tr><td>Health (${fd.health}%)</td><td>${f(-dc.health)}</td></tr>
     <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
+    <tr><td>Water system</td><td>${f(-dc.water)}</td></tr>
     <tr><td>City ordinances</td><td>${f(city.ordinanceBudget().net)}</td></tr>
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
@@ -1235,7 +1246,8 @@ function openQuery(x, y) {
   const ovName = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
     "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
     "Mayor's House", "Stadium", "School", "Hospital", "Gas plant", "Wind farm",
-    "Road + power line"][city.over[i]]; // M26: index 18 = WIREROAD crossing
+    "Road + power line", // M26: index 18 = WIREROAD crossing
+    "Water pipe", "Water tower", "Water pump"][city.over[i]]; // M24: indices 19/20/21
   // M19: for a power-plant anchor, surface its age and aged output vs nameplate
   let plantRow = "";
   if (isPlant(city.over[i]) && city.anc[i] === i) {
@@ -1244,12 +1256,22 @@ function openQuery(x, y) {
     plantRow = `<tr><td>Plant age</td><td>${age} yr (built ${by})</td></tr>` +
       `<tr><td>Output</td><td>${eff} / ${nameplate} MW${eff < nameplate ? " (aging)" : ""}</td></tr>`;
   }
+  // M24: for a water-provider anchor, surface its capacity + whether it is
+  // energized (a tower is always on; a pump needs power at its anchor)
+  let waterProvRow = "";
+  if (isWaterSrc(city.over[i]) && city.anc[i] === i) {
+    const t = city.over[i], energized = t === OV.WATERTOWER || city.powered[i];
+    waterProvRow = `<tr><td>Water supply</td><td>${energized
+      ? "💧 " + WATER_CAP[t] + " tiles" : (t === OV.PUMP ? "off (needs power)" : "off")}</td></tr>`;
+  }
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
     <tr><td>Zone/Building</td><td>${ovName}${city.lvl[i] ? " (level " + city.lvl[i] + ")" : ""}</td></tr>
     ${plantRow}
+    ${waterProvRow}
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
+    <tr><td>Water</td><td>${city.watered[i] ? "💧 yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
     <tr><td>Traffic</td><td>${(city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) ? city.traffic[i] : "—"}</td></tr>
@@ -1439,6 +1461,8 @@ function refreshHUD() {
   document.getElementById("v-jobs").textContent = city.jobs.toLocaleString();
   document.getElementById("v-power").textContent =
     `${city.powerDemand}/${city.powerSupply}`;
+  document.getElementById("v-water").textContent =
+    `${city.waterSupply}/${city.waterDemand}`; // M24: supply/demand tiles
   const approval = Math.max(5, Math.min(98,
     70 - city.taxRate * 2.4 + (city.demand.r > 0 ? 10 : -8) | 0));
   document.getElementById("v-approval").textContent = city.pop ? approval + "%" : "—";

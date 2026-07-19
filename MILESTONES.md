@@ -6,12 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M29 — Expanded disaster roster** *(next up)*: earthquake (epicenter
-  ripple → rubble + fires), coastal flood (spreads inland from water), riot
-  (spawns on the crime hotspot, suppressed by police coverage), and a kaiju
-  monster — each reading a sim system you already maintain, with its own sprite
-  + ticker flavor and the yearly disaster counter. Proposal-stage — design +
-  criteria set fresh by an independent reviewer.
+- [ ] **M30 — City history charts & trend graphs** *(next up)*: a Win95 Graphs
+  window plotting pop / cash flow / tax / pollution / crime / land value over
+  time (1yr / 10yr / 100yr zoom) on canvas, backed by the almanac records[] plus
+  a monthly ring-buffer of diffuse-map aggregates; survives save/load.
+  Proposal-stage — design + criteria set fresh by an independent reviewer.
 
 ## Open
 
@@ -19,10 +18,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M30 — City history charts & trend graphs**: a Win95 Graphs window
-  plotting pop / cash flow / tax / pollution / crime / land value over time
-  (1yr / 10yr / 100yr zoom) on canvas, backed by the almanac records[] plus a
-  monthly ring-buffer of diffuse-map aggregates; survives save/load.
 - [ ] **M31 — Garbage & waste management**: zones generate garbage by activity;
   dispose via a paint-style Landfill (scars land value/pollution as it
   saturates) or a tier-gated Waste-to-Energy incinerator (2×2, eats garbage,
@@ -33,6 +28,25 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M29 — Expanded disaster roster**: four new catastrophes ride the
+  existing single-disaster slot + `disasterTick()` plumbing (fire/tornado/ufo
+  left byte-identical), each reading a system the sim already maintains and
+  damaging via the tornado's building→rubble idiom + the existing `ignite()`:
+  **earthquake** (stationary epicenter, expanding rubble+fire ring), **flood**
+  (BFS spreads *only* inland from `TERR.WATER`-adjacent tiles — a waterless map
+  can't flood and doesn't phantom-count), **riot** (epicenter at the crime-map
+  argmax, suppressed faster under high police coverage), and a **kaiju monster**
+  (tornado-style moving path, wide stomp). Each increments the yearly counter
+  once (moved after the precondition check) and terminates cleanly. The
+  render's bare `else`-is-ufo was split into explicit per-kind branches so each
+  draws its own rotation-aware art and never falls through to the saucer.
+  `this.disaster` is now serialized **conditionally** (only when non-null, still
+  v10) so an in-progress disaster resumes after load while a no-disaster save
+  stays byte-identical; the disable flag gates the new kinds' random spawns.
+  Verified 9/9 + a 5-agent panel (5/5): riot on the crime hotspot, flood
+  water-reachability, save-resume, clean termination, disable gate, no-disaster
+  byte-identity, existing disasters + all composed features intact. Zero errors.
 
 - [x] **M28 — Arcologies & wonder landmarks**: four SC2K arcologies (Plymouth/
   Forest/Darco/Launch, OV 22–25) and three wonder landmarks (Statue/Eiffel/

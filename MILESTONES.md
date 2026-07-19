@@ -6,12 +6,13 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M22 — Ordinances** *(next up)*: a `#dlg-ordinances` dialog over an
-  ORDINANCES registry; `enactOrdinance()` rebuilds a pop-independent `ordMods`
-  scalar cache folded into the *existing* recomputeMaps/demand/traffic/fire
-  formulas (no new pass), tier-gated, month-billed through the budget; M23
-  advisors recommend ones matching their department bias. Save v9 (booleans
-  only). Full spec + 8 independent criteria in `docs/queue-specs.json`.
+- [ ] **M24 — Water & sewage system** *(next up)*: OV.PIPE/WATERTOWER/PUMP (ids
+  19–21, continuing from WIREROAD=18), `recomputeWater()` run after
+  recomputePower (pumps need power + a water neighbor; towers don't), a
+  watered[] coverage field that **gates density** (unwatered lots capped at lvl
+  1, lvl 3 behind pressure ≥0.9), a Water minimap overlay and budget upkeep.
+  Never conducts electricity. Save v9. Full spec + 8 criteria in
+  `docs/queue-specs.json`.
 
 ## Open
 
@@ -19,11 +20,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M24 — Water & sewage system**: OV.PIPE/WATERTOWER/PUMP (ids 19–21),
-  `recomputeWater()` run after recomputePower (pumps need power + a water
-  neighbor; towers don't), a watered[] coverage field that **gates density**
-  (unwatered lots capped at lvl 1, lvl 3 behind pressure ≥0.9), a Water
-  minimap overlay and budget upkeep. Never conducts electricity. Save v9.
 - [ ] **M25 — Rail & subway transit**: rail/subway/station on a **separate
   `city.rail` plane** (over[] untouched), `recomputeRail()` networks + station
   catchment (power by adjacency), ridership diverting a capped share of trips
@@ -60,6 +56,23 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M22 — City ordinances**: an ORDINANCES registry (recycling, neighborhood
+  watch, carpool incentive, curfew, nostalgia tax, smoke-detector mandate) with
+  a boolean `city.ordinances` map. `enactOrdinance()` rebuilds a pop-independent
+  scalar cache `city.ordMods` that folds into the **existing** recomputeMaps
+  (pollution/crime), recomputeTraffic, recomputeDemand and fireTick formulas — no
+  new per-tick pass, bounded by the existing clamps, reverting to identity when
+  off. Costs/revenue flow through the budget via an O(1) `ordinanceBudget()` +
+  a `lastBudget.ord` line scaling with live pop/comJobs. Tier-gated in both the
+  enact validator and the effect fold; a `#dlg-ordinances` Win95 dialog lists
+  each with cost/benefit + lock hints (refreshes while paused); M23 advisors
+  recommend relevant ones by department bias. `ordMods` is derived (never
+  serialized), rebuilt on load after tier restore, and now also refreshed by the
+  `tick()` tier ratchet so a gated ordinance activates the moment the ratchet
+  reaches it. Save stays v9. Verified 8/8 + determinism (no-ordinance ticks
+  byte-identical to HEAD incl. funds) + a 6-agent panel (6/6); the panel's
+  tier-ratchet edge was hardened and re-verified byte-identical.
 
 - [x] **M32c — Rotation framing polish**: postcards are now shot **north-up
   (`r=0`) regardless of the live view rotation**, so a keepsake taken while

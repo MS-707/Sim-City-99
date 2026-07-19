@@ -6,12 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M25 — Rail & subway transit** *(next up)*: rail/subway/station on a
-  **separate `city.rail` plane** (over[] untouched), `recomputeRail()` networks +
-  station catchment (power by adjacency), ridership diverting a capped share of
-  trips inside recomputeTraffic (≤0.60, never to zero), tier-gated tools, an 8th
-  minimap mode, transit query rows. Save v9 + legacy back-compat. Full spec + 8
-  criteria in `docs/queue-specs.json`.
+- [ ] **M20 — Soundtrack expansion** *(next up)*: 3–4 distinct generative music
+  moods (calm building, bustling metropolis, disaster tension, night jazz) that
+  crossfade on sim state; music-credits easter egg in About. Audio milestone —
+  criteria set fresh by an independent reviewer (no archived spec; the original
+  workflow was lost to a worker restart).
 
 ## Open
 
@@ -19,10 +18,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M20 — Soundtrack expansion**: 3–4 distinct generative music moods
-  (calm building, bustling metropolis, disaster tension, night jazz) that
-  crossfade on sim state; music-credits easter egg in About. *(Prior workflow
-  was lost to a worker restart; re-queued.)*
 - [ ] **M27 — Neighboring cities & regional connections**: named neighbor
   cities on the four map edges with per-seed personalities; roads/rail/power
   reaching a border tile open month-billed deals (sell surplus power, buy
@@ -50,6 +45,26 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M25 — Rail & subway transit**: buildable rail/subway/stations on a
+  **separate `city.rail` plane** (RL.TRACK/SUB/STATION) so `over[]` is never
+  touched — no OV-id or zone-idiom concerns. `recomputeRail()` (run after
+  recomputePower, reading `powered[]` without editing it) builds railNet
+  components + a `railCov` station catchment; station power is by **adjacency**
+  (a powered 4-neighbour), so it never bridges power into a zone. Ridership
+  diverts a **capped** share of a served zone's road trips inside
+  recomputeTraffic — `min(RAIL_MAX_SHARE=0.60, railCov/255)` scaled onto a
+  deterministic map before the reservoir walk, so it's identical per seed and
+  **never zeros a road**. Tier-gated tools (rail 20 / subway 45 / station 300,
+  Town+); surface rail can share a road tile as a grade crossing; an 8th transit
+  minimap mode, transit query rows, procedural sprites (rot4/cam.r autotile),
+  funding.transit upkeep. Save v9 (adds rail[] + funding.transit); legacy saves
+  load rail-zero + transit 100. Verified 8/8 + plane-isolation and
+  capped-diversion hard gates + a 5-agent panel (5/5): a rail city's over[]/
+  power/access/pollution are byte-identical to the same city rail-zeroed and to
+  the pre-M25 baseline. Panel notes non-blocking (relief is modest on 255-clamped
+  arterials as railCov peaks ~126; a 2-station line opens on one powered station
+  per the machine criteria). Zero console errors.
 
 - [x] **M24 — Water & sewage system**: a second utility network. OV.PIPE=19/
   WATERTOWER=20/PUMP=21 (appended after WIREROAD=18), with an `isWaterOv()`

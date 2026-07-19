@@ -40,10 +40,17 @@ function postcardBounds() {
     if (y > maxY) maxY = y;
   }
   if (maxX < 0) { minX = minY = 0; maxX = maxY = MAP - 1; }
-  return {
+  // M32c: the postcard is always shot north-up (r=0) for stable framing (see
+  // renderPhotoTo), so compute the frame at r=0 too — otherwise a rotated live
+  // view swaps which map corners are the screen extremes and the skyline would
+  // sit off-centre or clip in the mount.
+  const or = cam.r; cam.r = 0;
+  const b = {
     x0: worldX(minX, maxY) - HW - 28, x1: worldX(maxX, minY) + HW + 28,
     y0: worldY(minX, minY) - HH - 96, y1: worldY(maxX, maxY) + HH + 20,
   };
+  cam.r = or;
+  return b;
 }
 
 // season-matched sunset skies: [zenith, mid, horizon] stops, brightening

@@ -6,11 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M32c — Rotation overlay, animation & framing polish** *(next up)*:
-  rotation-correct postcard framing (project all four map corners so `r=1/3`
-  frame right), a rotated minimap viewport indicator, and an optional short
-  presentational turn animation (respects reduced-motion). Pure polish on top of
-  M32a/b (which already handle smoke, cache keys and the minimap viewport float).
+- [ ] **M22 — Ordinances** *(next up)*: a `#dlg-ordinances` dialog over an
+  ORDINANCES registry; `enactOrdinance()` rebuilds a pop-independent `ordMods`
+  scalar cache folded into the *existing* recomputeMaps/demand/traffic/fire
+  formulas (no new pass), tier-gated, month-billed through the budget; M23
+  advisors recommend ones matching their department bias. Save v9 (booleans
+  only). Full spec + 8 independent criteria in `docs/queue-specs.json`.
 
 ## Open
 
@@ -18,11 +19,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M22 — Ordinances**: a `#dlg-ordinances` dialog over an ORDINANCES
-  registry; `enactOrdinance()` rebuilds a pop-independent `ordMods` scalar
-  cache folded into the *existing* recomputeMaps/demand/traffic/fire formulas
-  (no new pass), tier-gated, month-billed through the budget; M23 advisors
-  recommend ones matching their department bias. Save v9 (booleans only).
 - [ ] **M24 — Water & sewage system**: OV.PIPE/WATERTOWER/PUMP (ids 19–21),
   `recomputeWater()` run after recomputePower (pumps need power + a water
   neighbor; towers don't), a watered[] coverage field that **gates density**
@@ -64,6 +60,17 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M32c — Rotation framing polish**: postcards are now shot **north-up
+  (`r=0`) regardless of the live view rotation**, so a keepsake taken while
+  rotated frames the skyline correctly instead of clipping — `renderPhotoTo`
+  saves/sets/restores `cam.r=0` around the photo render, and `postcardBounds`
+  computes its fit at `r=0` to match. Verified: with identical randomness the
+  postcard is byte-identical across all four live rotations, the bounds are
+  rotation-independent, and the live `cam.r` is restored afterward; zero errors.
+  (The other staged M32c items — per-facing smoke anchors, cache keys, the
+  minimap viewport float — already landed in M32a/b; the optional turn animation
+  was intentionally skipped to avoid gratuitous motion.)
 
 - [x] **M21 — Land value visualization & districts**: a district paint layer in
   a new per-tile `city.district` Uint8 channel + a `city.districts[]` metadata

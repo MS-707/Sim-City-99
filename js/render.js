@@ -598,15 +598,17 @@ function renderFrame(city, uiState, clearBG) {
 // terrain/night layer caches key on canvas size + camera, so they simply
 // rebuild on the next live frame — a once-per-click cost, nothing per-frame.
 function renderPhotoTo(canvas, city, uiState, cx, cy, cz) {
-  const oCvs = cvs, oCtx = ctx, ox = cam.x, oy = cam.y, oz = cam.z;
+  const oCvs = cvs, oCtx = ctx, ox = cam.x, oy = cam.y, oz = cam.z, orr = cam.r;
   cvs = canvas;
   ctx = canvas.getContext("2d");
-  cam.x = cx; cam.y = cy; cam.z = cz;
+  // M32c: shoot the postcard north-up regardless of the live view rotation, so
+  // the photo is a stable keepsake and matches postcardBounds' r=0 framing.
+  cam.x = cx; cam.y = cy; cam.z = cz; cam.r = 0;
   try {
     renderFrame(city, uiState, true);
   } finally {
     cvs = oCvs; ctx = oCtx;
-    cam.x = ox; cam.y = oy; cam.z = oz;
+    cam.x = ox; cam.y = oy; cam.z = oz; cam.r = orr;
   }
 }
 

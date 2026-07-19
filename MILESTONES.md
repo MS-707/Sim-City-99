@@ -6,24 +6,17 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M32b — True multi-side building sprites** *(next up)*: a lazy,
-  deterministic 4-facing building bake so rotating the view shows genuinely
-  different building sides. Facing 0 keeps seed 0x5EED (so `r=0` stays
-  byte-identical to M32a); facings 1–3 use a forked per-orientation RNG, baked
-  on first visit to that angle and cached. Box+window families get windows on
-  all four world faces; ~10 handed buildings tag their feature to one face.
-  Full spec + criteria archived in `docs/rotation-design.json`.
+- [ ] **M32c — Rotation overlay, animation & framing polish** *(next up)*:
+  rotation-correct postcard framing (project all four map corners so `r=1/3`
+  frame right), a rotated minimap viewport indicator, and an optional short
+  presentational turn animation (respects reduced-motion). Pure polish on top of
+  M32a/b (which already handle smoke, cache keys and the minimap viewport float).
 
 ## Open
 
 > Rotation staging + criteria live in `docs/rotation-design.json`; the
 > gameplay-queue designs + 8-criteria specs for M21/M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
-
-- [ ] **M32c — Rotation overlay, animation & framing polish**: per-facing smoke
-  emit-anchors, rotation-correct postcard framing, a rotated minimap viewport
-  indicator, and an optional short presentational turn animation (respects
-  reduced-motion). Pure polish on top of M32a/b.
 - [ ] **M21 — Land value visualization & districts**: a district paint layer in
   its own `city.district` Uint8 channel (co-exists with OV.*, never charges
   funds, never touches the sim update path — determinism-safe), a Win95 District
@@ -78,6 +71,27 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M32b — Multi-side building sprites** *(user request)*: rotating the view
+  now shows genuinely different building sides. Each building family bakes four
+  facings (`SPR.<fam>[r]`) — facing 0 keeps the original seed `0x5EED` (so `r=0`
+  is byte-identical for 18/20 families), facings 1–3 use a forked per-orientation
+  RNG (`0x5EED ^ r*0x9E3779B1`, snapshot-swapped so the shared bake never
+  desyncs), built lazily on first visit to each angle and cached (boot time +
+  default memory unchanged; ~20 MB after visiting all four). The sun stays
+  screen-welded; only which world-face's decoration maps to the visible SW/SE
+  edges rotates. Handed civics (fire-station bays, hospital canopy, plant stacks,
+  police/school detailing) present their feature on the correct side per rotation
+  and a coherent plainer back where occluded. The two industrial families `i2`/
+  `i3`, which shipped with a permanently bare face, were windowed on all faces —
+  a deliberate `r=0` art improvement (their bare face is visible at `r=0`, so it
+  can't be filled without changing `r=0`), verified surgical (only `i2`/`i3`
+  change; opaque-pixel count unchanged; silhouette/stacks/night-glow untouched;
+  fully deterministic). `spriteFor` masks the facing index with `cam.r & 3`.
+  Independent 6-agent panel caught the `i2`/`i3` gap; fixed and re-verified — no
+  blank face at any rotation, projection/painter/mask/picking untouched, save
+  unchanged, zero console errors. Verified 10/10 criteria + facing-0 byte-identity
+  + a multi-side visual proof.
 
 - [x] **M32a — View rotation core** *(user request)*: press **Q/E** (or `[`/`]`,
   or the ⟲/⟳ HUD buttons) to rotate the isometric view 90° through all four

@@ -6,18 +6,31 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M21 — Land value visualization & districts** *(next up)*: a district
-  paint layer in its own `city.district` Uint8 channel (co-exists with OV.*,
-  never charges funds, never touches the sim update path — determinism-safe),
-  a Win95 District Manager dialog with read-only `districtStats()` aggregating
-  the existing landv/poll/crime/coverage maps, a 7th minimap mode, and SC2K
-  low-zoom neighborhood labels. Save v9 + v8 back-compat. Full spec + 8
-  independent criteria archived in `docs/queue-specs.json`.
+- [ ] **M32b — True multi-side building sprites** *(next up)*: a lazy,
+  deterministic 4-facing building bake so rotating the view shows genuinely
+  different building sides. Facing 0 keeps seed 0x5EED (so `r=0` stays
+  byte-identical to M32a); facings 1–3 use a forked per-orientation RNG, baked
+  on first visit to that angle and cached. Box+window families get windows on
+  all four world faces; ~10 handed buildings tag their feature to one face.
+  Full spec + criteria archived in `docs/rotation-design.json`.
 
 ## Open
 
-> Full designs + independent 8-criteria specs for M21/M22/M24/M25 are archived
-> in `docs/queue-specs.json` (ultracode design workflow, judge-approved).
+> Rotation staging + criteria live in `docs/rotation-design.json`; the
+> gameplay-queue designs + 8-criteria specs for M21/M22/M24/M25 live in
+> `docs/queue-specs.json` (ultracode design workflows, judge-approved).
+
+- [ ] **M32c — Rotation overlay, animation & framing polish**: per-facing smoke
+  emit-anchors, rotation-correct postcard framing, a rotated minimap viewport
+  indicator, and an optional short presentational turn animation (respects
+  reduced-motion). Pure polish on top of M32a/b.
+- [ ] **M21 — Land value visualization & districts**: a district paint layer in
+  its own `city.district` Uint8 channel (co-exists with OV.*, never charges
+  funds, never touches the sim update path — determinism-safe), a Win95 District
+  Manager dialog with read-only `districtStats()`, a 7th minimap mode, and SC2K
+  low-zoom neighborhood labels. Save v9 + v8 back-compat. Full spec + 8
+  independent criteria in `docs/queue-specs.json`. *(A partial build is stashed
+  from before the rotation work; it will re-run fresh onto the rotated renderer.)*
 
 - [ ] **M22 — Ordinances**: a `#dlg-ordinances` dialog over an ORDINANCES
   registry; `enactOrdinance()` rebuilds a pop-independent `ordMods` scalar
@@ -65,6 +78,34 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M32a — View rotation core** *(user request)*: press **Q/E** (or `[`/`]`,
+  or the ⟲/⟳ HUD buttons) to rotate the isometric view 90° through all four
+  orientations. A single `cam.r ∈ {0,1,2,3}` routed through the worldX/worldY/
+  screenToTile chokepoint plus pure `rot()`/`unrot()` helpers (with an `r=0`
+  identity early-return, so orientation 0 is **byte-identical to the pre-rotation
+  game by construction**); the painter loop walks view-depth diagonals; autotile
+  masks rotate at lookup via `rot4()`; 2×2 anchors pick their front/back corner
+  by view depth; picking, cars, chopper, disasters, night glow and the minimap
+  all track; rotation pivots around screen-center and persists view-only in
+  UI.prefs (never serialized — no save bump). Buildings billboard for now (true
+  multi-side art is M32b). Criteria + staging set by an independent reviewer
+  (`docs/rotation-design.json`); implemented and verified via the milestone
+  workflow (10/10 criteria, HEAD `r=0` byte-identity, zero errors), then a
+  6-agent adversarial panel caught two real regressions (a 1px minimap
+  viewport-rect shift at `r=0`; smoke plumes detaching from 2×2 stacks when
+  rotated). Both fixed (a float inverse `screenToTileF`; plumes anchored to the
+  sprite's draw corner via `backCorner()`) and re-verified 3/3 against the pinned
+  pre-rotation commit — `r=0` main **and** minimap pixel-identical across four
+  cameras, plumes on-stack at every rotation, picking round-trips 32/32.
+
+- [x] **Bug fixes — New City & car speed** *(user reports)*: File ▸ New City (and
+  the no-saved-city notice) were gated behind native `confirm()`/`alert()`, which
+  the sandboxed artifact iframe blocks silently — replaced with a self-contained
+  Win95 modal (`uiConfirm`/`uiAlert`). Cars kept driving at full speed while
+  paused and ignored the speed setting — car motion now scales by `UI.speed`
+  (frozen at Pause, 0.5×/1×/2× for Turtle/Llama/Cheetah). Each independently
+  verified headless with a regression pass; zero console errors.
 
 - [x] **M26 — Power lines cross roads** *(user request)*: a wire laid on an
   existing road (or a road laid on an existing wire) fuses into a single

@@ -27,7 +27,7 @@
 function scnCongested(c) {
   let n = 0;
   for (let i = 0; i < c.traffic.length; i++)
-    if (c.over[i] === OV.ROAD && c.traffic[i] >= 100) n++;
+    if ((c.over[i] === OV.ROAD || c.over[i] === OV.WIREROAD) && c.traffic[i] >= 100) n++; // M26
   return n;
 }
 

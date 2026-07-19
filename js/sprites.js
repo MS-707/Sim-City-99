@@ -1627,6 +1627,10 @@ function spriteFor(city, i) {
   switch (t) {
     case OV.ROAD:  // winter roads show plowed snow banks (M12)
       return (season === "winter" ? SPR.roadWinter : SPR.road)[roadMask(city, i)];
+    // M26: a crossing's ground footprint is the ROAD sprite; render.js blits the
+    // overhead wire on top (the road is what sits on the ground).
+    case OV.WIREROAD:
+      return (season === "winter" ? SPR.roadWinter : SPR.road)[roadMask(city, i)];
     case OV.WIRE:  return SPR.wire[wireMask(city, i)];
     case OV.PARK:  return B.park;
     case OV.RUBBLE: return SPR.rubble;
@@ -1650,7 +1654,8 @@ function spriteFor(city, i) {
 function roadMask(city, i) {
   const x = i % MAP, y = (i / MAP) | 0;
   let m = 0;
-  const road = (X, Y) => city.inMap(X, Y) && city.over[city.idx(X, Y)] === OV.ROAD;
+  const road = (X, Y) => city.inMap(X, Y) &&
+    (city.over[city.idx(X, Y)] === OV.ROAD || city.over[city.idx(X, Y)] === OV.WIREROAD); // M26: road connects through a crossing
   if (road(x, y - 1)) m |= 1;
   if (road(x + 1, y)) m |= 2;
   if (road(x, y + 1)) m |= 4;

@@ -19,6 +19,12 @@ const OV = {
   // M19: two new generators join coal/solar. GAS is a big fossil peaker
   // (high output, coal-level smog); WIND is a clean low-output farm.
   GAS: 16, WIND: 17,
+  // M26: a WIREROAD is a single tile that is simultaneously a ROAD (for
+  // access/traffic/rendering/wear/pollution) AND a POWER CONDUCTOR. It is
+  // created ONLY by crossing an existing road with a wire (or an existing
+  // wire with a road) — never any other way. It lets power lines cross roads
+  // without routing around the street grid.
+  WIREROAD: 18,
 };
 
 // footprint (w,h) per overlay type
@@ -217,7 +223,7 @@ const EVENTS = [
    into the ticker queue. Documented qualifying thresholds (COMPLAINT_T):
      crime      city.crime[i]   >= COMPLAINT_T.crime
      poll       city.poll[i]    >= COMPLAINT_T.poll
-     traffic    over[i]===OV.ROAD && city.traffic[i] >= COMPLAINT_T.traffic
+     traffic    (over[i]===OV.ROAD || over[i]===OV.WIREROAD) && city.traffic[i] >= COMPLAINT_T.traffic
      unpowered  over[i] in {ZR,ZC,ZI} && lvl[i] > 0 && !powered[i]
      rubble     over[i]===OV.RUBBLE
    Deterministic backstop: while any qualifying tile persists, a complaint is
@@ -378,6 +384,11 @@ class City {
       if (!this.inMap(X, Y)) return false;
       const i = this.idx(X, Y);
       if (tool === "bulldoze") continue;
+      // M26: a wire may cross an existing road, and a road may cross an
+      // existing wire — both make a WIREROAD crossing. Every OTHER occupied
+      // tile (zones, buildings, plants, existing crossing, rubble) still refuses.
+      if (tool === "wire" && this.over[i] === OV.ROAD) continue;
+      if (tool === "road" && this.over[i] === OV.WIRE) continue;
       if (this.over[i] !== OV.NONE) return false;
       if (this.terr[i] === TERR.WATER) {
         // only roads & wires may bridge water
@@ -422,7 +433,13 @@ class City {
     const a = this.idx(x, y);
     for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
       const i = this.idx(x + dx, y + dy);
-      this.over[i] = type; this.lvl[i] = 0; this.anc[i] = a;
+      // M26: crossing a wire over an existing road (or a road over an existing
+      // wire) fuses the two into a single WIREROAD tile that both conducts and
+      // carries traffic. anc stays -1 / lvl 0 exactly like a plain road/wire.
+      let put = type;
+      if (tool === "wire" && this.over[i] === OV.ROAD) put = OV.WIREROAD;
+      else if (tool === "road" && this.over[i] === OV.WIRE) put = OV.WIREROAD;
+      this.over[i] = put; this.lvl[i] = 0; this.anc[i] = a;
       this.varnt[i] = (Math.random() * 5) | 0;
       this.plantYear[i] = 0;
       if (this.terr[i] === TERR.FOREST) { this.terr[i] = TERR.GRASS; this.terrRev++; }
@@ -470,6 +487,8 @@ class City {
     this.powered.fill(0);
     let supply = 0;
     const q = [];
+    // M26: OV.WIREROAD (a road+wire crossing) satisfies this predicate, so it
+    // conducts and is flooded exactly like a plain wire — the whole point.
     const conducts = (i) => this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD
       && this.over[i] !== OV.RUBBLE;
     for (let i = 0; i < this.over.length; i++) {
@@ -497,7 +516,7 @@ class City {
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (this.powered[i] && t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
-          && !isPlant(t)) demand++;
+          && t !== OV.WIREROAD && !isPlant(t)) demand++; // M26: crossing is not a consumer
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -510,8 +529,8 @@ class City {
       const cutRatio = 1 - supply / demand;
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
-        if (this.powered[i] && t >= OV.ZR && !isPlant(t) &&
-            Math.random() < cutRatio) this.powered[i] = 0;
+        if (this.powered[i] && t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t) &&
+            Math.random() < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -522,8 +541,8 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
-            !isPlant(t) && Math.random() < 0.3)
-          this.powered[i] = 0;
+            t !== OV.WIREROAD && !isPlant(t) && Math.random() < 0.3)
+          this.powered[i] = 0; // M26: crossing isn't a consumer
       }
     }
     this.powerDirty = false;
@@ -589,7 +608,7 @@ class City {
     this.access.fill(0);
     let q = [];
     for (let i = 0; i < this.over.length; i++)
-      if (this.over[i] === OV.ROAD) { this.access[i] = 4; q.push(i); }
+      if (this.over[i] === OV.ROAD || this.over[i] === OV.WIREROAD) { this.access[i] = 4; q.push(i); } // M26: crossing seeds access like a road
     for (let d = 3; d >= 1 && q.length; d--) {
       const next = [];
       for (const i of q) {
@@ -618,7 +637,7 @@ class City {
           const X = x + sx, Y = y + dy;
           if (!this.inMap(X, Y)) continue;
           const j = Y * MAP + X;
-          if (this.over[j] === OV.ROAD) return j;
+          if (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) return j; // M26: crossing counts as road
         }
       }
     }
@@ -633,7 +652,7 @@ class City {
       const X = x + dx, Y = y + dy;
       if (!this.inMap(X, Y)) continue;
       const j = Y * MAP + X;
-      if (this.over[j] === OV.ROAD && this.traffic[j] > m) m = this.traffic[j];
+      if ((this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && this.traffic[j] > m) m = this.traffic[j]; // M26
     }
     return m;
   }
@@ -659,7 +678,7 @@ class City {
           const X = x + dx, Y = y + dy;
           if (!this.inMap(X, Y)) continue;
           const j = Y * MAP + X;
-          if (this.over[j] !== OV.ROAD || j === prev) continue;
+          if ((this.over[j] !== OV.ROAD && this.over[j] !== OV.WIREROAD) || j === prev) continue; // M26: trips walk through crossings
           cnt++;
           if (Math.random() * cnt < 1) nxt = j;  // reservoir pick
         }
@@ -679,7 +698,7 @@ class City {
       // i.e. a fully worn road congests as if it hauled 60% more trips.
       // wear = 0 gives a factor of exactly 1: the legacy arithmetic untouched.
       const wearMul = 1 + this.roadWear[i] / 255 * 0.6;
-      this.traffic[i] = this.over[i] === OV.ROAD
+      this.traffic[i] = (this.over[i] === OV.ROAD || this.over[i] === OV.WIREROAD) // M26: crossing carries traffic
         ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i] * wearMul) * seasonMul * 0.5)
         : 0;
     }
@@ -710,7 +729,7 @@ class City {
     const delta = Math.round(18 * (100 - F) / 100) - Math.round(10 * F / 100);
     let crumbled = 0;
     for (let i = 0; i < this.over.length; i++) {
-      if (this.over[i] !== OV.ROAD) { this.roadWear[i] = 0; continue; }
+      if (this.over[i] !== OV.ROAD && this.over[i] !== OV.WIREROAD) { this.roadWear[i] = 0; continue; } // M26: a crossing wears like a road (may crumble to rubble, removing both)
       this.roadWear[i] = Math.max(0, Math.min(255, this.roadWear[i] + delta));
       if (F === 0 && this.roadWear[i] >= 255 && Math.random() < 0.35) {
         this.over[i] = OV.RUBBLE; this.lvl[i] = 0; this.anc[i] = -1;
@@ -744,7 +763,7 @@ class City {
       if (t === OV.ZI) src[i] += 30 + this.lvl[i] * 35;
       if (t === OV.COAL) src[i] += coalSmog;
       if (t === OV.GAS) src[i] += gasSmog;   // gas smokes; solar & wind stay clean
-      if (t === OV.ROAD) src[i] += 8;
+      if (t === OV.ROAD || t === OV.WIREROAD) src[i] += 8; // M26: crossing pollutes like a road
       if (this.fire[i]) src[i] += 100;
     }
     this.diffuse(src, this.poll, 3, 0.24);
@@ -946,6 +965,7 @@ class City {
         const j = this.idx(X, Y);
         if (this.fire[j]) continue;
         const flammable = (this.over[j] !== OV.NONE && this.over[j] !== OV.ROAD &&
+                           this.over[j] !== OV.WIREROAD && // M26: crossing is a road, non-flammable
                            this.over[j] !== OV.RUBBLE) || this.terr[j] === TERR.FOREST;
         if (!flammable) continue;
         const chance = 0.09 * (1 - this.fireCov[j] / 300);
@@ -958,6 +978,7 @@ class City {
     if (!this.inMap(x, y)) return;
     const i = this.idx(x, y);
     const flammable = (this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD &&
+                       this.over[i] !== OV.WIREROAD && // M26: crossing is a road, non-flammable
                        this.over[i] !== OV.RUBBLE) || this.terr[i] === TERR.FOREST;
     if (flammable) { this.fire[i] = 10 + ((Math.random() * 8) | 0); this.devRev++; }
   }
@@ -973,7 +994,8 @@ class City {
       // torch a random developed tile
       const cand = [];
       for (let i = 0; i < this.over.length; i++)
-        if (this.over[i] >= OV.ZR && this.over[i] !== OV.RUBBLE) cand.push(i);
+        if (this.over[i] >= OV.ZR && this.over[i] !== OV.RUBBLE &&
+            this.over[i] !== OV.WIREROAD) cand.push(i); // M26: crossing is a road, not flammable
       const i = cand.length ? cand[(Math.random() * cand.length) | 0]
                             : (Math.random() * this.over.length) | 0;
       this.ignite(i % MAP, (i / MAP) | 0);
@@ -1090,7 +1112,7 @@ class City {
         hospitals = 0, plants = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
-      if (t === OV.ROAD) roads++;
+      if (t === OV.ROAD || t === OV.WIREROAD) roads++; // M26: a crossing is counted as road infrastructure
       else if (t === OV.WIRE) wires++;
       else if (t === OV.POLICE && this.anc[i] === i) police++;
       else if (t === OV.FIRESTA && this.anc[i] === i) fireSt++;
@@ -1186,7 +1208,7 @@ class City {
       const t = this.over[i];
       let kind = null, score = 0;
       if (t === OV.RUBBLE) { kind = "rubble"; score = 130; }
-      else if (t === OV.ROAD && this.traffic[i] >= COMPLAINT_T.traffic) {
+      else if ((t === OV.ROAD || t === OV.WIREROAD) && this.traffic[i] >= COMPLAINT_T.traffic) { // M26: crossing can jam like a road
         kind = "traffic"; score = 60 + this.traffic[i] - COMPLAINT_T.traffic;
       } else if ((t === OV.ZR || t === OV.ZC || t === OV.ZI) &&
                  this.lvl[i] > 0 && !this.powered[i]) {

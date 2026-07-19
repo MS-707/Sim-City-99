@@ -400,6 +400,13 @@ function renderFrame(city, uiState, clearBG) {
           const spr = spriteFor(city, i);
           if (spr) {
             ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+            // M26: a WIREROAD draws the road footprint (spr, above) PLUS an
+            // overhead power line. SPR.wire sprites are baked at elevation 20
+            // so they draw above the diamond — the line hangs over the street.
+            if (ov === OV.WIREROAD) {
+              const ws = SPR.wire[wireMask(city, i)];
+              ctx.drawImage(ws.c, wx - ws.ox, wy - ws.oy);
+            }
             // G3: burning buildings char — darkened while city.fire[i] is
             // set, reverting the moment the fire ends
             if (city.fire[i]) drawChar(spr, wx, wy);
@@ -411,11 +418,11 @@ function renderFrame(city, uiState, clearBG) {
               ctx.fillRect(wx + spr.beacon.x, wy + spr.beacon.y, 3, 3);
             }
             // G2: buildings occlude glow behind them; flat roads/wires don't
-            if (ng && ov !== OV.ROAD && ov !== OV.WIRE)
+            if (ng && ov !== OV.ROAD && ov !== OV.WIRE && ov !== OV.WIREROAD) // M26: crossing is flat road+wire, doesn't punch
               nightPunch(spr, wx, wy);
           }
           // pothole tint (M23): unmaintained roads visibly darken with wear
-          if (ov === OV.ROAD && city.roadWear[i] > 96) {
+          if ((ov === OV.ROAD || ov === OV.WIREROAD) && city.roadWear[i] > 96) { // M26: crossing potholes like a road
             ctx.globalAlpha = Math.min(0.38, (city.roadWear[i] - 96) / 400);
             ctx.fillStyle = "#181008";
             ctx.beginPath();
@@ -428,7 +435,7 @@ function renderFrame(city, uiState, clearBG) {
             // night lights at this tile's own depth (G2): street lamps on
             // road tiles, prebaked lit-window glow on powered zones, plus
             // the ground pool — unless the tile in front blocks the spill
-            if (ov === OV.ROAD) {
+            if (ov === OV.ROAD || ov === OV.WIREROAD) { // M26: crossing gets a street lamp like a road
               nightAdd(SPR.lamp, wx, wy);
             } else if (spr && spr.night && city.powered[i] && !city.fire[i]) {
               // (burning buildings show fire, not tidy lit windows — G3)
@@ -651,7 +658,7 @@ function updateCars(city, ns) {
   const roads = [];
   let total = 0;
   for (let i = 0; i < city.over.length; i++)
-    if (city.over[i] === OV.ROAD) { roads.push(i); total += city.traffic[i]; }
+    if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) { roads.push(i); total += city.traffic[i]; } // M26: cars use crossings
 
   // G16: cap scales with map area (carCap) instead of the flat 70
   const want = roads.length >= 8 ? Math.min(carCap(), 6 + (total / 45 | 0)) : 0;
@@ -671,12 +678,12 @@ function updateCars(city, ns) {
       const px = c.fx, py = c.fy;
       c.fx = c.tx; c.fy = c.ty; c.p = 0;
       const i = c.fy * MAP + c.fx;
-      if (city.over[i] !== OV.ROAD) { cars.splice(k, 1); continue; } // road got dozed
+      if (city.over[i] !== OV.ROAD && city.over[i] !== OV.WIREROAD) { cars.splice(k, 1); continue; } // road/crossing got dozed (M26)
       const opts = [], back = [];
       for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const X = c.fx + dx, Y = c.fy + dy;
         if (X < 0 || Y < 0 || X >= MAP || Y >= MAP) continue;
-        if (city.over[Y * MAP + X] !== OV.ROAD) continue;
+        if (city.over[Y * MAP + X] !== OV.ROAD && city.over[Y * MAP + X] !== OV.WIREROAD) continue; // M26: cars path through crossings
         (X === px && Y === py ? back : opts).push([X, Y]);
       }
       const pool = opts.length ? opts : back; // dead end -> U-turn
@@ -866,7 +873,7 @@ function chopperTrySpawn(c) {
   if (chopper || !c) return false;
   let best = -1, bestV = -1;
   for (let i = 0; i < c.over.length; i++)
-    if (c.over[i] === OV.ROAD && c.traffic[i] > bestV) { bestV = c.traffic[i]; best = i; }
+    if ((c.over[i] === OV.ROAD || c.over[i] === OV.WIREROAD) && c.traffic[i] > bestV) { bestV = c.traffic[i]; best = i; } // M26
   if (best < 0 || bestV < CHOPPER_TRAFFIC_T) return false;
   const tx = best % MAP, ty = (best / MAP) | 0;
   // launch point: 4 tiles beyond the nearest map edge (offscreen of the map)
@@ -1045,6 +1052,7 @@ function minimapCityCol(city, i) {
   if (city.fire[i]) return "#f80";
   const t = city.over[i];
   if (t === OV.ROAD) return "#888";
+  if (t === OV.WIREROAD) return "#9a8"; // M26: crossing — road grey with a wire-tan tint
   if (t === OV.WIRE) return "#ba8";
   if (t === OV.ZR) return city.lvl[i] ? "#2d2" : "#141";
   if (t === OV.ZC) return city.lvl[i] ? "#46f" : "#114";
@@ -1090,7 +1098,7 @@ function renderMinimap(city, mode) {
       const v = city.landv[i];
       col = `rgb(${30 + v * 0.3 | 0},${40 + v * 0.7 | 0},${60 + v * 0.5 | 0})`;
     } else if (mode === "traffic") {
-      if (city.over[i] === OV.ROAD) {
+      if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) { // M26: crossing shows traffic
         const v = city.traffic[i]; // green -> yellow -> red as congestion rises
         col = `rgb(${Math.min(255, 60 + v * 1.6) | 0},${Math.max(0, 200 - v * 1.4) | 0},40)`;
       } else col = minimapDim(minimapCityCol(city, i), 0.35); // G8: keep district context

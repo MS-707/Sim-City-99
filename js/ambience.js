@@ -36,7 +36,7 @@ function ambScanViewport(city) {
       const i = y * MAP + x;
       if (city.terr[i] === TERR.WATER) found.water = true;
       const ov = city.over[i];
-      if (ov === OV.ROAD && city.traffic[i] >= AMB_TRAFFIC_MIN) found.traffic = true;
+      if ((ov === OV.ROAD || ov === OV.WIREROAD) && city.traffic[i] >= AMB_TRAFFIC_MIN) found.traffic = true; // M26
       else if (ov === OV.ZI && city.lvl[i] > 0) found.industry = true;
       else if (ov === OV.STADIUM) found.stadium = true;
     }

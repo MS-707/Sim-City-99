@@ -903,7 +903,8 @@ function openQuery(x, y) {
   const terrName = ["Grass", "Water", "Forest"][city.terr[i]];
   const ovName = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
     "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
-    "Mayor's House", "Stadium", "School", "Hospital", "Gas plant", "Wind farm"][city.over[i]];
+    "Mayor's House", "Stadium", "School", "Hospital", "Gas plant", "Wind farm",
+    "Road + power line"][city.over[i]]; // M26: index 18 = WIREROAD crossing
   // M19: for a power-plant anchor, surface its age and aged output vs nameplate
   let plantRow = "";
   if (isPlant(city.over[i]) && city.anc[i] === i) {
@@ -920,7 +921,7 @@ function openQuery(x, y) {
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
-    <tr><td>Traffic</td><td>${city.over[i] === OV.ROAD ? city.traffic[i] : "—"}</td></tr>
+    <tr><td>Traffic</td><td>${(city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) ? city.traffic[i] : "—"}</td></tr>
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
     <tr><td>Crime</td><td>${city.crime[i]}</td></tr>
     <tr><td>Education</td><td>${city.eduCov[i]}</td></tr>
@@ -960,7 +961,7 @@ const TRAFFIC_REPORT_N = 5;    // rows shown, at most
 function openTrafficReport() {
   const cand = [];
   for (let i = 0; i < city.over.length; i++)
-    if (city.over[i] === OV.ROAD && city.traffic[i] >= TRAFFIC_REPORT_MIN)
+    if ((city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) && city.traffic[i] >= TRAFFIC_REPORT_MIN) // M26
       cand.push(i);
   cand.sort((a, b) => city.traffic[b] - city.traffic[a]);
   const top = cand.slice(0, TRAFFIC_REPORT_N);

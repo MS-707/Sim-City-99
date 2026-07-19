@@ -11,7 +11,7 @@ function advAvg(arr) {
 function advRoadTraffic() { // mean congestion on road tiles (whole map if roadless)
   let s = 0, n = 0;
   for (let i = 0; i < city.over.length; i++)
-    if (city.over[i] === OV.ROAD) { s += city.traffic[i]; n++; }
+    if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) { s += city.traffic[i]; n++; } // M26
   return n ? s / n : advAvg(city.traffic);
 }
 
@@ -24,7 +24,7 @@ function advParkCount() {
 function advRoadStats() { // road wear / decay aggregates (M23)
   let roads = 0, worn = 0, wearSum = 0, rubble = 0;
   for (let i = 0; i < city.over.length; i++) {
-    if (city.over[i] === OV.ROAD) {
+    if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) { // M26: crossings wear like roads
       roads++; wearSum += city.roadWear[i];
       if (city.roadWear[i] >= 128) worn++;      // past the pothole line
     } else if (city.over[i] === OV.RUBBLE) rubble++;

@@ -1007,6 +1007,39 @@ function buildSprites() {
     });
   }
 
+  // ---- developed buildings, baked once PER VIEW ORIENTATION (M32b) ----
+  // buildSprites bakes only facing 0 at boot (below); spriteFor() lazily bakes
+  // facings 1..3 on first visit to that camera rotation and caches them in
+  // SPR.facings[r], so a rotation shows genuinely different building sides.
+  // Each facing is an independent bake of every developed building + its
+  // seasonal (summer/winter/autumn) variants, returned as one bset.
+  function bakeBuildingSet(BR) {
+    // DETERMINISM (M32b): facing 0 keeps the shared 0x5EED stream so its
+    // spritesheet is byte-identical to HEAD; facings 1..3 draw from an
+    // INDEPENDENT forked seed, so bake order can never desync facing 0 and a
+    // lazy facing never touches the shared ART_RNG (snapshot-swap idiom).
+    const fseed = BR === 0 ? seeded : mulberry32((0x5EED ^ (BR * 0x9E3779B1)) >>> 0);
+    const R = BR === 0 ? (() => seeded()) : (() => fseed());
+    const facingPrev = ART_RNG; ART_RNG = fseed;
+
+    // World-face feature router (M32b). The sun stays SCREEN-welded (SW face
+    // shade .72, SE face shade .92 — done by prism()); only WHICH world face's
+    // decoration lands on the two visible screen edges rotates. A handed
+    // feature authored on the r=0 screen SE edge (S->E) is world face FE_PX; on
+    // the SW edge (W->S) it is FE_PY. At bake rotation BR the SE edge shows
+    // world face BR and the SW edge shows (BR+1)&3, so a feature on face f draws
+    // on SE when f===BR, on SW when f===(BR+1)&3, else it is on an occluded back
+    // face and is skipped (the intended plainer back). At BR=0 this reproduces
+    // the HEAD placement exactly (S->E for FE_PX, W->S for FE_PY).
+    const FE_PX = 0, FE_PY = 1;
+    const onFace = (f, cn, draw) => {
+      if (f === BR) draw(cn.S, cn.E);
+      else if (f === ((BR + 1) & 3)) draw(cn.W, cn.S);
+    };
+
+    let park, police, firesta, coal, solar, gas, wind, school, hospital, mayor, stadium, bset;
+    const r1 = [], r2 = [], r3 = [], c1 = [], c2 = [], c3 = [], i1 = [], i2 = [], i3 = [];
+
   // ---- park ----
   // G14: parameterized by season so the park's two standalone trees recolor
   // with the year (snow caps in winter, fall hues in autumn) — the isolated-
@@ -1029,11 +1062,10 @@ function buildSprites() {
       g.fillRect(ox - 20 + R() * 40, oy - 4 + R() * 12, 2, 2);
     }
   };
-  SPR.park = mkSprite(1, 1, 22, parkDraw("summer"));
+  park = mkSprite(1, 1, 22, parkDraw("summer"));
 
   /* ---- residential (5 variants per level) ---- */
   const NV = 5; // zone sprite variants per level
-  SPR.r1 = []; SPR.r2 = []; SPR.r3 = [];
   // G10: residential = warm brick/cream/terracotta. Facades are muted warm
   // greige/clay (hue 0-50, low saturation); the punch is reserved for the
   // terracotta roofs and warm trim. R_ROOF are the saturated roof caps.
@@ -1057,8 +1089,8 @@ function buildSprites() {
     drawTree(g, ox + 22, oy + 6, 8, 1, P, 0, sk === "autumn" ? 0.3 : 0);
   };
   for (let v = 0; v < NV; v++) {
-    SPR.r1.push(withJitter(mkSprite(1, 1, 30, r1Draw(v, "summer"))));
-    SPR.r2.push(withJitter(withNight(1, 1, 46, (g, ox, oy) => {
+    r1.push(withJitter(mkSprite(1, 1, 30, r1Draw(v, "summer"))));
+    r2.push(withJitter(withNight(1, 1, 46, (g, ox, oy) => {
       const base = r2Base[v];
       // G10: pale mid-rise deck top (keeps G9's roof luminance variety); the
       // warm identity comes from the terracotta coping cap below.
@@ -1079,7 +1111,7 @@ function buildSprites() {
       g.fillStyle = "#9fd3ef"; g.fillRect(cx + 6, cy + 5, 7, 3);
       roofClutter(g, cx + 2, cy - 2, 2, R);
     })));
-    SPR.r3.push(withJitter(withNight(1, 1, 82, (g, ox, oy) => {
+    r3.push(withJitter(withNight(1, 1, 82, (g, ox, oy) => {
       const base = r3Base[v];
       // G10: pale-cream brick tower under a saturated terracotta roof cap —
       // the hospital's #d8d5ca helipad stays a clear >= 12 distance from these
@@ -1105,13 +1137,12 @@ function buildSprites() {
   // G10: commercial = cool glass blues / teals / grays. Facades are muted
   // cool blue-grays (hue 180-260); the punch lives in the bright glass crowns
   // and the saturated cool storefront awnings.
-  SPR.c1 = []; SPR.c2 = []; SPR.c3 = [];
   const c1Base = ["#a9b3bc", "#b0bbc4", "#a7b3bc", "#acb7c0", "#b4bdc5"];
   const c2Base = ["#91a2b0", "#96a8b7", "#8c9fa7", "#92a4b7", "#9daebc"];
   const c3Glass = ["#546d84", "#4b6d7b", "#5a6e83", "#4d727d", "#606e84"];
   const C_ROOF = ["#79b0c8", "#7ec0c4", "#88b8cc", "#7ab4c6", "#8cbcce"];
   for (let v = 0; v < NV; v++) {
-    SPR.c1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
+    c1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
       const base = c1Base[v];
       const { W, S, E } = prism(g, ox, oy, 1, 1, 18, base);
       // storefront glass band + cool jewel-tone awning (trim punch). G10:
@@ -1123,7 +1154,7 @@ function buildSprites() {
       poly(g, [up(S, 13), up(E, 13), up(E, 17), up(S, 17)], aw);
       poly(g, [up(W, 13), up(S, 13), up(S, 17), up(W, 17)], shade(aw, 0.8));
     })));
-    SPR.c2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
+    c2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
       const base = c2Base[v];
       // G10: bright cool crown for roof-line punch over the muted facade
       const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base, { top: C_ROOF[v] });
@@ -1157,14 +1188,13 @@ function buildSprites() {
     // beacon tip offset from the anchor center, for the live blink pass —
     // set BEFORE withJitter so every value-jittered copy inherits it (G10)
     if (c3mast) c3spr.beacon = { x: -1.5, y: -(HH + 104) };
-    SPR.c3.push(withJitter(c3spr));
+    c3.push(withJitter(c3spr));
   }
 
   /* ---- industrial ---- */
   // G10: industrial = desaturated ochre / rust / concrete (saturation <= 0.35,
   // warm-neutral hue) — clearly grayer than the warm-brick residential so the
   // two never trade places, and the smokestacks stay an industrial-only mark.
-  SPR.i1 = []; SPR.i2 = []; SPR.i3 = [];
   const i1Base = ["#a39c90", "#9b968e", "#a79e8f", "#959089", "#a79e8d"];
   const i2Base = ["#88837b", "#847f79", "#8b847c", "#7f7d78", "#888176"];
   const i3Base = ["#757068", "#716f6c", "#79726a", "#6f6d69", "#77706c"];
@@ -1172,14 +1202,19 @@ function buildSprites() {
   // family saturated while the concrete facades stay grey (roofs/trim rule).
   const I_ROOF = ["#9a6a3c", "#8f6236", "#a06e3e", "#8a5e34", "#9c6a3a"];
   for (let v = 0; v < NV; v++) {
-    SPR.i1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
+    i1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
       const base = i1Base[v];
-      const { W, S, E } = prism(g, ox, oy, 1, 1, 20, base);
-      g.fillStyle = "#5a5148"; // big loading door on SE face
-      poly(g, [up(S, 2), up(E, 2), up(E, 14), up(S, 14)].map(p => [
-        p[0] * 0.5 + (S[0] + E[0]) / 4, p[1] * 0.5 + (S[1] + E[1]) / 4]), "#5a5148");
+      const cn = prism(g, ox, oy, 1, 1, 20, base);
+      // big loading door tagged to ONE world face (M32b) — plainer at the two
+      // orientations where that face rotates to an occluded back
+      onFace(FE_PX, cn, (p0, p1) => {
+        const fm = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+        g.fillStyle = "#5a5148";
+        poly(g, [up(p0, 2), up(p1, 2), up(p1, 14), up(p0, 14)].map(p => [
+          p[0] * 0.5 + fm[0] * 0.5, p[1] * 0.5 + fm[1] * 0.5]), "#5a5148");
+      });
     })));
-    SPR.i2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
+    i2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
       const base = i2Base[v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base, { top: I_ROOF[v] });
       windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
@@ -1190,7 +1225,7 @@ function buildSprites() {
         GLOWG.fillRect(ox - 11, N[1] - 49, 3, 3);
       }
     })));
-    SPR.i3.push(withJitter(withNight(1, 1, 74, (g, ox, oy) => {
+    i3.push(withJitter(withNight(1, 1, 74, (g, ox, oy) => {
       const base = i3Base[v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, { top: I_ROOF[v] });
       windows(g, up(W, 0), up(S, 0), 38, 2, 2, 0.35, "#ffd27f", "#20242c", GLOW_SODIUM);
@@ -1212,7 +1247,7 @@ function buildSprites() {
   /* ---- civic 2x2 buildings ---- */
   // Police precinct: raised massing + a comms-mast landmark clearing the
   // tower skyline, a blue shield roof glyph (minimap #88f) and a paved apron.
-  SPR.police = withNight(2, 2, 92, (g, ox, oy) => {
+  police = withNight(2, 2, 92, (g, ox, oy) => {
     civicApron(g, ox, oy, 2, 2);
     const HT = 58, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
     prismFrom(g, cn, HT, "#b9c4d4");
@@ -1232,16 +1267,18 @@ function buildSprites() {
 
   // Fire station: apparatus bays, a red-roofed hose tower landmark, a bright
   // red garage-door roof emblem (minimap #f55) and a paved apron.
-  SPR.firesta = mkSprite(2, 2, 64, (g, ox, oy) => {
+  firesta = mkSprite(2, 2, 64, (g, ox, oy) => {
     civicApron(g, ox, oy, 2, 2);
     const HT = 34, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
     prismFrom(g, cn, HT, "#c8574a");
-    // three cream apparatus-bay doors on the SE face
-    for (let k = 0; k < 3; k++) {
-      const t0 = 0.12 + k * 0.28, t1 = t0 + 0.2;
-      const p = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
-      poly(g, [up(p(t0), 3), up(p(t1), 3), up(p(t1), 18), up(p(t0), 18)], "#e8e2d2");
-    }
+    // three cream apparatus-bay doors tagged to the apparatus world face (M32b)
+    onFace(FE_PX, cn, (p0, p1) => {
+      for (let k = 0; k < 3; k++) {
+        const t0 = 0.12 + k * 0.28, t1 = t0 + 0.2;
+        const p = (t) => [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t];
+        poly(g, [up(p(t0), 3), up(p(t1), 3), up(p(t1), 18), up(p(t0), 18)], "#e8e2d2");
+      }
+    });
     poly(g, [up(W, 26), up(S, 26), up(S, 31), up(W, 31)], "#8c2c22");
     poly(g, [up(S, 26), up(E, 26), up(E, 31), up(S, 31)], "#a53328");
     // G9: deck + parapet + clutter behind the station front
@@ -1251,7 +1288,7 @@ function buildSprites() {
     garageEmblem(g, rx - 6, ry + 7);    // findable red roof glyph
   });
 
-  SPR.coal = withNight(2, 2, 78, (g, ox, oy) => {
+  coal = withNight(2, 2, 78, (g, ox, oy) => {
     const { W, S, E, N } = prism(g, ox, oy, 2, 2, 34, "#5c5c64");
     windows(g, up(S, 0), up(E, 0), 34, 2, 4, 0.5, "#ffb54e", "#20242c", GLOW_SODIUM);
     stack(g, ox - 18, N[1] - 26, 44, 10, true);
@@ -1260,7 +1297,7 @@ function buildSprites() {
     g.beginPath(); g.ellipse(S[0] + 14, S[1] - 40, 12, 6, 0, 0, 7); g.fill();
   });
 
-  SPR.solar = mkSprite(2, 2, 30, (g, ox, oy) => {
+  solar = mkSprite(2, 2, 30, (g, ox, oy) => {
     const { N, E, S, W } = prism(g, ox, oy, 2, 2, 10, "#8d97a4");
     // panel grid on the top face
     g.save();
@@ -1289,7 +1326,7 @@ function buildSprites() {
   {
     const gasRng = mulberry32(0x6A5C0A1);
     const prevRng = ART_RNG; ART_RNG = gasRng;
-    SPR.gas = withNight(2, 2, 66, (g, ox, oy) => {
+    gas = withNight(2, 2, 66, (g, ox, oy) => {
       const { W, S, E, N } = prism(g, ox, oy, 2, 2, 26, "#7d7360");
       windows(g, up(S, 0), up(E, 0), 26, 2, 5, 0.55, "#ffd27a", "#20242c", GLOW_SODIUM);
       // two short exhaust stacks rising off the back of the hall
@@ -1312,7 +1349,7 @@ function buildSprites() {
      A clean, low-output generator: a grassy pad carrying two white lattice-
      free turbine towers, each with a hub and three swept blades. No stack,
      no windows — zero smog. Uses mkSprite (no night bake) like solar. */
-  SPR.wind = mkSprite(2, 2, 88, (g, ox, oy) => {
+  wind = mkSprite(2, 2, 88, (g, ox, oy) => {
     const { N, E, S, W } = prism(g, ox, oy, 2, 2, 6, "#6f9e57");
     const turbine = (bx, baseY, h) => {
       // tapered tower
@@ -1340,7 +1377,7 @@ function buildSprites() {
 
   // School: red-brick block with a tall white bell-tower landmark, a cyan
   // book roof glyph (minimap #0cc), a small yard and a paved apron.
-  SPR.school = withNight(2, 2, 72, (g, ox, oy) => {
+  school = withNight(2, 2, 72, (g, ox, oy) => {
     civicApron(g, ox, oy, 2, 2);
     const HT = 32, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
     // G9: the brick red would glow neon at 1.3 — the roof drops to 1.1
@@ -1359,11 +1396,13 @@ function buildSprites() {
     g.fillStyle = "#6e6656";
     for (let k = 0; k < 18; k++) g.fillRect(gx - 44 + R() * 88, gy - 20 + R() * 40, 2, 1);
     g.restore();
-    // double doors on the SE face
-    const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
-    poly(g, [up(dm(0.42), 2), up(dm(0.58), 2), up(dm(0.58), 14), up(dm(0.42), 14)], "#e8e0d0");
-    g.strokeStyle = "#6b3020"; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(...up(dm(0.5), 2)); g.lineTo(...up(dm(0.5), 14)); g.stroke();
+    // double doors tagged to the entrance world face (M32b)
+    onFace(FE_PX, cn, (p0, p1) => {
+      const dm = (t) => [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t];
+      poly(g, [up(dm(0.42), 2), up(dm(0.58), 2), up(dm(0.58), 14), up(dm(0.42), 14)], "#e8e0d0");
+      g.strokeStyle = "#6b3020"; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(...up(dm(0.5), 2)); g.lineTo(...up(dm(0.5), 14)); g.stroke();
+    });
     // cyan open-book roof glyph on the front of the deck (findable)
     schoolBook(g, gx - 2, gy + 12);
     // tall white bell tower — the school's skyline landmark
@@ -1383,16 +1422,18 @@ function buildSprites() {
 
   // Hospital: white slab with a taller tower wing, a #d8d5ca helipad bearing
   // an iso "H", an iso red cross, and a paved apron.
-  SPR.hospital = withNight(2, 2, 96, (g, ox, oy) => {
+  hospital = withNight(2, 2, 96, (g, ox, oy) => {
     civicApron(g, ox, oy, 2, 2);
     const HT = 62, cn = insetCorners(ox, oy, 2, 2, 0.84), { W, S, E } = cn;
     prismFrom(g, cn, HT, "#e6e3da");
     windows(g, up(W, 0), up(S, 0), HT, 5, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
     windows(g, up(S, 0), up(E, 0), HT, 5, 4, 0.75, "#bfe0f2", "#20242c", GLOW_COOL);
-    // emergency canopy on SE face
-    const dm = (t) => [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t];
-    poly(g, [up(dm(0.3), 12), up(dm(0.7), 12), up(dm(0.7), 15), up(dm(0.3), 15)], "#c94040");
-    poly(g, [up(dm(0.38), 2), up(dm(0.62), 2), up(dm(0.62), 12), up(dm(0.38), 12)], "#9fd8e8");
+    // emergency canopy tagged to the entrance world face (M32b)
+    onFace(FE_PX, cn, (p0, p1) => {
+      const dm = (t) => [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t];
+      poly(g, [up(dm(0.3), 12), up(dm(0.7), 12), up(dm(0.7), 15), up(dm(0.3), 15)], "#c94040");
+      poly(g, [up(dm(0.38), 2), up(dm(0.62), 2), up(dm(0.62), 12), up(dm(0.38), 12)], "#9fd8e8");
+    });
     const [rx, ry] = roofDeckFrom(g, cn, HT, shade("#e6e3da", 0.82), "rgba(40,44,52,.7)");
     // helipad slab (#d8d5ca signature, G9) with a roof-plane white "H"
     const hp = [rx - 15, ry + 15];
@@ -1412,7 +1453,7 @@ function buildSprites() {
 
   /* ---- milestone rewards ---- */
   // Mayor's House: stately 1x1 manor with a flag and hedges
-  SPR.mayor = mkSprite(1, 1, 40, (g, ox, oy) => {
+  mayor = mkSprite(1, 1, 40, (g, ox, oy) => {
     diamondPath(g, ox, oy);
     g.fillStyle = "#5fae57"; g.fill();
     g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
@@ -1432,7 +1473,7 @@ function buildSprites() {
   });
 
   // Stadium: 2x2 bowl with a green pitch and floodlights
-  SPR.stadium = mkSprite(2, 2, 52, (g, ox, oy) => {
+  stadium = mkSprite(2, 2, 52, (g, ox, oy) => {
     const { N, E, S, W } = prism(g, ox, oy, 2, 2, 22, "#b8b2a4");
     const cx = (E[0] + W[0]) / 2, cy = (N[1] + S[1]) / 2 - 22;
     // concrete bowl rim
@@ -1470,28 +1511,46 @@ function buildSprites() {
   const winArr = (arr) => arr.map((b) => withJitter(makeWinter(b)));
   const seasonR1 = (sk) => { const a = []; for (let v = 0; v < NV; v++) a.push(withJitter(mkSprite(1, 1, 30, r1Draw(v, sk)))); return a; };
   const summerSet = {
-    r1: SPR.r1, r2: SPR.r2, r3: SPR.r3, c1: SPR.c1, c2: SPR.c2, c3: SPR.c3,
-    i1: SPR.i1, i2: SPR.i2, i3: SPR.i3, park: SPR.park,
-    police: SPR.police, firesta: SPR.firesta, coal: SPR.coal, solar: SPR.solar,
-    gas: SPR.gas, wind: SPR.wind,
-    school: SPR.school, hospital: SPR.hospital, mayor: SPR.mayor, stadium: SPR.stadium,
+    r1: r1, r2: r2, r3: r3, c1: c1, c2: c2, c3: c3,
+    i1: i1, i2: i2, i3: i3, park: park,
+    police: police, firesta: firesta, coal: coal, solar: solar,
+    gas: gas, wind: wind,
+    school: school, hospital: hospital, mayor: mayor, stadium: stadium,
   };
   const winterSet = {
     r1: seasonR1("winter"),
-    r2: winArr(SPR.r2), r3: winArr(SPR.r3),
-    c1: winArr(SPR.c1), c2: winArr(SPR.c2), c3: winArr(SPR.c3),
-    i1: winArr(SPR.i1), i2: winArr(SPR.i2), i3: winArr(SPR.i3),
+    r2: winArr(r2), r3: winArr(r3),
+    c1: winArr(c1), c2: winArr(c2), c3: winArr(c3),
+    i1: winArr(i1), i2: winArr(i2), i3: winArr(i3),
     park: mkSprite(1, 1, 22, parkDraw("winter")),
-    police: makeWinter(SPR.police), firesta: makeWinter(SPR.firesta),
-    coal: makeWinter(SPR.coal), solar: makeWinter(SPR.solar),
-    gas: makeWinter(SPR.gas), wind: makeWinter(SPR.wind),
-    school: makeWinter(SPR.school), hospital: makeWinter(SPR.hospital),
-    mayor: makeWinter(SPR.mayor), stadium: makeWinter(SPR.stadium),
+    police: makeWinter(police), firesta: makeWinter(firesta),
+    coal: makeWinter(coal), solar: makeWinter(solar),
+    gas: makeWinter(gas), wind: makeWinter(wind),
+    school: makeWinter(school), hospital: makeWinter(hospital),
+    mayor: makeWinter(mayor), stadium: makeWinter(stadium),
   };
   const autumnSet = Object.assign({}, summerSet, {
     r1: seasonR1("autumn"), park: mkSprite(1, 1, 22, parkDraw("autumn")),
   });
-  SPR.bset = { summer: summerSet, spring: summerSet, autumn: autumnSet, winter: winterSet };
+  bset = { summer: summerSet, spring: summerSet, autumn: autumnSet, winter: winterSet };
+
+    ART_RNG = facingPrev; // restore the shared stream (a no-op for facing 0)
+    return {
+      bset,
+      fams: { park, r1, r2, r3, c1, c2, c3, i1, i2, i3, police, firesta, coal,
+              solar, gas, wind, school, hospital, mayor, stadium },
+    };
+  } // end bakeBuildingSet
+
+  // Boot: bake facing 0 only (boot time + default memory unchanged). Facing 0
+  // uses the shared 0x5EED stream, so its spritesheet is byte-identical to HEAD.
+  // Expose the family sprites as SPR.<fam> (UI toolbar / postcard read these)
+  // and SPR.bset (facing-0 set). Facings 1..3 bake lazily via SPR.bakeFacing().
+  const facing0 = bakeBuildingSet(0);
+  Object.assign(SPR, facing0.fams);
+  SPR.bset = facing0.bset;
+  SPR.facings = [facing0.bset];
+  SPR.bakeFacing = (r) => SPR.facings[r] || (SPR.facings[r] = bakeBuildingSet(r).bset);
 
   /* ---- night-light sprites (M10) ----
      Baked once here; renderFrame draws them additively ("lighter") after the
@@ -1608,9 +1667,14 @@ function spriteFor(city, i) {
   const t = city.over[i];
   // G14: buildings pick a season set — winter is snow-capped/cool-graded,
   // autumn recolors the tree-bearing amenities, summer & spring are the base
-  // bake. SPR.bset is built at boot; this is a pure lookup, never a rebuild.
+  // bake. M32b: pick the building set for the active VIEW ROTATION first —
+  // facing 0 is baked at boot; facings 1..3 bake lazily on first visit to that
+  // rotation and cache (a one-time hitch), so a rotated view shows different
+  // building sides. An optional billboard pref pins facing 0 at every rotation.
   const season = seasonOf(city.month);
-  const B = (SPR.bset && SPR.bset[season]) || SPR.bset.summer;
+  const bill = (typeof UI !== "undefined" && UI.prefs && UI.prefs.billboard);
+  const F = SPR.bakeFacing(bill ? 0 : (cam.r | 0));
+  const B = F[season] || F.summer;
   // developed zones: variant is a pure function of varnt[] (mod family size).
   // G10: pick a value-jittered day copy by a 4-colouring of (x, y) so two
   // orthogonally adjacent same-variant towers never render pixel-identical.

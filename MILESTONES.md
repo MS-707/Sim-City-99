@@ -6,12 +6,12 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M28 — Arcologies & wonder landmarks** *(next up)*: the four SC2K
-  arcologies (Plymouth/Forest/Darco/Launch) + placeable wonder landmarks
-  (Liberty/Eiffel/pyramid homages) as tier-unlocked multi-tile OV.*
-  megastructures — big fixed pop/jobs, self-powered, night-lit; landmarks pump
-  land value over a radius. Proposal-stage — design + criteria set fresh by an
-  independent reviewer.
+- [ ] **M29 — Expanded disaster roster** *(next up)*: earthquake (epicenter
+  ripple → rubble + fires), coastal flood (spreads inland from water), riot
+  (spawns on the crime hotspot, suppressed by police coverage), and a kaiju
+  monster — each reading a sim system you already maintain, with its own sprite
+  + ticker flavor and the yearly disaster counter. Proposal-stage — design +
+  criteria set fresh by an independent reviewer.
 
 ## Open
 
@@ -19,11 +19,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M29 — Expanded disaster roster**: earthquake (epicenter ripple → rubble
-  + fires), coastal flood (spreads inland from water), riot (spawns on the
-  crime hotspot, suppressed by police coverage), and a kaiju monster — each
-  reading a sim system you already maintain, with its own sprite + ticker
-  flavor and the yearly disaster counter.
 - [ ] **M30 — City history charts & trend graphs**: a Win95 Graphs window
   plotting pop / cash flow / tax / pollution / crime / land value over time
   (1yr / 10yr / 100yr zoom) on canvas, backed by the almanac records[] plus a
@@ -38,6 +33,24 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M28 — Arcologies & wonder landmarks**: four SC2K arcologies (Plymouth/
+  Forest/Darco/Launch, OV 22–25) and three wonder landmarks (Statue/Eiffel/
+  Pyramid, OV 26–28) as large multi-tile buildings (3×3/4×4) on the existing
+  OV_SIZE/anc[] machinery — `place`/`bulldoze` were already size-agnostic.
+  Arcologies carry a **fixed pop/jobs counted once per structure** (a 4×4 Launch
+  adds 3000 pop once, not ×16), pushing the city up the tier ladder, and are
+  **self-powered power islands** (four `!isMega` guards mirror the plant/water
+  exclusions: lit but zero grid demand, never conduct or get misclassified by
+  the `t >= OV.ZR` idioms). Landmarks stamp a land-value pride radius folded into
+  recomputeMaps — **fully revert-safe** (recomputeMaps rebuilds landv from
+  scratch, so bulldozing a landmark leaves no residual). Endgame arcologies are
+  tier-gated; sprites join the per-facing bake so rotation + night lighting work
+  for free (the render path needed no change). Save stays v10 (ids ride over[]/
+  anc[]). Verified 9/9 + a 5-agent panel (5/5): census-once, zero power demand,
+  land-value stamp+revert, tier gate, multi-tile placement/one-bulldoze, save
+  round-trip, and a no-arcology city byte-identical to the pre-M28 baseline.
+  Zero console errors.
 
 - [x] **M27 — Neighboring cities & regional connections**: the four map edges
   gain named neighbor cities whose names/archetypes/prices/dispositions are a

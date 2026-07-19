@@ -1218,6 +1218,20 @@ function buildSprites() {
       const base = i2Base[v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base, { top: I_ROOF[v] });
       windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
+      // M32b: the SW screen face was bare grey at every rotation (HEAD only lit
+      // the SE face). Light it too so both screen-visible faces read populated,
+      // like the box families. At facing 0 (BR===0) the shared 0x5EED stream is
+      // live, so draw this newly-lit face from a forked seed swapped in/out (the
+      // gasRng idiom, ~l.1340): the extra panes never consume the shared ART_RNG,
+      // so every OTHER sprite in the facing-0 bake stays byte-identical to HEAD
+      // and only this previously-blank face gains pixels. Facings 1..3 already
+      // draw from the forked fseed, so they are left exactly as before.
+      {
+        const swPrev = ART_RNG;
+        if (BR === 0) ART_RNG = mulberry32((0x1252A7 ^ (v * 0x9E3779B1)) >>> 0);
+        windows(g, up(W, 0), up(S, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
+        ART_RNG = swPrev;
+      }
       stack(g, ox - 10, N[1] - 24, 22, 6);
       groundPool(ox + 8, oy + 4, 15, 6, GLOW_SODIUM); // night-shift yard flood
       if (GLOWG) { // stack beacon stays with the window glow
@@ -1229,6 +1243,19 @@ function buildSprites() {
       const base = i3Base[v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, { top: I_ROOF[v] });
       windows(g, up(W, 0), up(S, 0), 38, 2, 2, 0.35, "#ffd27f", "#20242c", GLOW_SODIUM);
+      // M32b: mirror of i2 — HEAD only lit the SW face, leaving the SE screen
+      // face bare grey at every rotation. Light it too so both screen-visible
+      // faces read populated. At facing 0 (BR===0) the shared 0x5EED stream is
+      // live, so draw this face from a forked seed swapped in/out (gasRng idiom)
+      // — the extra panes never consume the shared ART_RNG, so the rest of the
+      // facing-0 bake stays byte-identical to HEAD and only this previously-blank
+      // face gains pixels. Facings 1..3 draw from the forked fseed as before.
+      {
+        const sePrev = ART_RNG;
+        if (BR === 0) ART_RNG = mulberry32((0x3E9B11 ^ (v * 0x85EBCA77)) >>> 0);
+        windows(g, up(S, 0), up(E, 0), 38, 2, 2, 0.35, "#ffd27f", "#20242c", GLOW_SODIUM);
+        ART_RNG = sePrev;
+      }
       stack(g, ox - 12, N[1] - 34, 30, 7);
       stack(g, ox + 2, N[1] - 30, 24, 6);
       g.fillStyle = "#a8b2ba"; // storage tank
@@ -1673,7 +1700,7 @@ function spriteFor(city, i) {
   // building sides. An optional billboard pref pins facing 0 at every rotation.
   const season = seasonOf(city.month);
   const bill = (typeof UI !== "undefined" && UI.prefs && UI.prefs.billboard);
-  const F = SPR.bakeFacing(bill ? 0 : (cam.r | 0));
+  const F = SPR.bakeFacing(bill ? 0 : (cam.r & 3));
   const B = F[season] || F.summer;
   // developed zones: variant is a pure function of varnt[] (mod family size).
   // G10: pick a value-jittered day copy by a 4-colouring of (x, y) so two

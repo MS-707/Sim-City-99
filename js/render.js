@@ -411,7 +411,12 @@ function renderFrame(city, uiState, clearBG) {
       const i = y * MAP + x;
       const ov = city.over[i];
       const t = city.terr[i];
-      if (ov === OV.NONE && !city.fire[i] && t !== TERR.FOREST) continue;
+      // M25: a bare tile still draws if it carries a rail feature (track/station,
+      // or a subway vent while the transit overlay is on) — otherwise skip it.
+      const rl = city.rail[i];
+      const railVisible = rl === RL.TRACK || rl === RL.STATION ||
+        (rl === RL.SUB && typeof UI !== "undefined" && UI.mapMode === "transit");
+      if (ov === OV.NONE && !city.fire[i] && t !== TERR.FOREST && !railVisible) continue;
       const wx = worldX(x, y), wy = worldY(x, y);
       if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
 
@@ -522,6 +527,28 @@ function renderFrame(city, uiState, clearBG) {
             }
           }
         }
+      }
+
+      // M25: rail plane — drawn AFTER over[] so surface track sits on top of the
+      // street (a grade crossing) and never hides behind a tower. Subways are
+      // invisible except a vent grate in the transit overlay; stations are a
+      // depot sprite that lights up when live and shows a no-power bolt otherwise.
+      if (rl === RL.TRACK) {
+        const rs = SPR.rail[rot4(railMask(city, i), cam.r)];
+        ctx.drawImage(rs.c, wx - rs.ox, wy - rs.oy);
+      } else if (rl === RL.STATION) {
+        const ss = SPR.station;
+        ctx.drawImage(ss.c, wx - ss.ox, wy - ss.oy);
+        if (ng) {
+          nightPunch(ss, wx, wy);
+          if (ss.night && city.stationLive[i]) nightAdd(ss.night, wx, wy);
+        }
+        // no-power bolt on an inert station (unpowered or unlinked)
+        if (blink && !city.stationLive[i])
+          ctx.drawImage(SPR.zap.c, wx - SPR.zap.ox, wy - SPR.zap.oy - 4);
+      } else if (rl === RL.SUB && typeof UI !== "undefined" && UI.mapMode === "transit") {
+        const vs = SPR.subwayVent;
+        ctx.drawImage(vs.c, wx - vs.ox, wy - vs.oy);
       }
 
       // fire on this tile
@@ -1296,6 +1323,18 @@ function renderMinimap(city, mode) {
       else if (city.watered[i]) {
         const p = Math.max(0.35, city.waterPressure); // strained mains read darker
         col = `rgb(${20 * p | 0},${(120 + city.watered[i] * 0.5) * p | 0},${(150 + city.watered[i] * 0.4) * p | 0})`;
+      } else col = minimapDim(minimapCityCol(city, i), 0.35);
+    } else if (mode === "transit") {
+      // M25: the invisible subway made visible — surface track steel-blue, subway
+      // dim indigo, stations a white dot (cyan when live), zones tinted by railCov
+      // so the catchment reads; everything else keeps dimmed City-mode context.
+      const rl = city.rail[i];
+      if (rl === RL.STATION) col = city.stationLive[i] ? "#2ff" : "#fff";
+      else if (rl === RL.TRACK) col = "#6cf";
+      else if (rl === RL.SUB) col = "#55f";
+      else if (city.railCov[i]) {
+        const v = city.railCov[i];
+        col = `rgb(${20 + v * 0.3 | 0},${60 + v * 0.5 | 0},${90 + v * 0.4 | 0})`;
       } else col = minimapDim(minimapCityCol(city, i), 0.35);
     } else if (mode === "dist") {
       const dc = city.district[i];

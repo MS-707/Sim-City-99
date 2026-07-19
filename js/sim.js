@@ -35,6 +35,17 @@ const OV = {
   PIPE: 19, WATERTOWER: 20, PUMP: 21,
 };
 
+// M25: RAIL — a THIRD network, but on a SEPARATE PLANE (city.rail, a Uint8Array)
+// rather than in over[]. This is the load-bearing decision: over[] byte values
+// never change, so no OV id / >= OV.ZR / conducts() / road-predicate site sees a
+// new value. A city with rail produces the EXACT same over[]/power/access/traffic
+// (before diversion)/pollution/land-value maps as the identical city with the
+// rail plane zeroed — rail only ADDS the ridership diversion on top.
+//   TRACK   surface rail (visible; can share a tile with a road = a grade crossing)
+//   SUB     subway (invisible except in the transit overlay + vents; runs under anything)
+//   STATION 1x1 rider magnet + network node + upkeep unit; bridges surface<->subway
+const RL = { NONE: 0, TRACK: 1, SUB: 2, STATION: 3 };
+
 // footprint (w,h) per overlay type
 const OV_SIZE = {
   [OV.POLICE]: 2, [OV.FIRESTA]: 2, [OV.COAL]: 2, [OV.SOLAR]: 2,
@@ -106,6 +117,15 @@ const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120, [OV.GAS]: 450, [OV.WIND]: 8
    first-pass balance knobs: single named constants, none touch the save format. */
 const WATER_CAP = { [OV.WATERTOWER]: 150, [OV.PUMP]: 400 };
 const WATER_REACH = 3;
+
+/* ---- rail / transit tuning (M25) ----
+   RAIL_STATION_R  manhattan catchment radius of a live station's ridership
+                   draw (cheaper than police's 12; scaled by transit funding).
+   RAIL_MAX_SHARE  a station diverts at most this fraction of a served zone's
+                   road trips — an arterial near a line COOLS but never fully
+                   empties (the cap the compose constraint pins at <= 0.60). */
+const RAIL_STATION_R = 7;
+const RAIL_MAX_SHARE = 0.60;
 const WATER_LABEL = { [OV.WATERTOWER]: "water tower", [OV.PUMP]: "water pump" };
 const PLANT_PRIME_AGE = 30;   // full nameplate through this age
 const PLANT_EOL_AGE   = 45;   // decayed to the floor by here
@@ -130,6 +150,7 @@ const COST = {
   police: 500, firesta: 500, coal: 3000, solar: 5000,
   gas: 4500, wind: 2500, // M19
   pipe: 8, watertower: 500, pump: 2000, // M24: water network
+  rail: 20, subway: 45, station: 300, // M25: rail network (station is the pricey node)
   school: 400, hospital: 600,
   mayor: 0, stadium: 500, // milestone rewards — gifts (or nearly so)
 };
@@ -145,7 +166,10 @@ const TIERS = [
 ];
 
 // reward tools gated behind a minimum tier (index into TIERS)
-const TOOL_TIER = { mayor: 2, stadium: 3 }; // Town / City
+// M25: mass transit is gated behind Town (tier 2) — the city "grows into" rail,
+// matching the mayor/stadium reward-unlock pacing. place() already refuses a
+// tool with TOOL_TIER>tier as {ok:false,reason:"locked"}, and the toolbar dims it.
+const TOOL_TIER = { mayor: 2, stadium: 3, rail: 2, subway: 2, station: 2 }; // Town / City
 
 /* ---- city ordinances (M22) ----
    Citywide policy booleans the mayor toggles from the #dlg-ordinances panel.
@@ -380,6 +404,19 @@ class City {
     this.watered = new Uint8Array(n);
     this._waterReach = new Uint8Array(n);
     this.waterSupply = 0; this.waterDemand = 0; this.waterPressure = 1;
+    // M25: RAIL — the ONE new serialized field (rail[]). Everything else here is
+    // DERIVED and rebuilt on load like access/traffic/coverage: railNet (flood
+    // component id, -1=none), stationLive (1 iff a powered station on a >=2-station
+    // component), railCov (0..255 ridership catchment). railRiders (trips/mo
+    // diverted, for UI), railDirty (mirrors powerDirty), metroOpened (one-time
+    // ticker gate) are all ephemeral scalars.
+    this.rail        = new Uint8Array(n); // RL.* — the SEPARATE rail plane
+    this.railNet     = new Int32Array(n).fill(-1);
+    this.stationLive = new Uint8Array(n);
+    this.railCov     = new Uint8Array(n);
+    this.railRiders  = 0;
+    this.railDirty   = false;
+    this.metroOpened = false;
     this.access  = new Uint8Array(n);   // 1 = road within reach
     this.fire    = new Uint8Array(n);   // burning ticks remaining
     this.unpow   = new Uint8Array(n);   // consecutive unpowered growth passes
@@ -411,7 +448,7 @@ class City {
     this.taxRate = 7;               // percent
     // M23: per-department funding levels, 0..100 (% of full funding).
     // A fresh city funds everything at 100%. Serialized in save v7.
-    this.funding = { police: 100, fire: 100, roads: 100, edu: 100, health: 100 };
+    this.funding = { police: 100, fire: 100, roads: 100, edu: 100, health: 100, transit: 100 };
     this.roadWear = new Uint8Array(n); // M23: road wear 0..255 (save v7)
     this.month = 0; this.year = 1997;
     this.tickCount = 0;
@@ -422,7 +459,7 @@ class City {
     this.history = { pop: [], funds: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
-      dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0, water: 0 } }; // M24: water upkeep
+      dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0, water: 0, transit: 0 } }; // M24 water / M25 transit upkeep
     this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
     this.disastersEnabled = true;
     this.disaster = null;           // {kind:'tornado'|'ufo', x, y, ticks}
@@ -495,6 +532,20 @@ class City {
       if (this.terr[i] !== TERR.GRASS) return false;
       return this.over[i] === OV.NONE || this.over[i] === OV.RUBBLE;
     }
+    // M25: rail-plane tools validate against city.rail, NEVER over[] — dispatched
+    // here (before the over[] footprint loop) exactly like the waterfill early-out.
+    // toolOverlay() returns OV.NONE for these, so the generic loop would wrongly
+    // refuse a station on empty land etc.
+    if (tool === "rail" || tool === "subway" || tool === "station") {
+      if (!this.inMap(x, y)) return false;
+      const i = this.idx(x, y);
+      if (this.rail[i] !== RL.NONE) return false;         // one rail feature per tile
+      if (tool === "subway") return true;                 // tunnels under ANY over[]/terr (incl. water)
+      if (tool === "station")                             // 1x1 magnet: empty, non-water land only
+        return this.over[i] === OV.NONE && this.terr[i] !== TERR.WATER;
+      // surface rail (TRACK): bare ground, or a grade crossing on a road; water OK (a bridge)
+      return this.over[i] === OV.NONE || this.over[i] === OV.ROAD || this.over[i] === OV.WIREROAD;
+    }
     const s = sizeOf(toolOverlay(tool));
     for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
       const X = x + dx, Y = y + dy;
@@ -533,8 +584,8 @@ class City {
 
   toolCost(tool, x, y) {
     let c = COST[tool] ?? 0;
-    if ((tool === "road" || tool === "wire") && this.inMap(x, y) &&
-        this.terr[this.idx(x, y)] === TERR.WATER) c *= 5; // bridges cost more
+    if ((tool === "road" || tool === "wire" || tool === "rail") && this.inMap(x, y) &&
+        this.terr[this.idx(x, y)] === TERR.WATER) c *= 5; // bridges cost more (surface rail spans water too)
     return c;
   }
 
@@ -544,6 +595,18 @@ class City {
     if (!this.canPlace(tool, x, y)) return { ok: false, reason: "blocked" };
     const cost = this.toolCost(tool, x, y);
     if (this.funds < cost) return { ok: false, reason: "funds" };
+    // M25: rail-plane tools write city.rail (never over[]). 1x1, no anc bookkeeping.
+    // A rail build sets railDirty (NOT powerDirty) — the power grid is unchanged.
+    if (tool === "rail" || tool === "subway" || tool === "station") {
+      const i = this.idx(x, y);
+      this.rail[i] = tool === "rail" ? RL.TRACK : tool === "subway" ? RL.SUB : RL.STATION;
+      this.funds -= cost;
+      this.railDirty = true;
+      this.devRev++;
+      if (tool === "station")
+        return { ok: true, cost, hint: "🚉 Station built — link it to another by rail to open the line." };
+      return { ok: true, cost };
+    }
     const type = toolOverlay(tool);
     if (tool === "tree") {
       const i = this.idx(x, y);
@@ -556,6 +619,7 @@ class City {
       const i = this.idx(x, y);
       this.terr[i] = TERR.WATER; this.over[i] = OV.NONE; // clears rubble
       this.lvl[i] = 0; this.anc[i] = -1; this.varnt[i] = 0;
+      if (this.rail[i] !== RL.NONE) { this.rail[i] = RL.NONE; this.railDirty = true; } // M25: flooding leaves no ghost line
       this.funds -= cost;
       this.powerDirty = true; // water blocks conduction & road access
       this.terrRev++;
@@ -588,6 +652,20 @@ class City {
   bulldoze(x, y) {
     if (!this.inMap(x, y)) return { ok: false, reason: "blocked" };
     let i = this.idx(x, y);
+    // M25 PEEL RULE: rail is always removed LAST. When something still sits on
+    // over[] (a zone, road, building), the normal path below razes THAT and
+    // leaves any subway/track beneath intact; only once over[] is bare does a
+    // bulldoze clear the exposed rail feature. So razing a zone over a subway is
+    // a two-step removal (zone first, tunnel second), and a grade crossing keeps
+    // its ROAD/WIREROAD over[] value while its TRACK is peeled separately.
+    if (this.over[i] === OV.NONE && this.rail[i] !== RL.NONE) {
+      if (this.funds < COST.bulldoze) return { ok: false, reason: "funds" };
+      this.rail[i] = RL.NONE;
+      this.funds -= COST.bulldoze;
+      this.railDirty = true;
+      this.devRev++;
+      return { ok: true, cost: COST.bulldoze };
+    }
     if (this.over[i] === OV.NONE && this.terr[i] !== TERR.FOREST)
       return { ok: false, reason: "nothing" };
     if (this.funds < COST.bulldoze) return { ok: false, reason: "funds" };
@@ -854,6 +932,90 @@ class City {
     }
   }
 
+  /* ---------- rail / transit network (M25) ----------
+     Deterministic, no RNG. MUST run AFTER recomputePower() (it READS powered[]
+     without editing it) and BEFORE recomputeTraffic() (which consumes railCov).
+     Rebuilds every derived rail field from the rail[] plane:
+       1. one O(n) ascending-index 4-connectivity flood-fill (explicit Int32
+          stack, never Set/Map order) assigns component ids to rail!=NONE cells;
+          TRACK/SUB/STATION all conduct, so a STATION fuses an adjacent surface
+          segment with an adjacent subway segment — that is how stations "link
+          modes." Per-component STATION count is tallied.
+       2. a station is LIVE iff it is powered by ADJACENCY (powered[i] || a
+          powered 4-neighbor — NOT the over[] flood, which never powers a plane
+          station) AND its component holds >= 2 stations.
+       3. catchment stamp (stampCoverage's body, gated on stationLive) scaled by
+          transit funding f: f<=0 stamps nothing (a real monotonic lever).
+       4. one-time "Metro is open" ticker, gated by metroOpened so it fires once
+          and never on load (recomputeRail(true) suppresses the message). */
+  recomputeRail(silent) {
+    const n = this.over.length;
+    this.railNet.fill(-1);
+    this.stationLive.fill(0);
+    this.railCov.fill(0);
+    // 1. component flood-fill (ascending scan; STATION count per component)
+    const comp = [];                                    // comp[id] = station count
+    const stack = this._railStack || (this._railStack = new Int32Array(n));
+    let cid = 0;
+    for (let s = 0; s < n; s++) {
+      if (this.rail[s] === RL.NONE || this.railNet[s] !== -1) continue;
+      let sp = 0, stations = 0;
+      stack[sp++] = s; this.railNet[s] = cid;
+      while (sp > 0) {
+        const i = stack[--sp];
+        if (this.rail[i] === RL.STATION) stations++;
+        const x = i % MAP, y = (i / MAP) | 0;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const j = this.idx(X, Y);
+          if (this.rail[j] !== RL.NONE && this.railNet[j] === -1) {
+            this.railNet[j] = cid; stack[sp++] = j;
+          }
+        }
+      }
+      comp[cid++] = stations;
+    }
+    // 2. station power by ADJACENCY, on a >=2-station component
+    let anyLive = false;
+    for (let i = 0; i < n; i++) {
+      if (this.rail[i] !== RL.STATION) continue;
+      let powHere = this.powered[i] === 1;
+      if (!powHere) {
+        const x = i % MAP, y = (i / MAP) | 0;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (this.inMap(X, Y) && this.powered[this.idx(X, Y)]) { powHere = true; break; }
+        }
+      }
+      if (powHere && comp[this.railNet[i]] >= 2) { this.stationLive[i] = 1; anyLive = true; }
+    }
+    // 3. ridership catchment (stampCoverage shape, gated on stationLive, scaled
+    //    by transit funding). f<=0 => zero coverage AND (via deptCosts) zero upkeep.
+    const f = this.funding.transit / 100;
+    if (anyLive && f > 0) {
+      const R = Math.round(RAIL_STATION_R * (0.4 + 0.6 * f));
+      for (let i = 0; i < n; i++) {
+        if (!this.stationLive[i]) continue;
+        const x = i % MAP, y = (i / MAP) | 0;
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          const d = Math.abs(dx) + Math.abs(dy);
+          if (d > R) continue;
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const j = this.idx(X, Y);
+          this.railCov[j] = Math.max(this.railCov[j], Math.min(255, Math.round((R - d) * 18 * f)));
+        }
+      }
+    }
+    // 4. one-time "Metro is open" milestone
+    if (!this.metroOpened && anyLive) {
+      this.metroOpened = true;
+      if (!silent)
+        this.pushMsg("🚇 The Metro is open, Mayor! Commuters leave the car at home.");
+    }
+  }
+
   // ---------- traffic ----------
   // nearest road tile within manhattan distance 3 (matches access BFS reach)
   nearestRoad(i) {
@@ -891,12 +1053,20 @@ class City {
     const n = MAP * MAP;
     const load = this._trafficLoad || (this._trafficLoad = new Float32Array(n));
     load.fill(0);
+    this.railRiders = 0; // M25: trips/mo diverted onto rail this pass (UI only)
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       if ((t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0) continue;
       // M22: Carpool Incentive scales trips at the SOURCE (trafficMul), so fewer
       // trips deposit everywhere the random walk lands — no 2nd pass. 1 when off.
-      const trips = (4 + this.lvl[i] * 9) * this.ordMods.trafficMul; // busier at higher development
+      const baseTrips = (4 + this.lvl[i] * 9) * this.ordMods.trafficMul; // busier at higher development
+      // M25: a served zone diverts up to min(RAIL_MAX_SHARE, railCov/255) of its
+      // trips onto rail — capped, never zeroing. This scales a DETERMINISTIC map
+      // (railCov) BEFORE the reservoir walk, so the sole RNG (the walk) is
+      // untouched and two runs from the same seed + same rail edits are identical.
+      const share = this.railCov[i] ? Math.min(RAIL_MAX_SHARE, this.railCov[i] / 255) : 0;
+      const trips = baseTrips * (1 - share);
+      this.railRiders += baseTrips * share;
       let cur = this.nearestRoad(i);
       if (cur < 0) continue;
       let prev = -1;
@@ -1425,9 +1595,14 @@ class City {
      dialog for its live per-department projection. */
   deptCosts() {
     let roads = 0, wires = 0, police = 0, fireSt = 0, schools = 0,
-        hospitals = 0, plants = 0, towers = 0, pumps = 0, pipeTiles = 0;
+        hospitals = 0, plants = 0, towers = 0, pumps = 0, pipeTiles = 0,
+        surface = 0, subway = 0, stations = 0; // M25 rail-plane tallies
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
+      // M25: rail rides a separate plane — tally it alongside the over[] scan
+      if (this.rail[i] === RL.TRACK) surface++;
+      else if (this.rail[i] === RL.SUB) subway++;
+      else if (this.rail[i] === RL.STATION) stations++;
       if (t === OV.ROAD || t === OV.WIREROAD) roads++; // M26: a crossing is counted as road infrastructure
       else if (t === OV.WIRE) wires++;
       else if (t === OV.PIPE) pipeTiles++;                              // M24
@@ -1449,6 +1624,10 @@ class City {
       plants: plants * 40,
       // M24: flat water-network upkeep (no funding slider — mirrors "plants*40").
       water:  Math.round(towers * 15 + pumps * 40 + pipeTiles * 0.15),
+      // M25: transit upkeep, scaled by funding.transit. Because recomputeRail
+      // ALSO scales catchment by f.transit, cutting Transit funding shrinks
+      // ridership AND cost monotonically — a genuine tradeoff (police/fire idiom).
+      transit: Math.round((surface * 0.3 + subway * 0.5 + stations * 20) * f.transit / 100),
     };
   }
 
@@ -1460,6 +1639,7 @@ class City {
     const serviceCost = dc.police + dc.fire + dc.edu + dc.health;
     const plantCost = dc.plants;
     const waterCost = dc.water; // M24: flat water-network upkeep
+    const transitCost = dc.transit; // M25: rail/subway/station upkeep (funding-scaled)
     // ---- debt service (M13) ----
     // Each active bond charges one payment per month rollover. The payment is
     // the fixed amortized `monthly` stamped at issue (annuity formula — see
@@ -1488,15 +1668,15 @@ class City {
     // M22: ordinance costs/revenue — O(1) over the registry with the live
     // pop/comJobs/resTiles cached by recomputeDemand (run earlier this tick).
     const ob = this.ordinanceBudget();
-    const net = taxes - roadCost - serviceCost - plantCost - waterCost - debt + ob.net;
+    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - debt + ob.net;
     this.funds += net;
     this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost,
-      water: waterCost, debt, net, // M24: water upkeep line
+      water: waterCost, transit: transitCost, debt, net, // M24 water / M25 transit upkeep lines
       // M22: the ordinance line (net = revenue - cost) charged this month
       ord: ob.net, ordCost: ob.cost, ordRev: ob.rev,
       // M23: the per-department breakdown actually charged this month
       dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
-              edu: dc.edu, health: dc.health, water: dc.water } };
+              edu: dc.edu, health: dc.health, water: dc.water, transit: dc.transit } };
     if (this.funds < 0) this.pushMsg("💸 The city is BROKE. Raise taxes or cut back, Mayor!");
     this.history.pop.push(this.pop);
     this.history.funds.push(this.funds);
@@ -1629,11 +1809,17 @@ class City {
       if (this.tickCount % 8 === 0)
         this.pushMsg(Y2K_LINES[(Math.random() * Y2K_LINES.length) | 0]);
     }
-    if (this.powerDirty || this.tickCount % 10 === 0) {
+    // M25: capture the refresh decision BEFORE recomputePower() clears powerDirty.
+    // Stations read powered[], so recomputeRail runs AFTER power and BEFORE
+    // traffic; a pure rail build sets only railDirty (power unchanged) and reads
+    // the still-valid powered[]. recomputeTraffic reads railCov read-only.
+    const doPower = this.powerDirty || this.tickCount % 10 === 0;
+    if (doPower) {
       this.recomputePower();
       this.recomputeAccess();
       this.recomputeWater(); // M24: AFTER power — a pump reads fresh powered[]
     }
+    if (doPower || this.railDirty) { this.recomputeRail(); this.railDirty = false; }
     if (this.tickCount % 5 === 0) this.recomputeTraffic();
     if (this.tickCount % 14 === 0) this.recomputeMaps();
     this.recomputeDemand();
@@ -1807,6 +1993,13 @@ class City {
       terr: Array.from(this.terr), over: Array.from(this.over),
       lvl: Array.from(this.lvl), varnt: Array.from(this.varnt),
       anc: Array.from(this.anc),
+      // M25 (still save v9): the rail plane is the SOLE new authored transit
+      // state — the physical network (surface track / subway / stations) lives
+      // entirely in it. railNet/stationLive/railCov/railRiders and the funding.
+      // transit lever ride along (funding is serialized wholesale below); all
+      // are DERIVED and rebuilt on load. A v9-from-before-M25 save simply lacks
+      // this field and loads with rail all-zero (zero behavioral drift).
+      rail: Array.from(this.rail),
       // M21 (save v9): the per-tile district layer (mostly zeros, same idiom/
       // footprint as over/lvl/roadWear) plus the tiny district metadata list.
       // distRev + all districtStats are derived and NOT serialized (same policy
@@ -1836,7 +2029,9 @@ class City {
     // M23 (save v7): department funding + road wear. A v6-or-earlier save has
     // neither field: every department loads at the 100% default and all roads
     // load pristine (wear 0) — the city keeps playing exactly as before.
-    c.funding = Object.assign({ police: 100, fire: 100, roads: 100, edu: 100, health: 100 },
+    // M25: funding.transit joins the default map — a legacy save with no transit
+    // key loads at 100% (zero behavioral drift) since funding is merged wholesale.
+    c.funding = Object.assign({ police: 100, fire: 100, roads: 100, edu: 100, health: 100, transit: 100 },
       (d.funding && typeof d.funding === "object") ? d.funding : {});
     if (Array.isArray(d.roadWear)) c.roadWear.set(d.roadWear);
     // M19 (save v8): restore per-anchor plant build years. A v7-or-earlier
@@ -1857,6 +2052,11 @@ class City {
     if (Array.isArray(d.district)) c.district.set(d.district);
     c.districts = Array.isArray(d.districts)
       ? d.districts.map((o) => Object.assign({}, o)) : [];
+    // M25: restore the rail plane (the sole authored transit field). A save with
+    // no rail field leaves the ctor's all-zero rail[] — railCov stays all-zero,
+    // recomputeTraffic's share is always 0, and traffic behaves exactly as before.
+    // railNet/stationLive/railCov are DERIVED — rebuilt by recomputeRail below.
+    if (Array.isArray(d.rail)) c.rail.set(d.rail);
     // M22 (still save v9): restore the enacted-ordinance map. A v9-from-before-
     // M22 save (or any pre-v9 save) has no ordinances field => {} => everything
     // off => ordMods identity => the city plays byte-identically to pre-M22.
@@ -1896,6 +2096,13 @@ class City {
     // (supply 0/demand 0 → the demand?…:1 branch); because the density gate is
     // UPGRADE-ONLY and never decrements lvl, every existing skyline loads intact.
     c.recomputeWater();
+    // M25: rebuild the DERIVED rail state from the loaded rail[] plane, AFTER
+    // recomputePower (a station reads fresh powered[]) and BEFORE recomputeTraffic
+    // (which consumes railCov for the diversion). silent=true so a loaded open
+    // line never re-fires the "Metro is open" ticker; the metroOpened flag it
+    // sets carries forward. railDirty is cleared afterward (nothing pending).
+    c.recomputeRail(true);
+    c.railDirty = false;
     c.recomputeTraffic();
     c.recomputeMaps(); c.recomputeDemand();
     // milestone state: restore, or (legacy v1 save) infer rank from population

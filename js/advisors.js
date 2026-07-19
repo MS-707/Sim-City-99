@@ -46,7 +46,7 @@ function advRoadStats() { // road wear / decay aggregates (M23)
        f <  40   flipping out — urgent markup: '!' plus an ALL-CAPS alarm word
    Every register cites the live percentage verbatim ("<f>%"). */
 const DEPT_CHAMPION = { police: "safety", fire: "safety", roads: "transport",
-                        edu: "finance", health: "environment" };
+                        edu: "finance", health: "environment", transit: "transport" };
 const DEPT_LINES = {
   police: {
     ok: (f) => "Police funding sits at " + f + "% — precincts humming, radios " +
@@ -87,6 +87,15 @@ const DEPT_LINES = {
       "longer than a Phish set, man. The community vibe is suffering.",
     mad: (f) => "Health at " + f + "% funding is a public health DISASTER! " +
       "Hospitals are turning folks away — this is seriously bad karma, Mayor!",
+  },
+  // M25: Big Ray also runs the trains — transit funding rides his transport panel
+  transit: {
+    ok: (f) => "Transit funding runs at " + f + "% — the trains are on time and " +
+      "the ridership catchment pulls cars right off my arterials. Beautiful.",
+    grumble: (f) => "Transit down at " + f + "%? Fewer riders means more of 'em back " +
+      "in the Geo, clogging my roads. Fund the rails, Mayor.",
+    mad: (f) => "Transit at " + f + "% funding is a MELTDOWN! The lines are empty and " +
+      "every commuter is back on my pavement — restore the transit budget NOW!",
   },
 };
 
@@ -322,6 +331,11 @@ function adviseTransport() {
   else
     out.push("All " + rs.roads + " road tiles in good repair — mean wear " +
       Math.round(rs.meanWear) + "/255. The pavement gods smile upon us.");
+  out.push(deptFundingLine("transit")); // M25: Big Ray also champions the transit budget
+  const riders = Math.round(city.railRiders);
+  if (riders > 0)
+    out.push("The Metro is pulling ~" + riders.toLocaleString() + " trips/month off " +
+      "the roads. Every one of those is a car NOT idling on my blacktop, Mayor.");
   out.push(...adviseOrdinances("transport")); // M22: pushes Carpool Incentive
   return out;
 }

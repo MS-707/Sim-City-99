@@ -1060,6 +1060,107 @@ function buildSprites() {
     g.beginPath(); g.moveTo(rx, ry + 2); g.lineTo(hc.W[0] - 7, hc.W[1] + 7); g.stroke();
   });
 
+  // ---- rail / transit (M25) — a SEPARATE plane, drawn on top of over[] ----
+  // Surface track: 16 connection masks (bit0=N bit1=E bit2=S bit3=W), built like
+  // SPR.road/SPR.wire over the same EDGE arms but drawing two parallel steel rails
+  // + sleeper-tie hatching, baked slightly raised (extraTop 8) so a grade crossing
+  // reads clearly over the street beneath it. Autotiled by railMask (render.js).
+  const railSprite = (m) => mkSprite(1, 1, 8, (g, ox, oy) => {
+    const C = [ox, oy];
+    const railCol = "#9aa2ac", railHi = "#c8d0d8", tie = "#5a4632";
+    const armLen = Math.hypot(HW / 2, HH / 2);
+    const gauge = 3.2; // half the rail spacing, perpendicular to each arm
+    for (let b = 0; b < 4; b++) {
+      if (!(m & (1 << b)) && m !== 0) continue;
+      const [P0, P1] = EDGE[b];
+      const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
+      const dx = C[0] - mid[0], dy = C[1] - mid[1];
+      const L = Math.hypot(dx, dy) || 1;
+      const ux = dx / L, uy = dy / L;      // unit vector mid -> center
+      const px = -uy, py = ux;             // perpendicular (for the two rails)
+      // sleeper ties: short cross-hatches strung along the arm
+      g.strokeStyle = tie; g.lineWidth = 2.2; g.lineCap = "butt";
+      for (let s = 0.16; s <= 0.92; s += 0.24) {
+        const cx = mid[0] + dx * s, cy = mid[1] + dy * s;
+        g.beginPath();
+        g.moveTo(cx + px * (gauge + 1.6), cy + py * (gauge + 1.6));
+        g.lineTo(cx - px * (gauge + 1.6), cy - py * (gauge + 1.6));
+        g.stroke();
+      }
+      // two steel rails
+      g.lineCap = "round";
+      for (const off of [gauge, -gauge]) {
+        g.strokeStyle = railCol; g.lineWidth = 1.6;
+        g.beginPath();
+        g.moveTo(mid[0] + px * off, mid[1] + py * off);
+        g.lineTo(C[0] + px * off, C[1] + py * off);
+        g.stroke();
+        g.strokeStyle = railHi; g.lineWidth = 0.7;
+        g.beginPath();
+        g.moveTo(mid[0] + px * off, mid[1] + py * off);
+        g.lineTo(C[0] + px * off, C[1] + py * off);
+        g.stroke();
+      }
+    }
+    g.lineCap = "butt";
+  });
+  SPR.rail = [];
+  for (let m = 0; m < 16; m++) SPR.rail.push(railSprite(m));
+
+  // Subway toolbar icon (a tunnel mouth) — the buried plane is invisible on the
+  // map, so this only ever appears on the toolbtn (SPR.subwayIcon).
+  SPR.subwayIcon = mkSprite(1, 1, 8, (g, ox, oy) => {
+    g.fillStyle = "#3a3f48";
+    g.beginPath();
+    g.moveTo(ox - 12, oy + 6);
+    g.arc(ox, oy + 6, 12, Math.PI, 0);
+    g.closePath(); g.fill();
+    g.fillStyle = "#15181d";
+    g.beginPath();
+    g.moveTo(ox - 7, oy + 6);
+    g.arc(ox, oy + 6, 7, Math.PI, 0);
+    g.closePath(); g.fill();
+    g.fillStyle = "#e8c23a"; g.font = "bold 9px Tahoma, sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText("M", ox, oy + 1);
+  });
+
+  // Subway vent grate — a small sidewalk grille drawn ONLY in the transit overlay
+  // so the invisible tunnels have a visible trace (SPR.subwayVent).
+  SPR.subwayVent = mkSprite(1, 1, 0, (g, ox, oy) => {
+    g.fillStyle = "#4b5560";
+    g.beginPath();
+    g.moveTo(ox, oy - 4); g.lineTo(ox + 8, oy); g.lineTo(ox, oy + 4); g.lineTo(ox - 8, oy);
+    g.closePath(); g.fill();
+    g.strokeStyle = "#20262c"; g.lineWidth = 0.8;
+    for (let k = -2; k <= 2; k++) {
+      g.beginPath();
+      g.moveTo(ox + k * 2.6, oy - 2.6); g.lineTo(ox + k * 2.6 + 3, oy + 1);
+      g.stroke();
+    }
+  });
+
+  // Station — a 1x1 brick depot with a platform canopy and a "T" placard. Baked
+  // through withNight so a live (powered) station shows lit windows after dark.
+  SPR.station = withNight(1, 1, 26, (g, ox, oy) => {
+    const cn = corners(ox, oy, 1, 1);
+    poly(g, [cn.N, cn.E, cn.S, cn.W], "#7a7f88", "rgba(0,0,0,.25)"); // paved apron
+    const hc = insetCorners(ox, oy, 1, 1, 0.62);
+    prismFrom(g, hc, 16, "#9a4a3a"); // brick depot body
+    // platform canopy: a pale flat roof cantilevered over the apron
+    const tN = up(hc.N, 16), tE = up(hc.E, 16), tS = up(hc.S, 16), tW = up(hc.W, 16);
+    poly(g, [tN, tE, tS, tW], "#c9ced6", "#8a9098");
+    // lit windows on the two visible faces (glow bakes for the night layer)
+    windows(g, hc.W, hc.S, 16, 1, 2, 0.7, "#ffe9a0", "#20242c", GLOW_COOL);
+    windows(g, hc.S, hc.E, 16, 1, 2, 0.7, "#ffe9a0", "#20242c", GLOW_COOL);
+    // "T" placard on the canopy
+    const cx = (tN[0] + tS[0]) / 2, cy = (tN[1] + tS[1]) / 2;
+    g.fillStyle = "#1c5faa"; g.beginPath(); g.arc(cx, cy - 3, 5.5, 0, 7); g.fill();
+    g.fillStyle = "#fff"; g.font = "bold 8px Tahoma, sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText("T", cx, cy - 3);
+  });
+
   // ---- undeveloped zone markers ----
   const zoneDef = [["zoneR", "#22c522", "R"], ["zoneC", "#3555ff", "C"], ["zoneI", "#e6c619", "I"]];
   for (const [key, col, letter] of zoneDef) {
@@ -1911,6 +2012,20 @@ function wireMask(city, i) {
   if (conn(x + 1, y)) m |= 2;
   if (conn(x, y + 1)) m |= 4;
   if (conn(x - 1, y)) m |= 8;
+  return m;
+}
+
+// M25: rail autotile mask — mirrors roadMask but reads the rail PLANE. Surface
+// track, subway and stations all connect into one continuous line, so a cell
+// links to a 4-neighbor whenever that neighbor is any rail feature (!== RL.NONE).
+function railMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let m = 0;
+  const rail = (X, Y) => city.inMap(X, Y) && city.rail[city.idx(X, Y)] !== RL.NONE;
+  if (rail(x, y - 1)) m |= 1;
+  if (rail(x + 1, y)) m |= 2;
+  if (rail(x, y + 1)) m |= 4;
+  if (rail(x - 1, y)) m |= 8;
   return m;
 }
 

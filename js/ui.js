@@ -53,6 +53,12 @@ const TOOLS = [
   { id: "pipe",       name: "Water Pipe", key: "p", icon: null, spr: () => SPR.pipe[5] },
   { id: "watertower", name: "Watr Twr",   key: "t", icon: null, spr: () => SPR.watertower },
   { id: "pump",       name: "Watr Pump",  key: "u", icon: null, spr: () => SPR.pump },
+  // M25: mass transit — gated behind Town (TOOL_TIER.rail/subway/station=2), so
+  // the buttons dim with a padlock until the city ranks up. Keys r/k/n are free
+  // (r/u/t from the design collide with rotate/pump/water-tower, so they moved).
+  { id: "rail",    name: "Railway",  key: "r", icon: null, spr: () => SPR.rail[5],   minTier: TOOL_TIER.rail },
+  { id: "subway",  name: "Subway",   key: "k", icon: null, spr: () => SPR.subwayIcon, minTier: TOOL_TIER.subway },
+  { id: "station", name: "Station",  key: "n", icon: null, spr: () => SPR.station,    minTier: TOOL_TIER.station },
   // milestone rewards — locked until the city earns its rank
   { id: "mayor",    name: "Mayor Hse", key: "m", icon: null, spr: () => SPR.mayor,
     minTier: TOOL_TIER.mayor },
@@ -538,6 +544,7 @@ function applyToolAt(e) {
       case "zr": case "zc": case "zi": Snd.zone(); break;
       default: Snd.place(); Snd.cash();
     }
+    if (res.hint) setStatus(res.hint); // M25: "link the station" feedback
   } else if (res.reason === "funds") {
     Snd.denied(); setStatus("⛔ Not enough funds!");
   } else if (res.reason === "locked") {
@@ -589,6 +596,8 @@ const MM_LEGENDS = {
   svc:     '<i class="sw" style="background:#28dc3c"></i>edu <i class="sw" style="background:#dc283c"></i>health <i class="sw" style="background:#dcdc3c"></i>both',
   // M24: water network — providers, dry pipe, and a served-pressure gradient
   water:   '<i class="sw" style="background:#0cf"></i>tower/pump <i class="sw" style="background:#234"></i>dry pipe <i class="grad" style="background:linear-gradient(90deg,#146078,#28c8f0)"></i>served',
+  // M25: rail network — track, subway, live/dead station, and the ridership catchment
+  transit: '<i class="sw" style="background:#6cf"></i>track <i class="sw" style="background:#55f"></i>subway <i class="sw" style="background:#2ff"></i>station <i class="grad" style="background:linear-gradient(90deg,#16305a,#3c78c8)"></i>catchment',
   // M21: static fallback string (satisfies "MM_LEGENDS.dist is a non-empty
   // string"); updateMapLegend swaps in live per-district swatches when any exist.
   dist:    '<i class="sw" style="background:#e04040"></i>neighborhoods — paint with the 🏘️ tool',
@@ -758,6 +767,9 @@ function bindDialogs() {
     s.addEventListener("input", () => {
       city.funding[s.dataset.dept] = +s.value;
       document.getElementById("fund-label-" + s.dataset.dept).textContent = s.value + "%";
+      // M25: transit funding scales the ridership catchment, so rebuild rail (and
+      // traffic) live — the served-zone relief reacts even while paused.
+      if (s.dataset.dept === "transit" && city) { city.railDirty = true; city.recomputeRail(true); city.railDirty = false; city.recomputeTraffic(); }
       fillBudgetTable();
     });
   });
@@ -798,7 +810,7 @@ function bindDialogs() {
 function openBudget() {
   document.getElementById("tax-slider").value = city.taxRate;
   document.getElementById("tax-label").textContent = city.taxRate + "%";
-  for (const dept of ["police", "fire", "roads", "edu", "health"]) { // M23
+  for (const dept of ["police", "fire", "roads", "edu", "health", "transit"]) { // M23 / M25 transit
     document.getElementById("fund-" + dept).value = city.funding[dept];
     document.getElementById("fund-label-" + dept).textContent = city.funding[dept] + "%";
   }
@@ -876,6 +888,7 @@ function fillBudgetTable() {
     <tr><td>Health (${fd.health}%)</td><td>${f(-dc.health)}</td></tr>
     <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
     <tr><td>Water system</td><td>${f(-dc.water)}</td></tr>
+    <tr><td>Transit (${fd.transit}%)</td><td>${f(-dc.transit)}</td></tr>
     <tr><td>City ordinances</td><td>${f(city.ordinanceBudget().net)}</td></tr>
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
@@ -1264,13 +1277,37 @@ function openQuery(x, y) {
     waterProvRow = `<tr><td>Water supply</td><td>${energized
       ? "💧 " + WATER_CAP[t] + " tiles" : (t === OV.PUMP ? "off (needs power)" : "off")}</td></tr>`;
   }
+  // M25: transit rows. A rail tile names its feature; a station also shows its
+  // line number, station count, open/needs-2/no-power status, and diverted trips.
+  // A "Transit access" row on ANY tile surfaces railCov so the player learns why
+  // a nearby zone is (or isn't) relieved.
+  let transitRow = "";
+  if (city.rail[i] !== RL.NONE) {
+    const kind = city.rail[i] === RL.TRACK ? "Surface rail"
+      : city.rail[i] === RL.SUB ? "Subway" : "Station";
+    transitRow = `<tr><td>Transit</td><td>${kind}</td></tr>`;
+    if (city.rail[i] === RL.STATION) {
+      const net = city.railNet[i];
+      let stations = 0;
+      for (let k = 0; k < city.rail.length; k++)
+        if (city.rail[k] === RL.STATION && city.railNet[k] === net) stations++;
+      const status = city.stationLive[i] ? "open"
+        : stations < 2 ? "needs 2 stations" : "no power";
+      transitRow += `<tr><td>Line</td><td>#${net + 1} (${stations} station${stations === 1 ? "" : "s"})</td></tr>` +
+        `<tr><td>Status</td><td>${status}</td></tr>` +
+        `<tr><td>Riders</td><td>~${Math.round(city.railRiders)} trips/mo off roads</td></tr>`;
+    }
+  }
+  const transitAccessRow = `<tr><td>Transit access</td><td>${city.railCov[i]}</td></tr>`;
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
     <tr><td>Zone/Building</td><td>${ovName}${city.lvl[i] ? " (level " + city.lvl[i] + ")" : ""}</td></tr>
     ${plantRow}
     ${waterProvRow}
+    ${transitRow}
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
+    ${transitAccessRow}
     <tr><td>Water</td><td>${city.watered[i] ? "💧 yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>

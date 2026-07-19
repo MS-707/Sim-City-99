@@ -296,6 +296,7 @@ const MENUS = {
   ],
   windows: () => [
     ["Budget…", openBudget],
+    ["Regional Deals… 🌐", openRegion],
     ["City Ordinances… 📋", openOrdinances],
     ["Districts… 🏘️", openDistricts],
     [`${UI.prefs.autoBudget ? "✓ " : ""}Budget Report Monthly`,
@@ -803,6 +804,23 @@ function bindDialogs() {
     if (!document.getElementById("dlg-budget").classList.contains("hidden")) fillBudgetTable();
   });
 
+  // M27: regional-deal dialog — delegated on #region-list so handlers survive
+  // every fillRegion() re-render. Segmented Sell/Buy/None just repaints the row's
+  // active button (no model change until Propose); Propose commits deterministically.
+  const regionList = document.getElementById("region-list");
+  regionList.addEventListener("click", (ev) => {
+    const seg = ev.target.closest(".rg-seg");
+    if (seg && !seg.disabled) {
+      Snd.ensure();
+      const box = seg.parentElement;
+      box.querySelectorAll(".rg-seg").forEach((b) => b.classList.remove("on"));
+      seg.classList.add("on");
+      return;
+    }
+    const prop = ev.target.closest(".rg-propose");
+    if (prop && !prop.disabled) { Snd.ensure(); regionApply(prop.closest(".region-panel")); }
+  });
+
   // M13: issue-bond button — refusal at the cap is handled by issueBond()
   document.getElementById("btn-issue-bond").addEventListener("click", () => {
     Snd.ensure();
@@ -901,6 +919,7 @@ function fillBudgetTable() {
     <tr><td>Water system</td><td>${f(-dc.water)}</td></tr>
     <tr><td>Transit (${fd.transit}%)</td><td>${f(-dc.transit)}</td></tr>
     <tr><td>City ordinances</td><td>${f(city.ordinanceBudget().net)}</td></tr>
+    <tr><td>Regional power trade</td><td>${f(city.lastBudget.trade || 0)}</td></tr>
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;
@@ -944,6 +963,84 @@ function fillOrdList() {
   document.getElementById("ord-footer").innerHTML =
     `Net effect on budget: <b>${(ob.net < 0 ? "-§" : "+§")}` +
     `${Math.abs(ob.net).toLocaleString()}/mo</b>`;
+}
+
+/* ================= Regional Deals (M27) ================= */
+// World-fixed edge labels (0=N,1=E,2=S,3=W) — display only; the model never
+// reads cam.r. Rebuilt on open and after every Propose (same on-demand pattern
+// as the budget/ordinance dialogs), so the live disposition bar, connection
+// lamps and § figures track the current border layout even while paused.
+const REGION_EDGE_NAMES = ["North", "East", "South", "West"];
+function openRegion() { city.updateConnections(); fillRegion(); showDlg("dlg-region"); }
+
+function fillRegion() {
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const list = document.getElementById("region-list");
+  city.updateConnections();
+  let html = "";
+  for (let e = 0; e < 4; e++) {
+    const nb = city.neighbors[e], dl = city.deals[e], cn = city.conn[e];
+    const disp = city.disp[e], cap = city.dealCap(e);
+    const commuteOpen = cn.road || cn.rail;
+    const lamp = (on, icon, name) =>
+      `<span class="rg-lamp ${on ? "on" : "off"}">${icon} ${name}</span>`;
+    const seg = (mode, label, dis) =>
+      `<button class="rg-seg${dl.mode === mode ? " on" : ""}" data-mode="${mode}"${dis ? " disabled" : ""}>${label}</button>`;
+    html +=
+      `<div class="region-panel" data-edge="${e}">` +
+        `<div class="rg-head"><b>${esc(nb.name)}</b>` +
+          `<span class="rg-arche">${esc(nb.label)} · ${REGION_EDGE_NAMES[e]} edge</span></div>` +
+        `<div class="rg-blurb">${esc(nb.blurb)}</div>` +
+        `<div class="rg-prices">Sells power for <b>§${nb.priceSell}/MW</b>, buys at <b>§${nb.priceBuy}/MW</b></div>` +
+        `<div class="rg-disp"><span>Relations</span>` +
+          `<div class="rg-bar"><i style="width:${disp}%"></i></div><span class="rg-dispnum">${disp}</span></div>` +
+        `<div class="rg-conns">${lamp(cn.road, "🛣️", "Road")}${lamp(cn.wire, "⚡", "Wire")}${lamp(cn.rail, "🚉", "Rail")}</div>` +
+        `<div class="rg-controls">` +
+          `<div class="rg-segbox">${seg(0, "None")}${seg(1, "Sell", !cn.wire)}${seg(2, "Buy", !cn.wire)}</div>` +
+          `<label class="rg-mwlbl">MW <input type="number" class="rg-mw" min="0" max="${cap}" ` +
+            `value="${dl.mw}"${!cn.wire ? " disabled" : ""}></label>` +
+          `<span class="rg-cap">cap ${cap}</span>` +
+          `<label class="rg-commlbl"><input type="checkbox" class="rg-commute"${dl.commute ? " checked" : ""}` +
+            `${commuteOpen ? "" : " disabled"}> Commuter link</label>` +
+          `<button class="btn95 rg-propose"${(!cn.wire && !commuteOpen) ? " disabled" : ""}>Propose</button>` +
+        `</div>` +
+        `<div class="rg-note"></div>` +
+      `</div>`;
+  }
+  list.innerHTML = html;
+}
+
+// Commit the panel's edited controls through city.proposeDeal (deterministic).
+// Mirrors the funding-slider live-refresh: on any change write the deal, mark
+// power dirty, recompute power + region, and refresh an open budget dialog.
+function regionApply(panel) {
+  const e = +panel.dataset.edge;
+  const segOn = panel.querySelector(".rg-seg.on");
+  const mode = segOn ? +segOn.dataset.mode : city.deals[e].mode;
+  const mwEl = panel.querySelector(".rg-mw");
+  const mw = mwEl ? Math.max(0, mwEl.value | 0) : 0;
+  const commute = panel.querySelector(".rg-commute").checked;
+  const note = panel.querySelector(".rg-note");
+  const ok = city.proposeDeal(e, mode, mw, commute);
+  if (!ok) {
+    Snd.denied();
+    note.textContent = mode !== 0 && !city.conn[e].wire
+      ? "Refused — run a power line to this edge first."
+      : `Refused — ${mw} MW exceeds the ${city.dealCap(e)} MW cap. Improve relations first.`;
+    note.className = "rg-note bad";
+    return;
+  }
+  Snd.click();
+  const nb = city.neighbors[e];
+  note.textContent = mode === 0 ? "Deal cancelled." :
+    mode === 1 ? `Selling ${mw} MW to ${nb.name} for §${mw * nb.priceSell}/mo.` :
+    `Buying ${mw} MW from ${nb.name} for §${mw * nb.priceBuy}/mo.`;
+  note.className = "rg-note good";
+  city.powerDirty = true;
+  city.recomputePower();
+  city.recomputeRegion();
+  fillRegion();
+  if (!document.getElementById("dlg-budget").classList.contains("hidden")) fillBudgetTable();
 }
 
 /* ================= District Manager (M21) ================= */

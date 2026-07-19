@@ -385,6 +385,56 @@ function mulberry32(a) {
   };
 }
 
+/* ========================= M27: NEIGHBORING CITIES ========================= */
+// Four WORLD-fixed map edges: 0=N (y==0), 1=E (x==MAP-1), 2=S (y==MAP-1), 3=W
+// (x==0). This order is world-fixed and NEVER reads cam.r, so rotation can only
+// move the on-screen label — the region MODEL is rotation-invariant by
+// construction. Every effect (power trade, § trade, commuter demand) is GATED on
+// an OPEN border connection, so an island city contributes a literal +0 to
+// supply, budget net, and per-tile demand — the pre-M27 byte-identity guarantee.
+const EDGE_SALT = [0x9E3779B1, 0x85EBCA77, 0xC2B2AE3D, 0x27D4EB2F];
+const NEIGHBOR_NAMES = [
+  "Ludlow", "Fort Ramsey", "New Boccaccio", "Cedar Junction", "Aberdeen",
+  "Portsworth", "Elk Hollow", "Verona Falls", "Grimsby", "Onondaga",
+  "Blackwater", "Saint Cloud", "Harmony", "Duskerton", "Millbrook", "Rio Verde",
+];
+// Per-seed personalities. sellLo/sellHi bound the neighbor's §/MW sell price;
+// commLo/commHi bound its commuter strength (scaled demand units). pref is the
+// deal the neighbor LIKES (1=you sell to them, 2=you buy from them) — drives the
+// deterministic disposition nudge on a successful Propose.
+const ARCHETYPES = [
+  { key: "industrial", label: "Industrial town", sellLo: 8,  sellHi: 14, commLo: 4,  commHi: 10, pref: 1,
+    blurb: "A hungry factory town — it will always buy your surplus power." },
+  { key: "suburb",     label: "Bedroom suburb",  sellLo: 10, sellHi: 18, commLo: 30, commHi: 60, pref: 2,
+    blurb: "A wealthy bedroom community that floods your shops with commuters." },
+  { key: "metropolis", label: "Metropolis",      sellLo: 6,  sellHi: 11, commLo: 15, commHi: 35, pref: 2,
+    blurb: "A big neighbor with cheap power to sell and a steady stream of workers." },
+  { key: "agrarian",   label: "Farm county",     sellLo: 12, sellHi: 20, commLo: 2,  commHi: 8,  pref: 1,
+    blurb: "A quiet farm county — low activity, but it pays well for juice." },
+];
+// integer in the inclusive band [lo, hi], pulled from one rng() draw.
+function intBand(rng, lo, hi) { return lo + ((rng() * (hi - lo + 1)) | 0); }
+// PURE function of seed: identical seed => identical 4-neighbor array, all
+// integer fields => exact reproduction. Called in the ctor AND deserialize;
+// NEVER serialized (same policy as district centroids / ordMods / watered[]).
+// Draw order per edge is FIXED: name, archetype, priceSell, priceBuy, commuter,
+// disposition0 — reordering would change every seed's region, so it is frozen.
+function computeNeighbors(seed) {
+  const out = [];
+  for (let e = 0; e < 4; e++) {
+    const rng = mulberry32((seed ^ EDGE_SALT[e]) | 0);
+    const name = NEIGHBOR_NAMES[(rng() * NEIGHBOR_NAMES.length) | 0];
+    const arche = ARCHETYPES[(rng() * ARCHETYPES.length) | 0];
+    const priceSell = intBand(rng, arche.sellLo, arche.sellHi);
+    const priceBuy = priceSell + intBand(rng, 2, 6);
+    const commuter = intBand(rng, arche.commLo, arche.commHi);
+    const disposition0 = 20 + ((rng() * 60) | 0);
+    out.push({ name, archetype: arche.key, label: arche.label, blurb: arche.blurb,
+      pref: arche.pref, priceSell, priceBuy, commuter, disposition0 });
+  }
+  return out;
+}
+
 class City {
   constructor(seed, size = 80) {
     this.size = size;
@@ -458,6 +508,7 @@ class City {
     this.powerDemand = 0; this.powerSupply = 0;
     this.history = { pop: [], funds: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
+      trade: 0, // M27: regional power-trade line
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
       dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0, water: 0, transit: 0 } }; // M24 water / M25 transit upkeep
     this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
@@ -488,6 +539,20 @@ class City {
     this.sinceComplaint = 0;        // rollovers since the last citizen complaint
 
     this.generateTerrain(seed ?? ((Math.random() * 1e9) | 0));
+
+    // M27: neighboring cities & regional connections. neighbors is a PURE
+    // function of this.seed (set by generateTerrain just above) — recomputed on
+    // load, never serialized. deals + disp are the ONLY serialized region state;
+    // conn[] (border scan) + commuterBias[] (per-tile demand bump) are DERIVED
+    // and rebuilt by updateConnections()/recomputeRegion() in the tick + load
+    // cascades. Defaults (all deals none, disp = seed-derived initial) make an
+    // untouched city behave byte-identically to pre-M27.
+    this.neighbors = computeNeighbors(this.seed);
+    this.deals = [0, 0, 0, 0].map(() => ({ mode: 0, mw: 0, commute: false }));
+    this.disp = new Int32Array(4);
+    for (let e = 0; e < 4; e++) this.disp[e] = this.neighbors[e].disposition0;
+    this.conn = [0, 0, 0, 0].map(() => ({ road: false, wire: false, rail: false }));
+    this.commuterBias = new Float32Array(n);
   }
 
   idx(x, y) { return y * MAP + x; }
@@ -694,6 +759,9 @@ class City {
 
   // ---------- power network ----------
   recomputePower() {
+    // M27: refresh the border-scan connection state FIRST so power trade (and
+    // the commuter pass that runs right after) read the current border layout.
+    this.updateConnections();
     this.powered.fill(0);
     let supply = 0;
     const q = [];
@@ -736,6 +804,11 @@ class City {
     for (const m of this.activeMods)
       if (m.type === "powerDemand" && m.mult) pdMult *= m.mult;
     if (pdMult !== 1) demand = Math.round(demand * pdMult);
+    // M27: fold in regional power trade BEFORE the supply/demand comparison — a
+    // SELL lowers available supply (can induce brownouts), a BUY raises it
+    // (relieves them), reusing the existing brownout branch below unchanged. With
+    // no open-wire connection or all deals none, the delta is literally 0.
+    supply = Math.max(0, supply + this.powerTradeDelta());
     this.powerSupply = supply; this.powerDemand = demand;
     if (demand > supply && supply > 0) {
       // brownout: cut power to a fraction of consumers
@@ -1355,6 +1428,87 @@ class City {
     return { cost, rev, net: rev - cost };
   }
 
+  /* ---------- M27: neighboring cities & regional connections ---------- */
+  // Rebuild conn[] by scanning ONLY the four border lines (O(MAP)). World-edge
+  // indexed (0=N,1=E,2=S,3=W); never reads cam.r. A corner tile legitimately
+  // feeds two edges. wire=any WIRE/WIREROAD on the border; road=any ROAD/WIREROAD;
+  // rail=any TRACK/STATION on that border.
+  updateConnections() {
+    for (let e = 0; e < 4; e++) { const c = this.conn[e]; c.road = c.wire = c.rail = false; }
+    const scan = (e, i) => {
+      const o = this.over[i], r = this.rail[i], c = this.conn[e];
+      if (o === OV.WIRE || o === OV.WIREROAD) c.wire = true;
+      if (o === OV.ROAD || o === OV.WIREROAD) c.road = true;
+      if (r === RL.TRACK || r === RL.STATION) c.rail = true;
+    };
+    for (let x = 0; x < MAP; x++) { scan(0, x); scan(2, (MAP - 1) * MAP + x); }
+    for (let y = 0; y < MAP; y++) { scan(3, y * MAP); scan(1, y * MAP + (MAP - 1)); }
+  }
+
+  // Net supply change from open power deals. A BUY imports power (raises supply);
+  // a SELL exports it (lowers available supply). Gated on an open border wire, so
+  // this is exactly 0 when no wire reaches the border or all deals are none.
+  powerTradeDelta() {
+    let d = 0;
+    for (let e = 0; e < 4; e++) {
+      if (!this.conn[e].wire) continue;
+      const dl = this.deals[e];
+      if (dl.mode === 2) d += dl.mw;       // buy → import
+      else if (dl.mode === 1) d -= dl.mw;  // sell → export
+    }
+    return d;
+  }
+
+  // Monthly § from open power deals: selling earns priceSell/MW (+), buying costs
+  // priceBuy/MW (−). Gated on an open border wire → exactly 0 with no open deal.
+  powerTradeBudget() {
+    let s = 0;
+    for (let e = 0; e < 4; e++) {
+      if (!this.conn[e].wire) continue;
+      const dl = this.deals[e], nb = this.neighbors[e];
+      if (dl.mode === 1) s += dl.mw * nb.priceSell;
+      else if (dl.mode === 2) s -= dl.mw * nb.priceBuy;
+    }
+    return s;
+  }
+
+  // Rebuild the per-tile commuter demand bump. EXACTLY 0.0 everywhere when no
+  // commute link is open, so growthPass's `dem + commuterBias[i]` is a bit-
+  // identical `+0.0` no-op and draws the same Math.random sequence as pre-M27.
+  // An open highway/rail link stamps neighbors[e].commuter*0.01 with a linear
+  // falloff over K=8 tiles inward from that edge, raising near-border growth.
+  recomputeRegion() {
+    this.commuterBias.fill(0);
+    const K = 8;
+    for (let e = 0; e < 4; e++) {
+      const dl = this.deals[e];
+      if (!dl.commute || !(this.conn[e].road || this.conn[e].rail)) continue;
+      const amp = this.neighbors[e].commuter * 0.01;
+      for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+        const d = e === 0 ? y : e === 1 ? (MAP - 1 - x) : e === 2 ? (MAP - 1 - y) : x;
+        if (d >= K) continue;
+        this.commuterBias[y * MAP + x] += amp * (K - d) / K;
+      }
+    }
+  }
+
+  // Deterministic deal negotiation (NO Math.random). Accepts iff a power deal's
+  // mw is within the disposition-derived cap AND the required connection is open;
+  // on accept writes deals[e] and nudges disp toward the neighbor's preferred
+  // deal (+2 match / −1 else, clamped 0..100). Returns true on accept.
+  dealCap(e) { return 50 + this.disp[e] * 4; }
+  proposeDeal(e, mode, mw, commute) {
+    mw = Math.max(0, mw | 0);
+    const powerOk = mode === 0 || (mw <= this.dealCap(e) && this.conn[e].wire);
+    if (!powerOk) return false;
+    const commuteOk = !commute || this.conn[e].road || this.conn[e].rail;
+    if (!commuteOk) return false;
+    this.deals[e] = { mode, mw: mode === 0 ? 0 : mw, commute: !!commute };
+    if (mode === 1 || mode === 2)
+      this.disp[e] = Math.max(0, Math.min(100, this.disp[e] + (mode === this.neighbors[e].pref ? 2 : -1)));
+    return true;
+  }
+
   // ---------- growth ----------
   growthPass() {
     const n = MAP * MAP;
@@ -1364,7 +1518,10 @@ class City {
       const ov = this.over[i];
       if (ov !== OV.ZR && ov !== OV.ZC && ov !== OV.ZI) continue;
       if (this.fire[i]) continue;
-      const dem = ov === OV.ZR ? this.demand.r : ov === OV.ZC ? this.demand.c : this.demand.i;
+      // M27: commuterBias is exactly 0.0 where no commute link is open, so this
+      // is a bit-identical `+0.0` no-op vs pre-M27; an open link raises effective
+      // demand within K tiles of the connected edge → higher near-border growth.
+      let dem = (ov === OV.ZR ? this.demand.r : ov === OV.ZC ? this.demand.c : this.demand.i) + this.commuterBias[i];
       const powered = this.powered[i], road = this.access[i] > 0;
 
       if (!powered) {
@@ -1668,10 +1825,14 @@ class City {
     // M22: ordinance costs/revenue — O(1) over the registry with the live
     // pop/comJobs/resTiles cached by recomputeDemand (run earlier this tick).
     const ob = this.ordinanceBudget();
-    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - debt + ob.net;
+    // M27: monthly regional power-trade balance (sell earns +, buy costs −),
+    // gated on an open border wire so it is 0 when no power deal is live.
+    const trade = this.powerTradeBudget();
+    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - debt + ob.net + trade;
     this.funds += net;
     this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost,
       water: waterCost, transit: transitCost, debt, net, // M24 water / M25 transit upkeep lines
+      trade, // M27: regional power-trade line
       // M22: the ordinance line (net = revenue - cost) charged this month
       ord: ob.net, ordCost: ob.cost, ordRev: ob.rev,
       // M23: the per-department breakdown actually charged this month
@@ -1818,6 +1979,7 @@ class City {
       this.recomputePower();
       this.recomputeAccess();
       this.recomputeWater(); // M24: AFTER power — a pump reads fresh powered[]
+      this.recomputeRegion(); // M27: refresh commuterBias from fresh conn[]/deals (updateConnections ran inside recomputePower)
     }
     if (doPower || this.railDirty) { this.recomputeRail(); this.railDirty = false; }
     if (this.tickCount % 5 === 0) this.recomputeTraffic();
@@ -1974,7 +2136,7 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 9, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 10, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -2010,6 +2172,15 @@ class City {
       // id->true object. ordMods and the § figures are DERIVED and never saved.
       // A v9 save from before M22 simply lacks this field and loads all-off.
       ordinances: this.ordinances,
+      // M27 (save v10): the ONLY authored region state — per-edge deal
+      // {mode,mw,commute} + current negotiated disposition. neighbors (names/
+      // archetypes/prices/commuter/initial disposition) is a PURE function of
+      // seed and is recomputed on load, NOT serialized; conn[]/commuterBias[] are
+      // DERIVED and rebuilt in the load cascade. A v9-or-earlier save lacks these
+      // two fields → all deals none + seed-derived disp → the loaded city
+      // simulates byte-identically to pre-M27.
+      deals: this.deals.map((d) => ({ mode: d.mode, mw: d.mw, commute: d.commute })),
+      disp: Array.from(this.disp),
       history: this.history,
     });
   }
@@ -2057,6 +2228,18 @@ class City {
     // recomputeTraffic's share is always 0, and traffic behaves exactly as before.
     // railNet/stationLive/railCov are DERIVED — rebuilt by recomputeRail below.
     if (Array.isArray(d.rail)) c.rail.set(d.rail);
+    // M27 (save v10): overlay the authored deal + disposition state. Defensive
+    // Array.isArray guards (NO hard v===10 test, matching every prior milestone):
+    // a v9-or-earlier save has neither field, so the ctor's default deals (all
+    // none) and seed-derived disp stand → powerTradeDelta()/powerTradeBudget()=0
+    // and commuterBias all-zero → the loaded city plays byte-identically to
+    // pre-M27. neighbors[] was already rebuilt from d.seed by the ctor above.
+    if (Array.isArray(d.deals))
+      for (let e = 0; e < 4 && e < d.deals.length; e++) {
+        const s = d.deals[e]; if (!s) continue;
+        c.deals[e] = { mode: s.mode | 0, mw: Math.max(0, s.mw | 0), commute: !!s.commute };
+      }
+    if (Array.isArray(d.disp)) for (let e = 0; e < 4 && e < d.disp.length; e++) c.disp[e] = d.disp[e] | 0;
     // M22 (still save v9): restore the enacted-ordinance map. A v9-from-before-
     // M22 save (or any pre-v9 save) has no ordinances field => {} => everything
     // off => ordMods identity => the city plays byte-identically to pre-M22.
@@ -2096,6 +2279,13 @@ class City {
     // (supply 0/demand 0 → the demand?…:1 branch); because the density gate is
     // UPGRADE-ONLY and never decrements lvl, every existing skyline loads intact.
     c.recomputeWater();
+    // M27: rebuild the DERIVED region state (border-scan conn[] + per-tile
+    // commuterBias[]) from the loaded over[]/rail[] + restored deals. conn[] was
+    // already refreshed inside recomputePower above; recomputeRegion needs it +
+    // the deals to stamp commuterBias. Runs before recomputeTraffic since
+    // commuterBias feeds growth, not traffic.
+    c.updateConnections();
+    c.recomputeRegion();
     // M25: rebuild the DERIVED rail state from the loaded rail[] plane, AFTER
     // recomputePower (a station reads fresh powered[]) and BEFORE recomputeTraffic
     // (which consumes railCov for the diversion). silent=true so a loaded open

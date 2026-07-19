@@ -614,6 +614,10 @@ function renderFrame(city, uiState, clearBG) {
   // M21: low-zoom neighborhood labels, drawn in SCREEN space (after the world
   // transform is restored) so text stays upright at every rotation.
   drawDistrictLabels(city);
+  // M27: neighbor-city pennants at each WORLD map-edge midpoint. Positions are
+  // world-fixed (never read cam.r for the MODEL) but PROJECTED through the same
+  // worldX/worldY as tiles, so they ride the 90° rotation without special-casing.
+  drawRegionLabels(city);
 }
 
 /* ---- postcard photo pass (G4) ---- */
@@ -1242,6 +1246,36 @@ function drawDistrictLabels(city) {
     ctx.fillText(label, sx, sy);
   }
   ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// M27: draw a small pennant/label at each of the four world map-edge midpoints
+// with the neighbor's name and a plug icon when any connection to it is open.
+// The label ANCHOR is world-fixed (edge index 0=N,1=E,2=S,3=W never reads
+// cam.r); worldX/worldY apply the live camera rotation so the pennant sits at
+// the correct on-screen edge under every rotation. Text is drawn upright in
+// screen space (like the district labels) so it never mirrors or flips.
+function drawRegionLabels(city) {
+  if (!city.neighbors || cam.z >= 0.9) return;
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "bold 12px Tahoma, sans-serif";
+  ctx.lineJoin = "round";
+  for (let e = 0; e < 4; e++) {
+    const nb = city.neighbors[e], cn = city.conn[e];
+    const cx = e === 0 || e === 2 ? MAP / 2 : (e === 1 ? MAP + 0.5 : -1.5);
+    const cy = e === 1 || e === 3 ? MAP / 2 : (e === 2 ? MAP + 0.5 : -1.5);
+    const wx = worldX(cx, cy), wy = worldY(cx, cy);
+    const sx = (wx - cam.x) * cam.z + cvs.width / 2;
+    const sy = (wy - cam.y) * cam.z + cvs.height / 2;
+    if (sx < -80 || sx > cvs.width + 80 || sy < -30 || sy > cvs.height + 30) continue;
+    const open = cn.road || cn.wire || cn.rail;
+    const label = (open ? "🔌 " : "") + nb.name;
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,12,20,0.85)";
+    ctx.strokeText(label, sx, sy);
+    ctx.fillStyle = open ? "rgba(210,255,200,0.96)" : "rgba(230,230,230,0.85)";
+    ctx.fillText(label, sx, sy);
+  }
   ctx.restore();
 }
 

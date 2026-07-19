@@ -15,15 +15,8 @@ Queue policy: keep at least 5 open improvements at all times.
 ## Open
 
 > Rotation staging + criteria live in `docs/rotation-design.json`; the
-> gameplay-queue designs + 8-criteria specs for M21/M22/M24/M25 live in
+> gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
-- [ ] **M21 — Land value visualization & districts**: a district paint layer in
-  its own `city.district` Uint8 channel (co-exists with OV.*, never charges
-  funds, never touches the sim update path — determinism-safe), a Win95 District
-  Manager dialog with read-only `districtStats()`, a 7th minimap mode, and SC2K
-  low-zoom neighborhood labels. Save v9 + v8 back-compat. Full spec + 8
-  independent criteria in `docs/queue-specs.json`. *(A partial build is stashed
-  from before the rotation work; it will re-run fresh onto the rotated renderer.)*
 
 - [ ] **M22 — Ordinances**: a `#dlg-ordinances` dialog over an ORDINANCES
   registry; `enactOrdinance()` rebuilds a pop-independent `ordMods` scalar
@@ -71,6 +64,26 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M21 — Land value visualization & districts**: a district paint layer in
+  a new per-tile `city.district` Uint8 channel + a `city.districts[]` metadata
+  list (id/name/`col` index into DISTRICT_COLS), painted with a free `district`
+  tool (key `d`). Districts co-exist with OV.* — painting never writes
+  over[]/lvl[]/anc[] and never charges funds — and hook **none** of the sim
+  update path, so `tick()`/`recompute*`/`growthPass` stay byte-identical with or
+  without districts (verified against a seeded baseline). A `#dlg-districts`
+  Win95 manager creates/renames/recolors/deletes (cap 12, smallest-free id
+  reuse) and shows read-only `districtStats()` aggregating the existing
+  land-value/pollution/crime/coverage maps (pop/jobs from RES_POP/COM_JOB/
+  IND_JOB). A 7th `dist` minimap mode + legend, and low-zoom SCREEN-space
+  neighborhood labels whose centroids project through the rotation-aware
+  worldX/worldY (upright and correct at every camera rotation). Save bumps to v9
+  round-tripping district[]+districts[]; pre-v9 saves load with an empty layer.
+  Verified 8/8 criteria + determinism (rotation `r=0` unchanged) + a 6-agent
+  panel that caught a real bug — the label centroid cache keyed only on distRev
+  (which inits to 0 on every city) collided across loaded cities; fixed by
+  keying it on the city object identity too, re-verified with no name leak on a
+  city swap, zero console errors.
 
 - [x] **M32b — Multi-side building sprites** *(user request)*: rotating the view
   now shows genuinely different building sides. Each building family bakes four

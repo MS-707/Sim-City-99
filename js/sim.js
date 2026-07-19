@@ -808,7 +808,7 @@ class City {
     // SELL lowers available supply (can induce brownouts), a BUY raises it
     // (relieves them), reusing the existing brownout branch below unchanged. With
     // no open-wire connection or all deals none, the delta is literally 0.
-    supply = Math.max(0, supply + this.powerTradeDelta());
+    supply = Math.max(0, supply + this.powerTradeDelta(supply, demand));
     this.powerSupply = supply; this.powerDemand = demand;
     if (demand > supply && supply > 0) {
       // brownout: cut power to a fraction of consumers
@@ -1448,28 +1448,40 @@ class City {
   // Net supply change from open power deals. A BUY imports power (raises supply);
   // a SELL exports it (lowers available supply). Gated on an open border wire, so
   // this is exactly 0 when no wire reaches the border or all deals are none.
-  powerTradeDelta() {
-    let d = 0;
+  // Net supply delta from open power deals, given this recompute's plant supply
+  // and own demand. Buys are firm imports (+mw). Sells can only EXPORT your own
+  // generation SURPLUS — you cannot sell power you don't make: sold =
+  // min(committed sell, max(0, plantSupply - demand)). This bounds the deal to
+  // deliverable surplus, so a plantless city exports nothing and overselling can
+  // never brown your own city out for free. Stashes sold/commit for the budget
+  // so § revenue is paid only for MW actually exported.
+  powerTradeDelta(plantSupply, demand) {
+    let buys = 0, sellCommit = 0;
     for (let e = 0; e < 4; e++) {
       if (!this.conn[e].wire) continue;
       const dl = this.deals[e];
-      if (dl.mode === 2) d += dl.mw;       // buy → import
-      else if (dl.mode === 1) d -= dl.mw;  // sell → export
+      if (dl.mode === 2) buys += dl.mw;         // buy → firm import
+      else if (dl.mode === 1) sellCommit += dl.mw; // sell → committed export
     }
-    return d;
+    const sold = Math.min(sellCommit, Math.max(0, plantSupply - demand));
+    this._tradeSold = sold; this._tradeSellCommit = sellCommit;
+    return buys - sold;
   }
 
-  // Monthly § from open power deals: selling earns priceSell/MW (+), buying costs
-  // priceBuy/MW (−). Gated on an open border wire → exactly 0 with no open deal.
+  // Monthly § from open power deals: selling earns priceSell/MW (+) — but ONLY
+  // for MW actually exported (capped to surplus in powerTradeDelta), scaled by
+  // sold/committed so overselling never yields phantom income. Buying costs
+  // priceBuy/MW (−, firm). Gated on an open border wire → exactly 0 with no deal.
   powerTradeBudget() {
+    const sellScale = this._tradeSellCommit > 0 ? this._tradeSold / this._tradeSellCommit : 0;
     let s = 0;
     for (let e = 0; e < 4; e++) {
       if (!this.conn[e].wire) continue;
       const dl = this.deals[e], nb = this.neighbors[e];
-      if (dl.mode === 1) s += dl.mw * nb.priceSell;
+      if (dl.mode === 1) s += dl.mw * nb.priceSell * sellScale; // paid for exported surplus only
       else if (dl.mode === 2) s -= dl.mw * nb.priceBuy;
     }
-    return s;
+    return Math.round(s);
   }
 
   // Rebuild the per-tile commuter demand bump. EXACTLY 0.0 everywhere when no

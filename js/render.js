@@ -491,7 +491,8 @@ function renderFrame(city, uiState, clearBG) {
     nightLayer.key = nKey;
   }
 
-  updateCars(city, ns);
+  const carSpeed = (uiState && uiState.speed != null) ? uiState.speed : 1;
+  updateCars(city, ns, carSpeed);
   updateSmoke(city);
   drawDisaster(city);
   updateChopper(city); // news helicopter (M18) — O(1), presentation-only
@@ -652,7 +653,7 @@ function drawFlames(wx, wy, i) {
 // pool size scales with total congestion (and now map area, G16) so busy
 // cities look busy. `ns` is the night strength: when > 0 each car queues a
 // headlight cone + taillight into carLightQ for the additive night pass.
-function updateCars(city, ns) {
+function updateCars(city, ns, speed = 1) {
   if (!carSprites.x) buildCarSprites();
   carLightQ.length = 0;
   const roads = [];
@@ -663,7 +664,9 @@ function updateCars(city, ns) {
   // G16: cap scales with map area (carCap) instead of the flat 70
   const want = roads.length >= 8 ? Math.min(carCap(), 6 + (total / 45 | 0)) : 0;
   while (cars.length > want) cars.pop();
-  for (let tries = 0; tries < 12 && cars.length < want && roads.length; tries++) {
+  // paused sim (speed 0): keep + still draw existing cars, but don't spawn new
+  // ones (they'd freeze mid-tile), and don't advance progress below.
+  for (let tries = 0; speed > 0 && tries < 12 && cars.length < want && roads.length; tries++) {
     const i = roads[(Math.random() * roads.length) | 0];
     if (Math.random() * 160 > city.traffic[i] + 25) continue; // favor busy roads
     const x = i % MAP, y = (i / MAP) | 0;
@@ -673,7 +676,7 @@ function updateCars(city, ns) {
 
   for (let k = cars.length - 1; k >= 0; k--) {
     const c = cars[k];
-    c.p += c.spd;
+    c.p += c.spd * speed;
     if (c.p >= 1) {
       const px = c.fx, py = c.fy;
       c.fx = c.tx; c.fy = c.ty; c.p = 0;

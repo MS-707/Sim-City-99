@@ -19,7 +19,7 @@ function boot() {
   document.getElementById("btn-load-city").addEventListener("click", () => {
     Snd.ensure();
     if (loadCity()) startGame();
-    else alert("No saved city found in this browser. Start a new one!");
+    else uiAlert("No saved city found in this browser. Start a new one!");
   });
 
   // pre-create a city so the sim objects exist even on splash

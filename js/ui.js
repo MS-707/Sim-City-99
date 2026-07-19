@@ -249,7 +249,7 @@ function setStatus(msg) { document.getElementById("sb-tool").textContent = msg; 
 /* ================= menus ================= */
 const MENUS = {
   file: () => [
-    ["New City", () => { if (confirm("Start a new city? Unsaved progress is lost.")) newCity(); }],
+    ["New City", () => uiConfirm("Start a new city? Unsaved progress is lost.", newCity)],
     ["Save City", saveCity],
     ["Load City", loadCity],
     "-",
@@ -575,6 +575,86 @@ function bindMinimap() {
 /* ================= dialogs ================= */
 function showDlg(id) { document.getElementById(id).classList.remove("hidden"); }
 function hideDlg(id) { document.getElementById(id).classList.add("hidden"); }
+
+/* Self-contained Win95 modal (native confirm/alert/prompt are blocked in the
+   sandboxed artifact iframe). Builds the same .dlg chrome the static dialogs
+   use, plus a click-swallowing backdrop, so it reads as modal in-game. */
+let uiModalOpen = false;
+function uiModal(title, message, buttons) {
+  if (uiModalOpen) return; // guard against stacking two modals
+  uiModalOpen = true;
+  const desktop = document.getElementById("desktop") || document.body;
+
+  const backdrop = document.createElement("div");
+  backdrop.style.cssText =
+    "position:absolute;inset:0;z-index:9000;background:rgba(0,0,0,0.35);";
+
+  const dlg = document.createElement("div");
+  dlg.className = "win95 dlg";
+  dlg.style.zIndex = "9001";
+
+  const bar = document.createElement("div");
+  bar.className = "titlebar";
+  const ttl = document.createElement("span");
+  ttl.textContent = title;
+  const tbtns = document.createElement("span");
+  tbtns.className = "title-btns";
+  const closeX = document.createElement("span");
+  closeX.className = "tbtn dlg-close";
+  closeX.textContent = "✕";
+  tbtns.appendChild(closeX);
+  bar.appendChild(ttl); bar.appendChild(tbtns);
+
+  const body = document.createElement("div");
+  body.className = "dlg-body";
+  body.textContent = message;
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "dlg-buttons";
+
+  function close() {
+    if (!uiModalOpen) return;
+    uiModalOpen = false;
+    document.removeEventListener("keydown", onKey, true);
+    backdrop.remove();
+    dlg.remove();
+  }
+  function onKey(e) { if (e.key === "Escape") { e.preventDefault(); close(); } }
+
+  let focusTarget = null;
+  for (const b of buttons) {
+    const el = document.createElement("button");
+    el.className = "btn95";
+    el.textContent = b.label;
+    el.addEventListener("click", () => { close(); if (b.action) b.action(); });
+    btnRow.appendChild(el);
+    if (b.focus) focusTarget = el;
+  }
+  if (!focusTarget && btnRow.firstChild) focusTarget = btnRow.firstChild;
+
+  closeX.addEventListener("click", close);
+  backdrop.addEventListener("click", close);
+
+  dlg.appendChild(bar); dlg.appendChild(body); dlg.appendChild(btnRow);
+  desktop.appendChild(backdrop);
+  desktop.appendChild(dlg);
+  document.addEventListener("keydown", onKey, true);
+  if (focusTarget) focusTarget.focus();
+}
+
+function uiConfirm(message, onOk, opts) {
+  const title = (opts && opts.title) || "SimCity 99";
+  uiModal(title, message, [
+    { label: "OK", action: onOk, focus: true },
+    { label: "Cancel" },
+  ]);
+}
+
+function uiAlert(message, onOk) {
+  uiModal("SimCity 99", message, [
+    { label: "OK", action: onOk, focus: true },
+  ]);
+}
 
 function bindDialogs() {
   document.querySelectorAll(".dlg").forEach(d => {

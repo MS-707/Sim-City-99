@@ -1,7 +1,7 @@
 /* ============ SimCity 99 — isometric renderer ============ */
 "use strict";
 
-const cam = { x: 0, y: 0, z: 1 };   // world-space center + zoom
+const cam = { x: 0, y: 0, z: 1, r: 0 };   // world-space center + zoom + view rotation (M32a: r∈{0,1,2,3}, 90° CCW steps)
 let cvs, ctx, frame = 0;
 const smoke = [];                    // {x, y, age, drift, fire}
 const SMOKE_MAX = 200;               // shared puff budget (G16)
@@ -76,8 +76,28 @@ function renderInit(canvas) {
   cam.x = 0; cam.y = MAP * HH; // middle of the map
 }
 
-const worldX = (x, y) => (x - y) * HW;
-const worldY = (x, y) => (x + y) * HH + HH;
+// ---- M32a view-rotation core ----
+// rot() remaps a logical tile (x,y) into "view space" (u,v) for the active
+// 90° camera rotation, BEFORE the fixed iso projection; unrot() is its exact
+// inverse. r===0 is an arithmetic-free identity early-return, so the r=0 path
+// is byte-identical to HEAD by construction. N = MAP (map is square). rot4()
+// is the matching 4-bit cyclic rotate for autotile mask lookups. Its ROR
+// direction (m>>r | m<<(4-r)) is DERIVED to agree with rot()/unrot(): a road
+// arm toward world-N (mask bit0=NE screen edge at r=0) must select the sprite
+// arm at the screen edge world-N projects to after rotation — empirically NW
+// (sprite bit3) at r=1, which is exactly ROR. rol would send it to SE (wrong).
+const rot = (x, y, r) => r === 0 ? { u: x, v: y }
+  : r === 1 ? { u: y, v: MAP - 1 - x }
+  : r === 2 ? { u: MAP - 1 - x, v: MAP - 1 - y }
+  : { u: MAP - 1 - y, v: x };
+const unrot = (u, v, r) => r === 0 ? { x: u, y: v }
+  : r === 1 ? { x: MAP - 1 - v, y: u }
+  : r === 2 ? { x: MAP - 1 - u, y: MAP - 1 - v }
+  : { x: v, y: MAP - 1 - u };
+const rot4 = (m, r) => r === 0 ? m : ((m >> r) | (m << (4 - r))) & 15;
+
+const worldX = (x, y) => { const p = rot(x, y, cam.r); return (p.u - p.v) * HW; };
+const worldY = (x, y) => { const p = rot(x, y, cam.r); return (p.u + p.v) * HH + HH; };
 
 /* ---------------- day/night cycle (M10) ---------------- */
 // One in-game day spans the 24-tick month: hour = tickCount % 24, midnight on
@@ -193,8 +213,13 @@ function drawNightLayer(g, ns) {
 // carries a developed building that would physically block the spill.
 // District-edge and low-density-neighbor tiles keep their pools.
 function poolBlocked(city, x, y) {
-  if (x + 1 >= MAP || y + 1 >= MAP) return false;
-  const i = (y + 1) * MAP + x + 1;
+  // M32a: the screen-nearer occluder is the tile whose VIEW image is at
+  // (u+1,v+1). Derive the map-space delta from unrot's linear part so it can
+  // never drift from rot()/unrot(): r0 (+1,+1) r1 (-1,+1) r2 (-1,-1) r3 (+1,-1).
+  const d0 = unrot(0, 0, cam.r), d1 = unrot(1, 1, cam.r);
+  const nx = x + (d1.x - d0.x), ny = y + (d1.y - d0.y);
+  if (nx < 0 || nx >= MAP || ny < 0 || ny >= MAP) return false;
+  const i = ny * MAP + nx;
   const ov = city.over[i];
   if (ov >= OV.ZR && ov <= OV.ZI) return city.lvl[i] > 0;
   return ov === OV.POLICE || ov === OV.FIRESTA || ov === OV.SCHOOL ||
@@ -227,7 +252,10 @@ function screenToTile(sx, sy) {
   const wx = (sx - cvs.width / 2) / cam.z + cam.x;
   const wy = (sy - cvs.height / 2) / cam.z + cam.y;
   const A = wx / HW, B = (wy - HH) / HH;
-  return { x: Math.round((A + B) / 2), y: Math.round((B - A) / 2) };
+  // recover FLOAT view coords, round IN VIEW SPACE, then un-rotate — rounding
+  // before unrot is mandatory or diagonal-seam tiles mis-pick (M32a).
+  const u = Math.round((A + B) / 2), v = Math.round((B - A) / 2);
+  return unrot(u, v, cam.r);
 }
 
 /* ---- flat-terrain layer cache (M11) ----
@@ -272,14 +300,14 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
         const sm = shoreMask(city, i); // sand / rime ice on land-facing edges
         // G13: per-tile shore-width variant by the same scrambled hash used for
         // grass/water (cache-safe, deterministic) — coasts wander in width
-        if (sm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][sm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        if (sm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(sm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       } else {
         // G5: grass variant by scrambled (x, y) hash — open meadows mottle
         // organically instead of alternating with varnt's seeded stripes
         const gs = S.grass[terrHash(x, y) & 3];
         g.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
         const bm = beachMask(city, i); // shore fringe on the land side of the seam
-        if (bm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][bm]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        if (bm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(bm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       }
     }
   }
@@ -295,7 +323,7 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
       const i = y * MAP + x;
       if (city.terr[i] === TERR.WATER) continue;
       const em = terrEdgeMask(city, i);
-      if (em) { const eg = SPR.terrEdge[em]; g.drawImage(eg.c, wx - eg.ox, wy - eg.oy); }
+      if (em) { const eg = SPR.terrEdge[rot4(em, cam.r)]; g.drawImage(eg.c, wx - eg.ox, wy - eg.oy); }
     }
   }
   L.key = key;
@@ -330,7 +358,7 @@ function renderFrame(city, uiState, clearBG) {
 
   // flat terrain: one cached blit unless the camera / water / terrain moved —
   // or the season changed (M12): the palette swap costs exactly one rebuild
-  const tKey = `${cam.x},${cam.y},${cam.z},${cvs.width},${cvs.height},` +
+  const tKey = `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},` +
     `${waterFrame},${city.terrRev | 0},${city.seed},${MAP},${seasonOf(city.month)}`;
   if (terrLayer.key !== tKey)
     buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, tKey);
@@ -343,7 +371,7 @@ function renderFrame(city, uiState, clearBG) {
   // G2: night lights accumulate on the punched layer during the loop, in
   // depth order — but only when the cache key moved; a static night frame
   // reuses the finished layer and pays one composite
-  const nKey = ns > 0 ? `${cam.x},${cam.y},${cam.z},${cvs.width},${cvs.height},` +
+  const nKey = ns > 0 ? `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},` +
     `${ns},${city.tickCount},${city.terrRev},${city.devRev},${city.seed},${MAP}` : "";
   const ng = ns > 0 && nightLayer.key !== nKey ? nightLayerCtx() : null;
 
@@ -359,10 +387,15 @@ function renderFrame(city, uiState, clearBG) {
     if (nf) fireGlowMul = FIRE_GLOW_CORE / (NIGHT_LIGHT_ALPHA * Math.sqrt(nf));
   }
 
-  // painter's order: by (x + y), then x
+  // painter's order (M32a): by VIEW depth (u + v), then u. Projected screen
+  // depth is monotonic in u+v, so this stays back-to-front under every camera
+  // rotation. unrot each (u,v) back to logical (x,y) to fetch city data. At
+  // r=0 unrot is the identity, so this is the exact HEAD walk (x=u, y=s-u).
   for (let s = 0; s <= (MAP - 1) * 2; s++) {
-    for (let x = Math.max(0, s - MAP + 1); x <= Math.min(MAP - 1, s); x++) {
-      const y = s - x;
+    for (let u = Math.max(0, s - MAP + 1); u <= Math.min(MAP - 1, s); u++) {
+      const v = s - u;
+      const p = unrot(u, v, cam.r);
+      const x = p.x, y = p.y;
       const i = y * MAP + x;
       const ov = city.over[i];
       const t = city.terr[i];
@@ -404,7 +437,7 @@ function renderFrame(city, uiState, clearBG) {
             // overhead power line. SPR.wire sprites are baked at elevation 20
             // so they draw above the diamond — the line hangs over the street.
             if (ov === OV.WIREROAD) {
-              const ws = SPR.wire[wireMask(city, i)];
+              const ws = SPR.wire[rot4(wireMask(city, i), cam.r)];
               ctx.drawImage(ws.c, wx - ws.ox, wy - ws.oy);
             }
             // G3: burning buildings char — darkened while city.fire[i] is
@@ -447,9 +480,20 @@ function renderFrame(city, uiState, clearBG) {
         } else {
           const a = city.anc[i];
           const ax = a % MAP, ay = (a / MAP) | 0;
-          if (x === ax + size - 1 && y === ay + size - 1) {
+          // M32a: anc stays the logical min-corner, but its SCREEN role rotates.
+          // TRIGGER the draw on the argmax-view-depth footprint corner (front-
+          // most, always in-footprint so in-map even at map edges); POSITION the
+          // sprite from the argmin-view-depth (screen-back) corner. At r=0 these
+          // are (ax+size-1,ay+size-1) and (ax,ay) — the exact HEAD behavior.
+          let tcx = ax, tcy = ay, bcx = ax, bcy = ay, maxD = -Infinity, minD = Infinity;
+          for (let cy = 0; cy < size; cy++) for (let cx = 0; cx < size; cx++) {
+            const q = rot(ax + cx, ay + cy, cam.r), d = q.u + q.v;
+            if (d > maxD) { maxD = d; tcx = ax + cx; tcy = ay + cy; }
+            if (d < minD) { minD = d; bcx = ax + cx; bcy = ay + cy; }
+          }
+          if (x === tcx && y === tcy) {
             const spr = spriteFor(city, a);
-            const awx = worldX(ax, ay), awy = worldY(ax, ay);
+            const awx = worldX(bcx, bcy), awy = worldY(bcx, bcy);
             if (spr) {
               ctx.drawImage(spr.c, awx - spr.ox, awy - spr.oy);
               // G3: any burning footprint tile chars the whole building
@@ -707,14 +751,18 @@ function updateCars(city, ns, speed = 1) {
     if (sx < -40 || sx > cvs.width + 40 || sy < -70 || sy > cvs.height + 50) continue;
     // G16: pick the body sprite for this car's travel axis so it points down
     // the road it's on — one of two iso shapes, never an axis-aligned rect.
-    const tdx = c.tx - c.fx, tdy = c.ty - c.fy;
-    const axis = tdx !== 0 ? "x" : "y";
+    // M32a: rotate the tile travel delta into view space so the axis→body pick
+    // and the headlight vector track the street's actual on-screen diagonal at
+    // every camera rotation. At r=0 (du,dv)=(tdx,tdy), identical to HEAD.
+    const rf = rot(c.fx, c.fy, cam.r), rt = rot(c.tx, c.ty, cam.r);
+    const du = rt.u - rf.u, dv = rt.v - rf.v;
+    const axis = du !== 0 ? "x" : "y";
     const spr = carSprites[axis][c.col];
     ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
     // G16: after dusk, queue this car's lights at its screen-forward heading —
     // headlight cone ahead, taillight behind — for the additive night pass.
-    if (ns > 0 && (tdx || tdy)) {
-      const rx = (tdx - tdy) * HW, ry = (tdx + tdy) * HH; // screen forward
+    if (ns > 0 && (du || dv)) {
+      const rx = (du - dv) * HW, ry = (du + dv) * HH; // screen forward
       const inv = 1 / (Math.hypot(rx, ry) || 1);
       carLightQ.push(wx, wy, rx * inv, ry * inv);
     }
@@ -1130,11 +1178,11 @@ function renderMinimap(city, mode) {
   // rect. Tracks every pan/zoom at every map size since sc = canvas / MAP.
   if (cvs) {
     let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity;
+    // M32a: route the four screen corners through the rotation-aware
+    // screenToTile (not an inline r=0 inverse) so the box bounds the rotated
+    // visible region in tile space at every camera rotation.
     for (const [sx, sy] of [[0, 0], [cvs.width, 0], [0, cvs.height], [cvs.width, cvs.height]]) {
-      const wx = (sx - cvs.width / 2) / cam.z + cam.x;
-      const wy = (sy - cvs.height / 2) / cam.z + cam.y;
-      const a = wx / HW, b = (wy - HH) / HH;
-      const tx = (a + b) / 2, ty = (b - a) / 2;
+      const { x: tx, y: ty } = screenToTile(sx, sy);
       tx0 = Math.min(tx0, tx); tx1 = Math.max(tx1, tx);
       ty0 = Math.min(ty0, ty); ty1 = Math.max(ty1, ty);
     }

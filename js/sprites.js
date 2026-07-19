@@ -1626,12 +1626,14 @@ function spriteFor(city, i) {
   };
   switch (t) {
     case OV.ROAD:  // winter roads show plowed snow banks (M12)
-      return (season === "winter" ? SPR.roadWinter : SPR.road)[roadMask(city, i)];
+      // M32a: rotate the mask index (not the connectivity probes) so arms point
+      // at the correct screen edge at every camera rotation. rot4(m,0)===m.
+      return (season === "winter" ? SPR.roadWinter : SPR.road)[rot4(roadMask(city, i), cam.r)];
     // M26: a crossing's ground footprint is the ROAD sprite; render.js blits the
     // overhead wire on top (the road is what sits on the ground).
     case OV.WIREROAD:
-      return (season === "winter" ? SPR.roadWinter : SPR.road)[roadMask(city, i)];
-    case OV.WIRE:  return SPR.wire[wireMask(city, i)];
+      return (season === "winter" ? SPR.roadWinter : SPR.road)[rot4(roadMask(city, i), cam.r)];
+    case OV.WIRE:  return SPR.wire[rot4(wireMask(city, i), cam.r)];
     case OV.PARK:  return B.park;
     case OV.RUBBLE: return SPR.rubble;
     case OV.ZR:    return zone([B.r1, B.r2, B.r3], SPR.zoneR);

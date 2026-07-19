@@ -17,12 +17,13 @@ const PREFS_KEY = "simcity99.prefs";
 function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch (e) {}
-  return Object.assign({ autoBudget: false, dayNight: true }, p);
+  return Object.assign({ autoBudget: false, dayNight: true, viewRot: 0 }, p);
 }
 function savePrefs() {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(UI.prefs)); } catch (e) {}
 }
 UI.prefs = loadPrefs();
+cam.r = (UI.prefs.viewRot | 0) & 3; // M32a: resume at the player's last view rotation
 
 const TOOLS = [
   { id: "query",    name: "Inspect",   key: "0", icon: "🔍" },
@@ -482,6 +483,20 @@ function clampCam() {
   cam.y = Math.max(-pad, Math.min(MAP * TH + pad, cam.y));
 }
 
+// M32a: 90° view rotation. dir=+1 rotates CCW (Q), dir=-1 CW (E). Pivots in
+// place: capture the tile under screen-center FIRST, advance cam.r, then
+// recenter the camera on that same tile's new projected position so the view
+// spins around what the player is looking at rather than jumping. Snap only.
+function rotateView(dir) {
+  const c = document.getElementById("game");
+  const ctr = screenToTile(c.width / 2, c.height / 2);
+  cam.r = (cam.r + dir + 4) & 3;
+  cam.x = worldX(ctr.x, ctr.y);
+  cam.y = worldY(ctr.x, ctr.y);
+  clampCam();
+  UI.prefs.viewRot = cam.r; savePrefs();
+}
+
 let lastPaint = -1;
 function applyToolAt(e) {
   const c = document.getElementById("game");
@@ -525,6 +540,10 @@ function bindKeys() {
       return;
     }
     if (e.code === "Space") { e.preventDefault(); setSpeed(UI.speed === 0 ? 1 : 0); return; }
+    // M32a: view rotation — intercept BEFORE the TOOLS.find lookup so rotate
+    // keys never select a tool. Q/[ = CCW, E/] = CW.
+    if (e.key === "q" || e.key === "Q" || e.key === "[") { rotateView(1); return; }
+    if (e.key === "e" || e.key === "E" || e.key === "]") { rotateView(-1); return; }
     const t = TOOLS.find(t => t.key === e.key);
     if (t) { setTool(t.id); return; }
     const pan = 40 / cam.z;
@@ -562,6 +581,11 @@ function bindMinimap() {
       updateMapLegend(b.dataset.mode);
     });
   });
+  // M32a: HUD rotate buttons
+  const rccw = document.getElementById("rot-ccw");
+  const rcw = document.getElementById("rot-cw");
+  if (rccw) rccw.addEventListener("click", () => { Snd.click(); rotateView(1); });
+  if (rcw) rcw.addEventListener("click", () => { Snd.click(); rotateView(-1); });
   const mm = document.getElementById("minimap");
   mm.addEventListener("click", (e) => {
     const r = mm.getBoundingClientRect();
@@ -869,6 +893,7 @@ function openShortcuts() {
     <tr class="ksep"><td colspan="2">— Controls —</td></tr>
     <tr><td class="kbd">Space</td><td>Pause / resume the sim</td></tr>
     <tr><td class="kbd">Arrow keys</td><td>Pan the map</td></tr>
+    <tr><td class="kbd">Q / E</td><td>Rotate the view 90° (also [ / ])</td></tr>
     <tr><td class="kbd">Mouse wheel</td><td>Zoom in / out</td></tr>
     <tr><td class="kbd">Right / middle drag</td><td>Pan the map</td></tr>
     <tr><td class="kbd">Esc</td><td>Close dialogs</td></tr>
@@ -1241,7 +1266,8 @@ function newCity() {
   const names = ["Llamaville", "Port Modem", "Beanieburg", "Dialup Falls",
     "Pixel Heights", "Cassette Creek", "Winsock City", "Grungetown"];
   city.cityName = names[(Math.random() * names.length) | 0];
-  cam.x = 0; cam.y = MAP * HH; cam.z = 1;
+  cam.x = 0; cam.y = MAP * HH; cam.z = 1; cam.r = 0; // M32a: reset view rotation
+  UI.prefs.viewRot = 0; savePrefs();
   city.pushMsg(`🏗️ ${city.cityName} founded, January 1997. Taxes low, hopes high.`);
   PICKER.seed = (Math.random() * 1e9) | 0; // the next city gets a fresh roll
   pickerPreview();

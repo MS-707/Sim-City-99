@@ -203,6 +203,8 @@ input[type=range]::-moz-range-thumb {
 #mm-legend i.grad { flex: 1 1 auto; }
 /* G8: seven mode buttons in an equal-width 4-per-row grid; the active
    mode wears the sunken pressed-toggle dither like the toolbar */
+#viewrot { display: flex; gap: 3px; justify-content: center; margin-top: 3px; }
+#viewrot .btn95 { flex: 1; padding: 1px 0; font-size: 14px; line-height: 1; }
 #mapmodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 3px; }
 #mapmodes .mm { padding: 1px 0; min-width: 0; }
 #mapmodes .mm.active {

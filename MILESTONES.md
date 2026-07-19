@@ -6,27 +6,19 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M26 — Power lines cross roads** *(user request)*: implemented and
-  committed (981b5c6). A wire laid on a road (or a road laid on a wire) fuses
-  into a single **OV.WIREROAD** crossing that BOTH conducts power AND carries
-  road access/traffic; it renders as the road sprite with the overhead line
-  composited on top, wears/pollutes/jams like a road, is non-flammable and
-  never misclassified by the `t >= OV.ZR` zone idiom, and bulldozes as one.
-  Save v8 unchanged. Independent Opus criteria; **8/8 workflow-verified** with
-  a clean HEAD-baseline regression and zero console errors. An independent
-  multi-vote adversarial panel is confirming before the artifact is refreshed.
+- [ ] **M21 — Land value visualization & districts** *(next up)*: a district
+  paint layer in its own `city.district` Uint8 channel (co-exists with OV.*,
+  never charges funds, never touches the sim update path — determinism-safe),
+  a Win95 District Manager dialog with read-only `districtStats()` aggregating
+  the existing landv/poll/crime/coverage maps, a 7th minimap mode, and SC2K
+  low-zoom neighborhood labels. Save v9 + v8 back-compat. Full spec + 8
+  independent criteria archived in `docs/queue-specs.json`.
 
 ## Open
 
 > Full designs + independent 8-criteria specs for M21/M22/M24/M25 are archived
 > in `docs/queue-specs.json` (ultracode design workflow, judge-approved).
 
-- [ ] **M21 — Land value visualization & districts**: a district paint layer
-  in its own `city.district` Uint8 channel (co-exists with OV.*, never charges
-  funds, never touches the sim update path — determinism-safe), a Win95
-  District Manager dialog with read-only `districtStats()` aggregating the
-  existing landv/poll/crime/coverage maps, a 7th minimap mode, and SC2K
-  low-zoom neighborhood labels. Save v9 + v8 back-compat.
 - [ ] **M22 — Ordinances**: a `#dlg-ordinances` dialog over an ORDINANCES
   registry; `enactOrdinance()` rebuilds a pop-independent `ordMods` scalar
   cache folded into the *existing* recomputeMaps/demand/traffic/fire formulas
@@ -73,6 +65,29 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M26 — Power lines cross roads** *(user request)*: a wire laid on an
+  existing road (or a road laid on an existing wire) fuses into a single
+  **OV.WIREROAD** (18) crossing that BOTH conducts power (recomputePower's
+  flood-fill treats it as a wire node — a plant on one side powers a zone on
+  the far side through it; swapping it for a plain road severs that) AND
+  carries road access/traffic (recomputeAccess seeds it at 4, recomputeTraffic
+  + the car pool + nearestRoad/BFS/chopper all run through it — a zone reachable
+  only via the crossing gets access and grows). It renders as the road sprite
+  with the overhead power line composited on top (SPR.wire at its baked
+  elevation); road/wire connection masks join straight through; the minimap
+  tints it road-grey with a wire tan. It wears, pollutes and jams like a road,
+  is non-flammable like a road, and is explicitly excluded from every
+  `t >= OV.ZR` zone idiom so it is never a power consumer, unpowered flag,
+  fire/growth candidate or census unit. One bulldoze clears the whole crossing.
+  WIREROAD is just a byte in over[], so save v8 round-trips unchanged and
+  pre-M26 saves load clean; wires/roads still refuse to overlap zones/buildings/
+  plants. Criteria set by an independent Opus reviewer; implemented + verified
+  via the milestone workflow (8/8 criteria pass, clean HEAD-baseline regression,
+  zero console errors), then cleared by an independent 6-agent adversarial panel
+  (static completeness audit + 5 diverse-lens skeptics, 6/6 confirm, 0 refute)
+  and a bundle smoke test (crossing conducts + gives access + renders; the sole
+  404 is the standalone favicon, absent in the published artifact).
 
 - [x] **M19 — Power plant variety & aging**: OV.GAS (2x2, cap 450, §4500,
   moderate load-scaled smog) and OV.WIND (1x1, cap 80, §2500, zero smog)

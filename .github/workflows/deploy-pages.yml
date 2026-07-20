@@ -1,0 +1,42 @@
+name: Deploy to GitHub Pages
+
+# Publishes the game as a static site so anyone can play it in a browser
+# (no Claude, no install) at https://<owner>.github.io/<repo>/. The site is
+# just the repo's index.html + js/ + css/ (zero external requests), served
+# straight from this branch via the GitHub Actions Pages pipeline.
+
+on:
+  push:
+    branches: ["claude/simcity-2000-aaa-1997-ofveog"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress one.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Pages (enable on first run)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

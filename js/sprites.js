@@ -316,10 +316,11 @@ const SEASON_PAL = {
   // few % of `sand` so the beach no longer reads as a raised rampart; `iceEdge`
   // (winter only) is a dark shore crack that keeps the frozen coastline legible
   summer: {
-    grass: ["#4a9d44", "#479a47", "#4d9f46", "#489744"],
+    grass: ["#3fa53a", "#3ba23c", "#43a83c", "#3f9f38"],
     fleckA: "rgba(255,255,255,.08)", fleckB: "rgba(0,60,0,.15)",
-    floor: "#479843", leafLo: "#1d6e2a", leafHi: "#2f9c3f", snowCap: null,
-    waterTop: "#2564af", waterBot: "#215aa1",
+    floor: "#3ea23b", leafLo: "#1a7a26", leafHi: "#2bb03a", snowCap: null,
+    waterTop: "#1c66cc", waterBot: "#195cb8",
+    waterDith: "#2a72d6", waterCrest: "rgba(130,185,255,.22)",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
   },
@@ -349,7 +350,8 @@ const SEASON_PAL = {
     grass: ["#e9edf3", "#e6eaf1", "#eceff5", "#e5e9f0"],
     fleckA: "rgba(255,255,255,.5)", fleckB: "rgba(165,182,210,.35)",
     floor: "#e3e8f0", leafLo: "#2c5a34", leafHi: "#38703f", snowCap: "#eef2f7",
-    waterTop: "#9fc1d9", waterBot: "#98bbd5",
+    waterTop: "#6a9ed6", waterBot: "#6398cf",
+    waterDith: "#7aabde", waterCrest: "rgba(210,235,255,.35)",
     wave: "rgba(255,255,255,.4)", glint: "rgba(240,248,255,.7)",
     sand: "#c9d6e4", sandHi: "#e8eef5", foam: "rgba(255,255,255,.5)", iceEdge: "#7fa0bf",
   },
@@ -360,7 +362,7 @@ const SEASON_PAL = {
 // ellipse so forest trees stop floating. Defaults reproduce the pre-G13 round
 // tree exactly, so standalone park/mayor/stadium trees are unchanged.
 function drawTree(g, x, y, s, tint = 1, pal = null, sil = 0, hue = 0, ground = false) {
-  let lo = pal ? pal.leafLo : "#1d6e2a", hi = pal ? pal.leafHi : "#2f9c3f";
+  let lo = pal ? pal.leafLo : "#1a7a26", hi = pal ? pal.leafHi : "#2bb03a";
   if (pal && pal.leafSets) { // autumn: 3 discrete canopy hue pairs (G14)
     const set = pal.leafSets[hue < -0.27 ? 2 : hue < 0.27 ? 1 : 0]; // red / orange / gold
     lo = set[0]; hi = set[1];
@@ -725,6 +727,30 @@ function buildSprites() {
           gr.addColorStop(0, P.waterTop); gr.addColorStop(1, P.waterBot);
           sealedDiamond(g, ox, oy, gr); // opaque seam, no bleed
           g.save(); diamondPath(g, ox, oy); g.clip();
+          // GQ1: two-tone ORDERED DITHER — a 256-color-era cobalt stipple laid
+          // under the wave strokes. The second tone (P.waterDith) is dropped on
+          // one phase of a 2x2 block-parity Bayer pattern; the phase term
+          // (f+v)&1 is pure arithmetic (no RNG, no per-frame recompute), so
+          // every boot bakes these SPR.season.*.water canvases byte-identical.
+          if (P.waterDith) {
+            g.fillStyle = P.waterDith;
+            for (let py = -HH; py < HH; py += 2) {
+              for (let px = -HW; px < HW; px += 2) {
+                if ((((px >> 1) + (py >> 1)) & 1) === ((f + v) & 1)) continue;
+                g.fillRect(ox + px, oy + py, 1, 1);
+              }
+            }
+            // GQ1: SINE-SCROLL HIGHLIGHT — a brighter cobalt crest whose vertical
+            // offset is A*sin(phase) with phase = f*2 + v*3 + k, a pure integer
+            // function of (f, v, k). It scrolls across the WATER_FRAMES so the
+            // surface glimmers, and Math.sin of integer args is byte-identical
+            // every boot (determinism preserved, still one cached blit/frame).
+            g.fillStyle = P.waterCrest;
+            for (let k = 0; k < 3; k++) {
+              const by = oy - HH + 8 + k * 8 + Math.round(3 * Math.sin(f * 2 + v * 3 + k));
+              g.fillRect(ox - HW, by, TW, 2);
+            }
+          }
           g.strokeStyle = P.wave; g.lineWidth = 1;
           for (let k = 0; k < 4; k++) {
             const wy = oy - HH + 4 + k * 7 + ((k * 5 + f * 2 + v * 3) % 5);
@@ -1222,7 +1248,7 @@ function buildSprites() {
   // green, the flower confetti draws with the same seeded R() sequence).
   const parkDraw = (sk) => (g, ox, oy) => {
     const P = (sk && sk !== "summer" && sk !== "spring") ? SEASON_PAL[sk] : null;
-    const lawn = sk === "winter" ? "#e4e9f1" : sk === "autumn" ? "#9c9850" : "#57b04f";
+    const lawn = sk === "winter" ? "#e4e9f1" : sk === "autumn" ? "#9c9850" : "#4bb844";
     diamondPath(g, ox, oy);
     g.fillStyle = lawn; g.fill();
     g.strokeStyle = "rgba(0,0,0,.2)"; g.stroke();
@@ -1255,7 +1281,7 @@ function buildSprites() {
   const r1Draw = (v, sk) => (g, ox, oy) => {
     const P = (sk && sk !== "summer" && sk !== "spring") ? SEASON_PAL[sk] : null;
     const snow = sk === "winter";
-    const lawn = sk === "winter" ? "#e6ebf2" : sk === "autumn" ? "#9c9850" : "#5aa552";
+    const lawn = sk === "winter" ? "#e6ebf2" : sk === "autumn" ? "#9c9850" : "#4dae46";
     diamondPath(g, ox, oy);
     g.fillStyle = lawn; g.fill(); g.strokeStyle = "rgba(0,0,0,.18)"; g.stroke();
     tinyHouse(g, ox - 10, oy + 2, 22, houseWalls[v], houseRoofs[v], snow);

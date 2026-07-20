@@ -104,8 +104,10 @@ const worldY = (x, y) => { const p = rot(x, y, cam.r); return (p.u + p.v) * HH +
 // the month boundary, noon at hour 12. Both functions are pure in sim time —
 // equal tickCount values always produce identical lighting, and the phase
 // advances by itself as the sim ticks.
-const NIGHT_TINT = "#0a1230";     // dusk wash color (screen-space overlay)
-const NIGHT_MAX_ALPHA = 0.6;      // G1: lerp facades ~60% toward the tint at deepest
+const NIGHT_TINT = "#191826";     // GQ1: warmer, less-saturated slate dusk (S~0.19)
+                                  // so warm facade/window accents survive the wash
+                                  // and the day/night mean-S ratio clears 1.4
+const NIGHT_MAX_ALPHA = 0.53;     // G1: lerp facades ~53% toward the tint at deepest
                                   // night instead of covering them — silhouettes,
                                   // roof diamonds and zone colors stay readable
 const NIGHT_LIGHT_ALPHA = 0.7;    // G1: clamp on the additive night-light pass —

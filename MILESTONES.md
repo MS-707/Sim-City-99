@@ -6,8 +6,8 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- (none — autonomous loop paused per user request; a graphics-quality rubric
-  workflow is generating the next visual-milestone slate to refill this queue.)
+- [ ] **GQ1 — Daytime palette & water vibrancy** *(graphics roadmap 1/10)* —
+  running via dynamic workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
 
@@ -21,73 +21,66 @@ Queue policy: keep at least 5 open improvements at all times.
   trickles power); a recycling ordinance cuts the stream; overflow becomes a
   growing pollution + complaint source.
 
-### Graphics quality slate — SC2K fidelity (rubric-gated, ultracode audit)
+### Graphics quality roadmap — 10 milestones to SC2K fidelity
 
-> **Quality bar** = `docs/graphics-quality-rubric.json`: a weighted, measurable
-> 6-dimension rubric grounded in the OpenSC2K/SC2K reference pixels vs our own
-> render, built by an ultracode workflow (6 dimension critics → synthesis →
-> 3-lens adversarial panel → reconcile). **Current overall: 37/100** (scored
-> against the SUMMER/DAYTIME baseline). Dimensions & weights: buildings ×5,
-> groundscape ×5, palette-mood ×4, terrain-water ×4, transport ×4, specials ×4.
-> The slate below is the leverage-ranked path to the bar; each item's full
-> pass-criteria live in the rubric JSON. Clean-room throughout: recreate the
-> look procedurally, never copy Maxis art.
+> **The plan.** `docs/graphics-quality-rubric.json` is the measurable quality
+> bar (6 weighted dimensions, **current 37/100** vs the SUMMER/DAYTIME SC2K
+> reference). `docs/graphics-roadmap.json` breaks the path to that bar into the
+> **10 milestones below**, each with explicit **quality gates** and the
+> per-milestone dynamic-workflow protocol (design+criteria → implement → verify
+> against a HEAD baseline → adversarial panel → ship). **`/goal` + `/loop` drive
+> it:** each loop iteration runs the next `todo` milestone to completion via a
+> workflow, clears its gates, ships (bundle + artifact + commit + push), and
+> advances. Clean-room throughout — recreate the look procedurally, never copy
+> Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ1 — Daytime palette re-tune** *(palette, I5/E2)*: push summer/noon
-  facade + terrain saturation to full and tune `NIGHT_MAX_ALPHA`/the night-lerp
-  so no sampled frame collapses to cold monochrome. A lighting-constant + HSL
-  re-tune (day/night already exists, default-on) — **not** a default flip.
-- [ ] **GQ2 — Per-tile ground-material system** *(groundscape, I5/E3)*: assign
-  every empty tile a material (grass/dirt/sand/pavement) via low-frequency value
-  noise, drawn with a base color + stippled/dithered noise so no flat slab fills
-  remain. Highest screen-area coverage; the direct "blank slab" fix.
-- [ ] **GQ3 — Per-building hue families** *(buildings, I4/E3)*: seed each facade
-  base color from a curated zone/density palette (terracotta/brick R,
-  tan/mustard mid-rise, cream/white civic, teal/cyan + banded glass C, steel/
-  olive I); lit/shadow faces by HSL lightness shift. Restores zone-by-color
-  legibility → the ≥6 hue families the palette bar needs.
-- [ ] **GQ4 — Tree stands & street trees** *(groundscape, I4/E2)*: cluster dense
-  canopies on unbuilt tiles and line single trees along ≥70% of straight road
-  segments (size/hue jitter). Placement-only — the summer-green recolor already
-  shipped. Near-zero cost, large aliveness + green-primary gain.
-- [ ] **GQ5 — Non-prism building silhouettes** *(buildings, I5/E4)*: 3–4 new
-  massings from stacked/inset iso boxes (stepped-setback mid-rise, tapering
-  tower, pitched/hip-roof low-rise, sawtooth-roof industrial) + a 6+ rooftop
-  prop library with seeded placement. The top "reads as SC2K" lever.
-- [ ] **GQ6 — Reflective-glass facade renderer** *(buildings, I4/E2)*: a new bake
-  routine drawing PERIOD-CORRECT ordered-dithered/banded curtain-wall + vertical
-  mullions + a couple reflection streaks (256-color-era glass, **not** a smooth
-  modern gradient).
-- [ ] **GQ7 — Rotation-aware road markings** *(transport, I4/E3)*: darken road
-  fill to asphalt; bake dashed center-lines, solid lane edges and intersection
-  crosswalk/stop-line bars into all 16 autotile mask orientations so they still
-  read correctly after the `rot4()` remap.
-- [ ] **GQ8 — Building cast-shadows + aliveness guard** *(buildings, I4/E3)*: a
-  directional building drop-shadow pass onto neighbor tiles (matching the tree/
-  car grounding shadows already in `render.js`), and formalize aliveness
-  (traffic density, smoke plumes, animated water/train) as a regression-guarded
-  target.
-- [ ] **GQ9 — Auto-spanning suspension bridge** *(transport, I4/E3)*: when road/
-  rail abuts a `TERR.WATER` run, extrude two tapered towers, stroke a
-  quadratic-curve main cable, drop evenly spaced hangers to a railed deck, and
-  paint a water shadow. Unblocked — flat water gaps already exist and road/rail/
-  wire already bridge water at 5× cost.
-- [ ] **GQ10 — Specials gap-fill** *(specials, I3/E3)*: surface & tune the shipped
-  M28 landmarks (arcologies/statue/eiffel/pyramid/stadium/civics), then author
-  only the genuinely-missing silhouettes — an airport group (terminal/tower/
-  runway), a second power-plant type, and ≥1 water-edge seaport/marina.
-- [ ] **GQ11 — Water shimmer + winter-water saturation** *(palette, I2/E1)*:
-  after GQ1, verify summer water (already `#2564af`, S~66%) reads well; add a
-  two-tone dither + sine-scroll highlight if a gain remains, and lift winter
-  water (`#9fc1d9`) toward cobalt.
-- [ ] **GQ-EPIC — True elevation heightmap** *(terrain, I3/E5 — STRETCH, deferred)*:
-  integer per-tile elevation with cliff faces and sea-level water pooling.
-  Explicitly **de-scoped from the near-term bar**: it invalidates the flat
-  painter order (`s=x+y`), height-ambiguous click-picking, the single-blit
-  terrain cache, `updateCars`/minimap re-basing, multi-tile footprint leveling,
-  a save-format bump + migration, and must reconcile with the categorical
-  `TERR.WATER` model, waterfill, pump adjacency and the M29 flood. Tracked as its
-  own epic; do not attempt until the flat-model slate above is largely done.
+- [ ] **GQ1 — Daytime palette & water vibrancy** *(palette)*: full summer/noon
+  saturation + a night-lerp that never goes cold-monochrome + livelier water.
+  **Gates:** water S≥60% & bluest in frame · day saturation ≥2× deepest night ·
+  warm night accents present · parks S≥45% green · geometry byte-identical to HEAD.
+- [ ] **GQ2 — Ground-material quilt** *(groundscape)*: noise-driven grass/dirt/
+  sand/pavement with dithered per-tile variation + relief tone; no blank slabs.
+  **Gates:** ≥4 materials/view w/ per-tile noise · no NxN flat block · varied at
+  1.0 & 0.4 zoom · cache rebuilds only on season/size, frame within ~20% · deterministic.
+- [ ] **GQ3 — Zone-correlated building palette** *(buildings)*: curated per-zone/
+  density facade hues, lit/shadow by HSL shift. **Gates:** ≥6 hue buckets ·
+  nearest-hue classifier ≥0.9 zone-correct · adjacent variants ≥10 color dist ·
+  G1 night legibility preserved · deterministic.
+- [ ] **GQ4 — Vegetation & street trees** *(groundscape)*: dense tree stands +
+  street trees along ≥70% of straight roads (placement-only). **Gates:** ≥1
+  multi-tile stand · ≥70% road-edge coverage · legal placement · perf within ~20% · deterministic.
+- [ ] **GQ5 — Building silhouette variety** *(buildings)*: 3–4 non-prism massings
+  + a 6+ rooftop prop library. **Gates:** ≥12 grayscale-distinct silhouettes ·
+  levels 1–5 distinct · ≥6 seeded roof props · anchors unchanged (painter/picking
+  intact vs HEAD) · deterministic.
+- [ ] **GQ6 — Reflective-glass facades** *(buildings)*: period-correct
+  banded/ordered-dither curtain-wall + mullions + reflection streaks (not a
+  modern gradient). **Gates:** banding/dither measured (not smooth gradient) ·
+  mullions present · C-high-density-gated · silhouette/anchor unchanged · deterministic.
+- [ ] **GQ7 — Road markings & asphalt** *(transport)*: asphalt fill + dashed
+  center-lines/lane-edges/crosswalks baked into all 16 masks, rotation-correct.
+  **Gates:** markings on straights + crosswalks at junctions · correct across 4
+  rotations · asphalt darker than lots · night lamps + cars unregressed · deterministic.
+- [ ] **GQ8 — Building cast-shadows & aliveness guard** *(buildings)*: directional
+  drop-shadows onto neighbor tiles + a regression guard on motion. **Gates:**
+  shadow pixels sun-opposite · direction matches tree/car shadows · traffic/smoke/
+  water/train ≥ HEAD baseline · shadows day-only (no night bleed) · deterministic.
+- [ ] **GQ9 — Shorelines & suspension bridges** *(terrain-water + transport)*:
+  beveled beach/foam ramps on every water border + auto-spanning bridges over
+  flat water gaps. **Gates:** no hard 1px shoreline · foam/wet-sand band · bridge
+  towers+cable+hangers+deck on road/rail-over-water · rotation-correct + picking
+  intact · save unchanged.
+- [ ] **GQ10 — Special buildings gap-fill** *(specials)*: surface/tune M28
+  landmarks, then author airport group + a 2nd power plant + a seaport/marina.
+  **Gates:** ≥8 special silhouettes (incl. hero readable at 0.3 zoom) · airport
+  placeable · 2nd plant visually distinct + sim-wired · seaport on water · new
+  ids save-round-trip.
+
+> **Stretch (deferred, NOT one of the 10):** **GQ-EPIC — true elevation
+> heightmap** (integer per-tile height, cliffs, sea-level pooling). Effort-5;
+> breaks the flat painter order (`s=x+y`), click-picking, the terrain cache,
+> `updateCars`/minimap, multi-tile leveling, and the save format, and must
+> reconcile with `TERR.WATER`/waterfill/pump/M29 flood. Revisit only after GQ1–10.
 
 
 ## Done

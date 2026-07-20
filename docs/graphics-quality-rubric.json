@@ -1,0 +1,220 @@
+{
+  "title": "SimCity 99 — Graphics Quality Rubric",
+  "purpose": "The visual quality bar folded into the project /goal success criteria. Every future graphics milestone is scored against these weighted, measurable dimensions. The north-star recreates genuine SimCity 2000 fidelity ENTIRELY in procedural canvas — zero external art, zero dependencies, no build step. Clean-room: we recreate the LOOK and QUALITY, never copy Maxis art.",
+  "method": "Grounded in the four OpenSC2K reference screenshots (which render original Maxis SC2K art via user-supplied LARGE.DAT) side-by-side with a screenshot of our own developed city. Built by an ultracode workflow: 6 independent dimension critics scored our pixels vs the reference, a synthesis pass consolidated, a 3-lens adversarial panel (feasibility/leverage/fidelity) pressure-tested against the actual codebase, and a reconcile pass integrated the verified corrections.",
+  "established": "2026-07-20",
+  "overall_current_score_0_100": 37,
+  "scoring_baseline": "The SUMMER / DAYTIME render is the reference baseline (the earlier 22/100 was a winter-night sampling artifact; corrected to 37/100).",
+  "north_star": "Ship a vibrant, sunny 1997-nostalgia isometric city that reads instantly as a colorful topographic mosaic — the Maxis SimCity 2000 quality bar recreated entirely in procedural canvas draws with zero external art, zero dependencies, no build step. The SUMMER/DAYTIME render is the reference baseline against which we score (the prior '22/100 night-only' read was a winter-night sampling artifact): saturated cobalt water (already ~S66%) contrasting warm tan/sand terrain, a shoreline of beveled beaches and foam bands on every land-water border, and directional relief shading plus forest/height-class tonal variation so the ground never reads as one flat plane. The skyline is zone-legible buildings drawn from 6+ curated hue families (brick-red residential, tan/gold mid-rise, teal/cyan and banded reflective-glass commercial towers, cream-marble civic) with genuinely varied silhouettes and building cast-shadows for iso depth — not one recolored prism. Transport reads as engineered infrastructure — marked asphalt roads, a distinct highway class, steel rail with an animated multi-car train, and a signature suspension bridge that auto-spans the existing flat water gaps. The already-shipped M28 landmark family (arcologies, statue, eiffel, pyramid, stadium, columned civics) is surfaced and tuned, and the genuine gaps (airport group, a second power-plant type, water-edge seaport/marina) are filled. A living groundscape of noise-varied ground materials, tree stands, street trees, parks and decorated interstitial lots fills every tile so nothing reads as a blank slab, and aliveness (traffic, smoke plumes, animated water/train) is a protected target. STRETCH, tracked as an explicit effort-5 epic and NOT part of the near-term hard bar: a true integer elevation heightmap with cliffs and water pooling in low ground — its 'rolling heightmap / city drapes over terrain' language is a stretch goal because it invalidates the flat-plane cache, (x+y) painter order, click-picking, car paths, minimap, multi-tile footprints and the versioned save format, and must reconcile with the categorical TERR.WATER model, waterfill tool, pump adjacency and the M29 flood disaster. Success is measured against SC2K reference pixels for LOOK and FIDELITY only — we recreate the concept and quality, never copy the original art.",
+  "rubric": [
+    {
+      "dimension": "palette-mood",
+      "weight": 4,
+      "current_score_0_10": 5,
+      "pass_bar": "Scored against the SUMMER/DAYTIME render (not a winter-night sample): water saturation (HSL S) >= 60% and the most saturated blue in frame; >= 6 distinct building hue families correlated to zone; terrain warm tan/sand separated from water by >= 90 deg hue; average daytime frame saturation >= 2x the deepest night frame; night mode retains warm window/streetlight accents so it never collapses to a single gray-blue. Demoted to weight 4 because summer water (#2564af, S~66%) and summer foliage (S>=45) already meet several thresholds and a daytime render already exists.",
+      "criteria": [
+        "Verified on the summer/noon render: water S >= 60% and clearly bluer/more saturated than any building face",
+        ">= 6 distinct facade hue buckets spanning red, orange/tan, gold, teal/cyan, blue, neutral-white",
+        "Hue correlates to zone: residential warm red/tan, commercial cool teal/glass, civic white/cream",
+        "Terrain hue in tan/sand range, contrasting blue water by >= 90 degrees",
+        "Parks/trees render vivid mid-green (S >= 45%) in daytime, not dark winter pine",
+        "Night mode still shows warm accent pixels on a visible fraction of facades (NIGHT_MAX_ALPHA/night-lerp tuned so a sampled frame is never a single cold hue)"
+      ]
+    },
+    {
+      "dimension": "terrain-water",
+      "weight": 4,
+      "current_score_0_10": 3,
+      "pass_bar": "NEAR-TERM HARD BAR (flat-model, feasible without the elevation epic): water fills all TERR.WATER tiles as one connected saturated animated cobalt body; every land tile bordering water renders a beveled beach/foam ramp (no hard 1px seam); terrain carries directional relief shading and forest/height-class tonal variation so the plane never reads as one flat tone; shorelines show a distinct lighter foam/wet-sand band. STRETCH (tracked effort-5 epic, NOT required to pass this bar): a true integer heightmap with 6-8 visible cliff-separated levels and full object draping. Reworded from the draft, which hard-coded the stretch heightmap into the pass bar and was therefore unachievable without the epic.",
+      "criteria": [
+        "Water fills all sub-sea/TERR.WATER tiles as one connected saturated animated body",
+        "Every land tile bordering water renders a beveled beach/foam ramp, no hard 1px edge",
+        "Shorelines show a distinct lighter foam/wet-sand transition band",
+        "Directional relief shading on terrain (sun-facing tones lighter, far tones darker) so the plane is not flat-toned",
+        "Forest/ground tonal variation reads as relief texture at 1.0 and ~0.4 zoom",
+        "STRETCH ONLY (epic): integer elevation with 6-8 cliff-separated levels and buildings/roads/trees draping to tile height"
+      ]
+    },
+    {
+      "dimension": "buildings",
+      "weight": 5,
+      "current_score_0_10": 3,
+      "pass_bar": ">= 12 silhouette-distinct archetypes across R/C/I zones, each verifiable by grayscale outline (roofline differs, not just height); reflective-glass towers drawn as PERIOD-CORRECT banded/ordered-dithered curtain-wall with mullions (NOT a smooth photoreal gradient, which reads too modern for 1993/1997); buildings cast directional drop-shadows onto neighboring tiles for iso depth; each zone identifiable in grayscale by form and in daytime by a distinct palette family; rooftops draw from >= 6 seeded prop types; density levels 1-5 produce distinct sprites; facades carry material texture. Raised to the top weight: silhouette variety is the single most iconic 'reads as SC2K' signal and current buildings largely derive from one prism().",
+      "criteria": [
+        ">= 12 archetypes distinguishable by grayscale silhouette outline alone (not 12 barely-different boxes)",
+        "Glass facade uses banded/ordered-dithered curtain-wall + mullions + reflection streaks, not a smooth gradient and not lit dots",
+        "Buildings cast a directional drop-shadow onto adjacent tiles (matching the tree/car grounding shadows already in-engine)",
+        "Each zone identifiable in grayscale by silhouette/texture and in color by a distinct palette family",
+        "Rooftops draw from >= 6 prop types with seeded per-tile placement so neighbors differ",
+        "Density levels 1-5 produce distinct sprites (setbacks/tapering at high density)",
+        "Facades show material texture (brick coursing / stone banding / spandrel glass)"
+      ]
+    },
+    {
+      "dimension": "transport",
+      "weight": 4,
+      "current_score_0_10": 3,
+      "pass_bar": "Roads render dashed center-lines, solid lane edges and painted crosswalks/stop-lines correct under all 4 rotations (baked into all 16 autotile mask orientations so they survive rot4 remap); a distinct ~2x-width highway class with a ramp exists; a steel rail class with cross-tie ticks carries a smoothly animated multi-car train; road/rail meeting a TERR.WATER gap auto-spans a suspension bridge (towers, catenary cable, hangers, railed deck, water shadow) on the existing flat water model; each class distinct by palette/silhouette at multiple zooms. Aliveness (animated train + visible traffic density) is a protected target here, not a buried sub-clause.",
+      "criteria": [
+        "Roads draw dashed center-line + lane edges + intersection crosswalks, correct across all 4 rotations (baked per mask orientation)",
+        "Distinct highway class at ~2x width with a sloped ramp",
+        "Rail class with evenly spaced cross-tie ticks plus a smoothly animated multi-car train",
+        "Road/rail meeting a flat TERR.WATER gap auto-spans a bridge: towers, cable, hangers, railed deck, water shadow",
+        "Road/highway/rail/bridge each identifiable by palette+silhouette at 1x and zoomed out",
+        "Daytime asphalt darker than lot fill so the network reads as a grid; traffic animation visible and not regressed"
+      ]
+    },
+    {
+      "dimension": "specials",
+      "weight": 4,
+      "current_score_0_10": 5,
+      "pass_bar": "Reflects shipped M28: arcologies (plymouth/forestArc/darco/launch), statue, eiffel, pyramid, stadium and columned/pedimented/domed civics with marble aprons already bake. Bar is now SURFACING + FILLING GAPS, not re-authoring: >= 8 distinct non-prism specials visible in play (mostly already shipped), >= 1 hero landmark readable at 0.3 zoom, a civic family by columns/pediment/dome + marble palette (shipped), plus the genuinely-missing set filled — an airport group (terminal/tower/runway), a SECOND power-plant type, and >= 1 water-edge special (seaport/marina) on water tiles — each with a signature accent hue readable when zoomed out. Current score raised from the draft's 2 because M28 already shipped most of this.",
+      "criteria": [
+        ">= 8 distinct non-prism special silhouettes surfaced in play (M28 set counts)",
+        ">= 1 hero landmark taller/larger than surrounding blocks and readable at 0.3 zoom",
+        "Civic family distinguished by columns/pediment/dome and a pale marble palette (verify M28 civics render)",
+        "GAP-FILL: airport tile group with terminal, control tower, and runway/apron markings",
+        "GAP-FILL: a second visually distinct power-plant type and >= 1 water-edge special (seaport/marina) on water tiles",
+        "Each special carries a signature accent color identifiable by hue when zoomed out"
+      ]
+    },
+    {
+      "dimension": "groundscape",
+      "weight": 5,
+      "current_score_0_10": 3,
+      "pass_bar": ">= 4 noise-varied procedural ground materials (grass, dirt/sand, paved, water) visible in one view with per-tile variation so no flat fills remain; tree coverage includes >= 1 multi-tile dense stand plus street trees along >= 70% of straight road segments (the recolor to summer green is already met; the NEW work is placement); >= 3 park props (fountain, pond, footpath, bench, flowerbed); waterfront shows a distinct shoreline treatment; interstitial tiles carry decoration (lots/yards/hedges) so no large blank slab remains; the ground quilt reads as varied color at 1.0 and ~0.4 zoom. Kept at top weight: this covers the majority of screen tiles and is the direct fix for the north-star 'blank slab' complaint.",
+      "criteria": [
+        ">= 4 distinct ground materials in one view, each with per-tile noise so neighbors differ",
+        "Tree coverage includes >= 1 multi-tile dense stand AND street trees along >= 70% of straight road segments",
+        ">= 3 distinct procedural park/plaza props (fountain, pond, footpath, bench, flowerbed)",
+        "Waterfront tiles show a distinct beach/rip-rap shoreline rather than a flat seam",
+        "Interstitial tiles carry decoration (parking lots, yards, hedges, gardens); no blank slab regions",
+        "Ground quilt reads as varied color at both 1.0 and ~0.4 zoom"
+      ]
+    }
+  ],
+  "prioritized_slate": [
+    {
+      "milestone": "Re-tune the SUMMER/DAYTIME palette as the scored baseline: push daytime facade/terrain saturation to full, confirm the day render (dayNight pref + noon path already exist) and adjust NIGHT_MAX_ALPHA / the night-lerp so no sampled frame collapses to cold monochrome. This is a lighting-constant + HSL re-tune, NOT a 'flip the default' change.",
+      "rationale": "Corrected from the draft, whose 'current shot is night-only, flip the default' rationale was a verified misdiagnosis: day/night is tickCount%24 with dayNight default-true, so there is no stuck default. The substantive palette work still recolors ~100% of pixels and is the single biggest whole-frame lever, so it keeps rank 1 — but re-tuning constants across many baked night values may push past effort-2.",
+      "dimension": "palette-mood",
+      "impact_1_5": 5,
+      "effort_1_5": 2,
+      "priority_rank": 1,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Add a per-tile ground-material system: assign each empty tile a type (grass/dirt/sand/pavement) via low-frequency value noise and draw each with a base color plus stippled/dithered noise so no flat fills remain.",
+      "rationale": "Promoted from rank 9. Covers more screen area than any other item and is the direct fix for the north-star 'blank slab' complaint (leverage critic). Pairs with the daytime re-tune and tree stands to make the whole ground read as a mottled quilt. Moderate effort; lives in the terrain-layer cache but must not regress the single-blit perf assumption.",
+      "dimension": "groundscape",
+      "impact_1_5": 5,
+      "effort_1_5": 3,
+      "priority_rank": 2,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Add per-building hue assignment keyed to zone/density: seed each facade base color from a curated palette (terracotta/brick-red R, tan/mustard mid-rise, cream/white civic, teal/cyan and banded glass C, drab steel/olive I), deriving lit/shadow faces by HSL lightness shift.",
+      "rationale": "Restores zone legibility by color and reaches the >=6 hue families the palette bar needs. Effort raised from 2 to 3: sprites are pre-BAKED per type in sprites.js, so hue families multiply the baked-sprite cache set (memory + variant count), which the draft's effort-2 ignored.",
+      "dimension": "buildings",
+      "impact_1_5": 4,
+      "effort_1_5": 3,
+      "priority_rank": 3,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Add dense procedural tree stands plus road-edge street trees: cluster canopies on unbuilt tiles and line single trees along >= 70% of straight road segments with size/hue jitter. (The summer-green recolor is already shipped; scope is PLACEMENT only.)",
+      "rationale": "Promoted from rank 6. Near-zero geometry cost (reuses the tree sprite) for a large area-coverage aliveness gain and the green primary. Corrected scope: fidelity critic showed summer foliage is already S>=45, so the recolor half is done. Caveat noted: street trees rise above the plane, so they stay in the LIVE draw pass (cannot join the flat terrain cache) — watch per-frame draw count on 128x128 maps.",
+      "dimension": "groundscape",
+      "impact_1_5": 4,
+      "effort_1_5": 2,
+      "priority_rank": 4,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Build 3-4 non-prism building silhouettes from stacked/inset iso boxes (stepped-setback mid-rise, tapering tower, pitched/hip-roof low-rise, wide sawtooth-roof industrial shed) plus a 6+ rooftop prop library with seeded placement.",
+      "rationale": "Promoted from rank 10. Silhouette variety is the highest 'reads as SC2K' lever (fidelity critic) and breaks the one-recolored-prism monotony that pins buildings at 3/10 — verified: generic buildings largely derive from prism(). Sequenced after the cheap ground/color/tree wins but ahead of the glass tweak, since it is the real buildings gap.",
+      "dimension": "buildings",
+      "impact_1_5": 5,
+      "effort_1_5": 4,
+      "priority_rank": 5,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Add a reflective-glass skyscraper facade renderer using PERIOD-CORRECT ordered dithering / horizontal banding + vertical mullions + a couple of reflection streaks — a banded, 256-color-era glass, NOT a smooth top-to-bottom photoreal gradient.",
+      "rationale": "Corrected from the draft's 'smooth sky-to-ground gradient', which the fidelity critic flagged as reading too modern for the 1993/1997 target. Feasible as a new bake routine in sprites.js (a linear-gradient path already exists to adapt). Demoted from rank 4 per leverage critic: it only touches tall commercial towers, a minority of tiles.",
+      "dimension": "buildings",
+      "impact_1_5": 4,
+      "effort_1_5": 2,
+      "priority_rank": 6,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Add rotation-aware road surface markings: darken road fill to asphalt, draw dashed center-lines, solid lane edges and crosswalk/stop-line bars at intersections — baked correctly into all 16 autotile mask orientations so they still read after the rot4 remap.",
+      "rationale": "Feasible but effort raised from 2 to 3: roads are autotiled via masks remapped by rot4() picking a different BAKED sprite, so directional markings must be baked into each of the 16 orientations rather than stroked once — a real correctness burden the draft understated.",
+      "dimension": "transport",
+      "impact_1_5": 4,
+      "effort_1_5": 3,
+      "priority_rank": 7,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "NEW: add a building cast-shadow pass (directional drop-shadows onto neighbor tiles, matching the tree/car grounding shadows already in render.js) and formalize aliveness as a protected target — instrument/guard traffic density, smoke plumes and animated water/train against regression.",
+      "rationale": "Added per the fidelity critic: cast shadows and motion are defining SC2K look-drivers that are currently unscored and can silently regress (cars/smoke/night-lights already animate in-engine; buildings do not cast). Since the rubric is capped at 6 dimensions, these are folded in as first-class criteria under buildings (shadows) and transport/groundscape (aliveness) and get this dedicated milestone.",
+      "dimension": "buildings",
+      "impact_1_5": 4,
+      "effort_1_5": 3,
+      "priority_rank": 8,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Procedural suspension bridge that auto-spans the EXISTING flat water gaps: when road/rail abuts a TERR.WATER run, extrude two tapered towers, stroke a quadratic-curve main cable, drop evenly spaced hangers to a railed deck quad, and paint a translucent water shadow.",
+      "rationale": "UNBLOCKED and promoted from rank 12. The draft deferred this behind the elevation epic claiming 'water gaps must be real', but verification confirms flat TERR.WATER gaps already exist and roads/rail/wires already bridge water (canPlace) at 5x cost. This signature SC2K silhouette is buildable NOW as additive tower/cable/deck geometry — no elevation dependency.",
+      "dimension": "transport",
+      "impact_1_5": 4,
+      "effort_1_5": 3,
+      "priority_rank": 9,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Specials gap-fill (NOT re-authoring): surface and tune the shipped M28 landmarks (arcologies/statue/eiffel/pyramid/stadium/civics), then author only the genuinely-missing silhouettes — an airport group (terminal/control-tower/runway), a second power-plant type, and >= 1 water-edge seaport/marina on water tiles — each with a signature accent hue.",
+      "rationale": "Corrected from the draft's 'author the FIRST hero landmarks', which duplicated shipped work: sprites.js already bakes plymouth/forestArc/darco/launch arcologies, statue, eiffel, pyramid, stadium and columned/pedimented civics. The specials current score is raised to 5 to reflect this; the remaining effort is only the true gaps plus making the existing set discoverable in play.",
+      "dimension": "specials",
+      "impact_1_5": 3,
+      "effort_1_5": 3,
+      "priority_rank": 10,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "Post-daytime water verification + winter water saturation: after the daytime re-tune (rank 1), confirm summer water (already #2564af, S~66%) reads acceptably; if a gain remains, add a two-tone dither + sine-scroll highlight and lift the WINTER water (#9fc1d9) toward cobalt.",
+      "rationale": "Heavily demoted from rank 3. Verification showed the draft's 'pale icy shimmer' is the WINTER palette, not the summer default; summer water already meets the S>=60 bar. Impact drops to 2 — the real marginal work is winter water + optional dither, contingent on what the rank-1 re-tune leaves. Cheap (effort 1) and self-contained in the water-frame cache.",
+      "dimension": "palette-mood",
+      "impact_1_5": 2,
+      "effort_1_5": 1,
+      "priority_rank": 11,
+      "procedural_feasible": true
+    },
+    {
+      "milestone": "STRETCH EPIC (tracked, effort-5, explicitly de-scoped from the near-term bar): integer elevation heightmap with cliff faces and sea-level water pooling. Split into projection+z-offset, height-aware click-picking (screenToTile becomes column-ambiguous), painter-order rework (s=x+y invalid once tiles have height), terrain-cache rewrite off the single flat blit, updateCars/minimap re-basing, multi-tile footprint terrain-leveling, a save v10 bump + migration (synthesize elev=0 for flat v<=9 cities), and reconciling the new sea-level model with the categorical TERR.WATER type, the waterfill tool, pump adjacency, water-bridging and the M29 flood disaster.",
+      "rationale": "Reworded to a feasible tracked epic and deferred to last. All three critics converged: the draft rated this effort-3 at rank 7, but it is an effort-5 change that invalidates nearly every core system, and at 1.0 zoom on a built city cliffs are occluded — the lowest payoff-per-work on the board. The infeasible-as-stated M8 (cliffs + water pooling) is folded in here since it is strictly downstream. The north_star's heightmap language was moved to STRETCH so the vision and slate no longer contradict; skip it entirely if the flat-model terrain-water bar is judged sufficient.",
+      "dimension": "terrain-water",
+      "impact_1_5": 3,
+      "effort_1_5": 5,
+      "priority_rank": 12,
+      "procedural_feasible": true
+    }
+  ],
+  "reconcile_changelog": [
+    "Resolved the central strategic contradiction all three critics flagged: the north_star hard-required a true elevation heightmap ('rolling heightmap', 'water pooling', 'cliffs', 'city drapes over terrain') while the slate rated that work effort-3. Verified in code that terr[] is a 3-value categorical type (GRASS/WATER/FOREST) and generateTerrain discards its bilinear heightmap. Moved all heightmap language to an explicit STRETCH epic and rewrote the terrain-water pass bar to a feasible flat-model bar (connected saturated water, beveled/foam shorelines, directional relief shading, forest/tonal variation), with 6-8 levels + object draping listed as stretch-only.",
+    "Re-rated the elevation field from effort-3/rank-7 to effort-5/rank-12 and expanded it into a tracked epic enumerating everything it breaks (projection, click-picking, (x+y) painter order, flat terrain cache, updateCars, minimap, multi-tile footprints, save v10 migration) and every system it must reconcile with (TERR.WATER, waterfill, pump adjacency, water-bridging, M29 flood). Folded the strictly-downstream, infeasible-as-stated cliffs+water-pooling milestone (old rank 8) into this single epic.",
+    "Corrected milestone 1's rationale: verified day/night is tickCount%24 with dayNight pref default-true and a noon path, so 'the shot is night-only, flip the default' was a misdiagnosis (winter-night sampling artifact). Reworded to a palette-saturation + NIGHT_MAX_ALPHA/night-lerp re-tune; kept rank 1 since it still recolors ~100% of pixels.",
+    "Unblocked and promoted the suspension bridge from rank 12 to rank 9: verified flat TERR.WATER gaps already exist and canPlace already lets road/rail/wire bridge water at 5x cost, so the bridge sprite is buildable now with no elevation dependency.",
+    "Rescoped specials (old milestone 11 'author the FIRST hero landmarks'): verified M28 already ships plymouth/forestArc/darco/launch arcologies, statue, eiffel, pyramid, stadium and columned civics. Raised specials current_score from 2 to 5, reframed the milestone and pass bar to surfacing/tuning existing landmarks plus filling genuine gaps (airport, 2nd power-plant, water-edge seaport), and demoted its impact accordingly.",
+    "Promoted the ground-material system (rank 9 -> 2) and tree stands/street trees (rank 6 -> 4) per the leverage critic, since they cover the majority of screen tiles and are the direct 'blank slab' fix; demoted glass facades (rank 4 -> 6) and water recolor (rank 3 -> 11) which touch a minority of tiles. Promoted non-prism building silhouettes (rank 10 -> 5) per the fidelity critic as the top 'reads as SC2K' lever.",
+    "Corrected the water-recolor milestone: verified summer water is already #2564af (S~66%) and #9fc1d9 is the WINTER palette. Reframed to post-daytime verification + winter-water saturation, dropped impact from 4 to 2.",
+    "Changed the glass-facade spec from a 'smooth sky-to-ground gradient' to period-correct ordered-dithering/banding + mullions per the fidelity critic, so it reads as 1993/1997 glass rather than modern photoreal; updated the buildings pass bar to match.",
+    "Added a new milestone (rank 8) for building cast-shadows + formalizing aliveness (traffic/smoke/animated water/train), addressing the two high-severity missing look-drivers. Since the rubric is capped at 6 dimensions, folded cast-shadows into the buildings criteria and aliveness into transport/groundscape criteria rather than adding a 7th dimension.",
+    "Raised effort estimates the critics showed were optimistic: per-building hue 2 -> 3 (baked-sprite cache multiplies per hue family) and road markings 2 -> 3 (must bake into all 16 rot4 mask orientations).",
+    "Rebalanced weights off the near-flat 5,5,5,4,4,5 to give buildings/groundscape primacy (5) over the near-free palette flip (4) and the largely-shipped specials/terrain (4): palette 5->4, terrain-water 5->4, buildings 5, transport 4, specials 4, groundscape 5. Spread the impact scores (was 9 of 12 at impact-5) so area-coverage items outrank single-tower features.",
+    "Recalibrated current scores against the summer/day render rather than the winter-night frame (palette 3->5, specials 2->5, terrain-water 1->3, transport 2->3) and raised the overall from 22 to 37; re-numbered priority_rank uniquely 1-12 and gave every slate item a procedural_feasible flag (all now true, achieved by rewording the two infeasible-as-stated elevation items into a single feasible tracked epic)."
+  ]
+}

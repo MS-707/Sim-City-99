@@ -21,7 +21,73 @@ Queue policy: keep at least 5 open improvements at all times.
   trickles power); a recycling ordinance cuts the stream; overflow becomes a
   growing pollution + complaint source.
 
-### Graphics & UI audit slate (judge-approved, ultracode audit)
+### Graphics quality slate — SC2K fidelity (rubric-gated, ultracode audit)
+
+> **Quality bar** = `docs/graphics-quality-rubric.json`: a weighted, measurable
+> 6-dimension rubric grounded in the OpenSC2K/SC2K reference pixels vs our own
+> render, built by an ultracode workflow (6 dimension critics → synthesis →
+> 3-lens adversarial panel → reconcile). **Current overall: 37/100** (scored
+> against the SUMMER/DAYTIME baseline). Dimensions & weights: buildings ×5,
+> groundscape ×5, palette-mood ×4, terrain-water ×4, transport ×4, specials ×4.
+> The slate below is the leverage-ranked path to the bar; each item's full
+> pass-criteria live in the rubric JSON. Clean-room throughout: recreate the
+> look procedurally, never copy Maxis art.
+
+- [ ] **GQ1 — Daytime palette re-tune** *(palette, I5/E2)*: push summer/noon
+  facade + terrain saturation to full and tune `NIGHT_MAX_ALPHA`/the night-lerp
+  so no sampled frame collapses to cold monochrome. A lighting-constant + HSL
+  re-tune (day/night already exists, default-on) — **not** a default flip.
+- [ ] **GQ2 — Per-tile ground-material system** *(groundscape, I5/E3)*: assign
+  every empty tile a material (grass/dirt/sand/pavement) via low-frequency value
+  noise, drawn with a base color + stippled/dithered noise so no flat slab fills
+  remain. Highest screen-area coverage; the direct "blank slab" fix.
+- [ ] **GQ3 — Per-building hue families** *(buildings, I4/E3)*: seed each facade
+  base color from a curated zone/density palette (terracotta/brick R,
+  tan/mustard mid-rise, cream/white civic, teal/cyan + banded glass C, steel/
+  olive I); lit/shadow faces by HSL lightness shift. Restores zone-by-color
+  legibility → the ≥6 hue families the palette bar needs.
+- [ ] **GQ4 — Tree stands & street trees** *(groundscape, I4/E2)*: cluster dense
+  canopies on unbuilt tiles and line single trees along ≥70% of straight road
+  segments (size/hue jitter). Placement-only — the summer-green recolor already
+  shipped. Near-zero cost, large aliveness + green-primary gain.
+- [ ] **GQ5 — Non-prism building silhouettes** *(buildings, I5/E4)*: 3–4 new
+  massings from stacked/inset iso boxes (stepped-setback mid-rise, tapering
+  tower, pitched/hip-roof low-rise, sawtooth-roof industrial) + a 6+ rooftop
+  prop library with seeded placement. The top "reads as SC2K" lever.
+- [ ] **GQ6 — Reflective-glass facade renderer** *(buildings, I4/E2)*: a new bake
+  routine drawing PERIOD-CORRECT ordered-dithered/banded curtain-wall + vertical
+  mullions + a couple reflection streaks (256-color-era glass, **not** a smooth
+  modern gradient).
+- [ ] **GQ7 — Rotation-aware road markings** *(transport, I4/E3)*: darken road
+  fill to asphalt; bake dashed center-lines, solid lane edges and intersection
+  crosswalk/stop-line bars into all 16 autotile mask orientations so they still
+  read correctly after the `rot4()` remap.
+- [ ] **GQ8 — Building cast-shadows + aliveness guard** *(buildings, I4/E3)*: a
+  directional building drop-shadow pass onto neighbor tiles (matching the tree/
+  car grounding shadows already in `render.js`), and formalize aliveness
+  (traffic density, smoke plumes, animated water/train) as a regression-guarded
+  target.
+- [ ] **GQ9 — Auto-spanning suspension bridge** *(transport, I4/E3)*: when road/
+  rail abuts a `TERR.WATER` run, extrude two tapered towers, stroke a
+  quadratic-curve main cable, drop evenly spaced hangers to a railed deck, and
+  paint a water shadow. Unblocked — flat water gaps already exist and road/rail/
+  wire already bridge water at 5× cost.
+- [ ] **GQ10 — Specials gap-fill** *(specials, I3/E3)*: surface & tune the shipped
+  M28 landmarks (arcologies/statue/eiffel/pyramid/stadium/civics), then author
+  only the genuinely-missing silhouettes — an airport group (terminal/tower/
+  runway), a second power-plant type, and ≥1 water-edge seaport/marina.
+- [ ] **GQ11 — Water shimmer + winter-water saturation** *(palette, I2/E1)*:
+  after GQ1, verify summer water (already `#2564af`, S~66%) reads well; add a
+  two-tone dither + sine-scroll highlight if a gain remains, and lift winter
+  water (`#9fc1d9`) toward cobalt.
+- [ ] **GQ-EPIC — True elevation heightmap** *(terrain, I3/E5 — STRETCH, deferred)*:
+  integer per-tile elevation with cliff faces and sea-level water pooling.
+  Explicitly **de-scoped from the near-term bar**: it invalidates the flat
+  painter order (`s=x+y`), height-ambiguous click-picking, the single-blit
+  terrain cache, `updateCars`/minimap re-basing, multi-tile footprint leveling,
+  a save-format bump + migration, and must reconcile with the categorical
+  `TERR.WATER` model, waterfill, pump adjacency and the M29 flood. Tracked as its
+  own epic; do not attempt until the flat-model slate above is largely done.
 
 
 ## Done

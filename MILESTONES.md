@@ -7,7 +7,17 @@ Queue policy: keep at least 5 open improvements at all times.
 ## In progress
 
 - [ ] **GQ1 — Daytime palette & water vibrancy** *(graphics roadmap 1/10)* —
-  running via dynamic workflow. Gates in `docs/graphics-roadmap.json`.
+  **preview-shipped, gate-verification pending.** The implement pass landed
+  (`056da87`, js/sprites.js + js/render.js) and is **smoke-checked healthy**:
+  boots, renders full, avg scene saturation ~0.54 (vivid green terrain +
+  saturated cobalt water + tan shorelines confirmed by screenshot), zero console
+  errors — and it's in the published artifact. But the formal gate suite +
+  adversarial panel were **interrupted** (stopped mid-verify to conserve the
+  weekly usage budget), so GQ1 is **not yet gate-certified**. On resume: finish
+  verify (water S≥60%, day sat ≥2× night, warm night accents, parks S≥45%,
+  geometry byte-identical to HEAD) + panel, fix anything found, then mark done.
+  The `/goal`+`/loop` autonomous driver is **stopped** until the budget resets
+  (Tue); GQ2–GQ10 remain queued below.
 
 ## Open
 

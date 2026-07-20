@@ -219,7 +219,20 @@
     <div class="titlebar"><span>📈 City Graphs</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
     <div class="dlg-body">
       <canvas id="graph-canvas" width="360" height="180"></canvas>
-      <div class="graph-legend"><span style="color:#0a0">■ Population</span> <span style="color:#00a">■ Funds</span></div>
+      <div class="graph-series-strip" id="graph-series-strip">
+        <label><input type="checkbox" class="graph-series" data-series="pop" checked><span style="color:#00aa00">■</span> Population</label>
+        <label><input type="checkbox" class="graph-series" data-series="net" checked><span style="color:#0000cc">■</span> Cash flow</label>
+        <label><input type="checkbox" class="graph-series" data-series="tax" checked><span style="color:#cc6600">■</span> Tax income</label>
+        <label><input type="checkbox" class="graph-series" data-series="poll" checked><span style="color:#cc0000">■</span> Pollution</label>
+        <label><input type="checkbox" class="graph-series" data-series="crime" checked><span style="color:#9900cc">■</span> Crime</label>
+        <label><input type="checkbox" class="graph-series" data-series="landv" checked><span style="color:#00aaaa">■</span> Land value</label>
+      </div>
+      <div class="graph-range-strip" id="graph-range-strip">
+        <label><input type="radio" name="graph-range" class="graph-range" value="1yr"> 1&nbsp;yr</label>
+        <label><input type="radio" name="graph-range" class="graph-range" value="10yr" checked> 10&nbsp;yr</label>
+        <label><input type="radio" name="graph-range" class="graph-range" value="100yr"> 100&nbsp;yr</label>
+      </div>
+      <div class="graph-legend" id="graph-legend"></div>
       <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
     </div>
   </div>

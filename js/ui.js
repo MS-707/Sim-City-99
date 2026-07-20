@@ -10,6 +10,19 @@ const UI = {
   painting: false,
   panning: false,
   lastMouse: null,
+  // M30: City Graphs series toggles + active time range. Keyed by history key
+  // (pop/net/tax/poll/crime/landv) so a series' descriptor maps 1:1 to its
+  // ring-buffer array. `idx` flags the 0-255 diffuse-map indices (which have no
+  // annual record store, so at 100yr they draw only their monthly tail).
+  graphSeries: {
+    pop:   { on: true, color: "#00aa00", key: "pop",   label: "Population" },
+    net:   { on: true, color: "#0000cc", key: "net",   label: "Cash flow" },
+    tax:   { on: true, color: "#cc6600", key: "tax",   label: "Tax income" },
+    poll:  { on: true, color: "#cc0000", key: "poll",  label: "Pollution", idx: true },
+    crime: { on: true, color: "#9900cc", key: "crime", label: "Crime",     idx: true },
+    landv: { on: true, color: "#00aaaa", key: "landv", label: "Land value", idx: true },
+  },
+  graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
 };
 
 /* --------- user preferences (localStorage, separate from the save) --------- */
@@ -1295,7 +1308,29 @@ function graphNum(v) {
   if (a >= 1000) return (v / 1000).toFixed(1) + "k";
   return String(v);
 }
+// M30: pure selector — return a FRESH array of the points to plot for one
+// series at one range. It never mutates city.history or city.records.
+//   1yr  → last 12 monthly samples of the ring-buffer array
+//   10yr → last 120 monthly samples
+//   100yr→ the annual almanac (records[]) for pop/net/tax; the diffuse-map
+//          indices have no annual store, so they fall back to their full
+//          monthly tail and simply render sparse over the wide domain.
+function seriesData(desc, range) {
+  const h = city.history || {};
+  if (range === "100yr") {
+    const recs = city.records || [];
+    if (desc.key === "pop") return recs.map((r) => r.pop);
+    if (desc.key === "net") return recs.map((r) => r.net);
+    if (desc.key === "tax") return recs.map((r) => r.taxes);
+    return (h[desc.key] || []).slice();          // index series: monthly tail
+  }
+  const n = range === "1yr" ? 12 : 120;
+  const a = h[desc.key] || [];
+  return a.slice(Math.max(0, a.length - n));
+}
+
 function openGraphs() {
+  bindGraphControls();                            // idempotent one-time wiring
   const cv = document.getElementById("graph-canvas");
   const g = cv.getContext("2d");
   const W = cv.width, H = cv.height;
@@ -1315,20 +1350,33 @@ function openGraphs() {
     g.beginPath(); g.moveTo(gx, y0); g.lineTo(gx, y1); g.stroke();
   }
 
-  const pop = city.history.pop, funds = city.history.funds;
-  // --- empty / low-data state: too few months to plot a line yet ---
-  if (pop.length < 2) {
+  const range = UI.graphRange;
+  // sync the control widgets to the UI state so a programmatic toggle reflects
+  syncGraphControls();
+  // gather each enabled series' windowed data for the active range
+  const enabled = Object.keys(UI.graphSeries)
+    .map((id) => ({ id, desc: UI.graphSeries[id] }))
+    .filter((s) => s.desc.on)
+    .map((s) => ({ id: s.id, desc: s.desc, data: seriesData(s.desc, range) }));
+  const maxLen = enabled.reduce((m, s) => Math.max(m, s.data.length), 0);
+
+  // --- empty / low-data state: the ACTIVE range yields too few points to plot
+  if (maxLen < 2) {
     g.textAlign = "center"; g.textBaseline = "middle";
     g.fillStyle = "#444"; g.font = "bold 13px 'MS Sans Serif',Arial,sans-serif";
     g.fillText("Collecting data —", W / 2, H / 2 - 9);
     g.fillStyle = "#555"; g.font = "11px 'MS Sans Serif',Arial,sans-serif";
     g.fillText("check back in February", W / 2, H / 2 + 9);
+    drawGraphLegend(enabled);
     showDlg("dlg-graphs");
     return;
   }
 
-  // trace over an independent per-series scale so both fill the frame
+  // trace one series over its own auto-scale-to-frame so 0-255 indices and
+  // 5-digit § values coexist. A series with <2 points in this range is skipped
+  // (never divides by zero) but still contributes its latest value to legend.
   const plot = (data, color) => {
+    if (data.length < 2) return;
     const max = Math.max(...data.map(Math.abs), 1);
     const px = (k) => x0 + 2 + k / (data.length - 1) * (x1 - x0 - 4);
     const py = (v) => Math.max(top, Math.min(bot, bot - (v / max) * (bot - top)));
@@ -1339,10 +1387,8 @@ function openGraphs() {
       g.fillStyle = color;
       data.forEach((v, k) => { g.beginPath(); g.arc(px(k), py(v), 2, 0, 7); g.fill(); });
     }
-    return max;
   };
-  const popMax = plot(pop, "#0a0");
-  const fundMax = plot(funds, "#00a");
+  enabled.forEach((s) => plot(s.data, s.desc.color));
 
   // strong axes on top of the traces (dark, clearly beyond the #ddd gridlines)
   g.strokeStyle = "#333"; g.lineWidth = 1;
@@ -1351,26 +1397,68 @@ function openGraphs() {
   g.moveTo(x0, y1 + 0.5); g.lineTo(x1, y1 + 0.5);        // x-axis
   g.stroke();
 
-  // value scale: population (dark green) down the left gutter, funds (dark
-  // blue) down the right — tinted to their traces but dark enough to read
-  g.font = "bold 10px 'MS Sans Serif',Arial,sans-serif"; g.textBaseline = "middle";
-  g.textAlign = "right"; g.fillStyle = "#040";
-  g.fillText(graphNum(popMax), x0 - 4, top);
-  g.fillText(graphNum(popMax / 2), x0 - 4, (top + bot) / 2);
-  g.fillText("0", x0 - 4, bot);
-  g.textAlign = "left"; g.fillStyle = "#004";
-  g.fillText(graphNum(fundMax), x1 + 4, top);
-  g.fillText(graphNum(fundMax / 2), x1 + 4, (top + bot) / 2);
-  g.fillText("0", x1 + 4, bot);
-
-  // month axis along the bottom: first month, span label, latest month
+  // x-axis label along the bottom: the active range + its point span. Each
+  // series auto-scales to the frame, so per-series magnitudes live in the
+  // legend (below the canvas) rather than a single shared gutter.
+  const unit = range === "100yr" ? "yr" : "mo";
   g.fillStyle = "#333"; g.font = "bold 9px 'MS Sans Serif',Arial,sans-serif";
   g.textBaseline = "top";
-  g.textAlign = "left"; g.fillText("mo 1", x0, y1 + 4);
-  g.textAlign = "center"; g.fillText("months", (x0 + x1) / 2, y1 + 4);
-  g.textAlign = "right"; g.fillText("mo " + pop.length, x1, y1 + 4);
+  g.textAlign = "left"; g.fillText(unit + " 1", x0, y1 + 4);
+  g.textAlign = "center";
+  g.fillText(range === "100yr" ? "years" : "months", (x0 + x1) / 2, y1 + 4);
+  g.textAlign = "right"; g.fillText(unit + " " + maxLen, x1, y1 + 4);
 
+  drawGraphLegend(enabled);
   showDlg("dlg-graphs");
+}
+
+// M30: render the legend swatches below the canvas, each showing the series'
+// latest value in the active range (§ for the flow series, raw index for the
+// 0-255 diffuse-map series). Reads only the windowed data already fetched.
+function drawGraphLegend(enabled) {
+  const el = document.getElementById("graph-legend");
+  if (!el) return;
+  el.innerHTML = enabled.map((s) => {
+    const v = s.data.length ? s.data[s.data.length - 1] : null;
+    const val = v == null ? "—"
+      : s.desc.idx ? String(Math.round(v))
+      : (v < 0 ? "-§" : "§") + graphNum(Math.abs(v));
+    return `<span style="color:${s.desc.color}">■ ${s.desc.label}: ${val}</span>`;
+  }).join("");
+}
+
+// M30: mirror UI.graphSeries.*.on / UI.graphRange onto the checkbox+radio
+// widgets (so a programmatic toggle followed by openGraphs() shows correctly).
+function syncGraphControls() {
+  document.querySelectorAll(".graph-series").forEach((cb) => {
+    const d = UI.graphSeries[cb.dataset.series];
+    if (d) cb.checked = !!d.on;
+  });
+  document.querySelectorAll(".graph-range").forEach((r) => {
+    r.checked = (r.value === UI.graphRange);
+  });
+}
+
+// M30: wire the series checkboxes and range radios exactly once. A change sets
+// the UI flag (no history touched) and redraws via openGraphs().
+let _graphControlsBound = false;
+function bindGraphControls() {
+  if (_graphControlsBound) return;
+  const strip = document.getElementById("graph-series-strip");
+  const rstrip = document.getElementById("graph-range-strip");
+  if (!strip || !rstrip) return;               // DOM not ready yet — retry next open
+  strip.addEventListener("change", (e) => {
+    const cb = e.target.closest(".graph-series"); if (!cb) return;
+    const d = UI.graphSeries[cb.dataset.series]; if (!d) return;
+    d.on = cb.checked;
+    openGraphs();
+  });
+  rstrip.addEventListener("change", (e) => {
+    const r = e.target.closest(".graph-range"); if (!r || !r.checked) return;
+    UI.graphRange = r.value;
+    openGraphs();
+  });
+  _graphControlsBound = true;
 }
 
 function openQuery(x, y) {

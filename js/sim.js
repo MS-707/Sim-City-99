@@ -10,6 +10,17 @@ const MAP_SIZES = [64, 80, 128];                   // sizes offered by the splas
 // and every indexing site stays consistent with the city that owns the world.
 function setMapSize(n) { MAP = n; }
 
+// M30: guarantee the history ring-buffer has all seven arrays. Any missing key
+// (a pre-M30 v10 save, whose history has only pop/funds) becomes []. Copies each
+// array so the loaded city owns its own buffers. Used by City.deserialize.
+function normaliseHistory(h) {
+  h = (h && typeof h === "object") ? h : {};
+  const out = {};
+  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv"])
+    out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
+  return out;
+}
+
 const TERR = { GRASS: 0, WATER: 1, FOREST: 2 };
 
 const OV = {
@@ -555,7 +566,12 @@ class City {
     this.comJobs = 0; this.resTiles = 0; // M22: cached counts for ordinance §
     this.demand = { r: 0.4, c: 0.1, i: 0.5 };
     this.powerDemand = 0; this.powerSupply = 0;
-    this.history = { pop: [], funds: [] };
+    // M30: the monthly history ring-buffer. pop/funds are the original two
+    // traces; net/tax copy lastBudget each month; poll/crime/landv are the
+    // diffuse-map citywide aggregates (cityIndex over recomputeMaps' fields).
+    // All seven are pushed together and trimmed in lockstep in collectBudget()
+    // so they stay index-aligned to the same month. Serialized wholesale.
+    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
@@ -2136,9 +2152,32 @@ class City {
       dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
               edu: dc.edu, health: dc.health, water: dc.water, transit: dc.transit } };
     if (this.funds < 0) this.pushMsg("💸 The city is BROKE. Raise taxes or cut back, Mayor!");
+    // M30: push all seven history arrays together at the month rollover, AFTER
+    // lastBudget is finalized above. net/tax copy the budget just computed; the
+    // three index series sample the diffuse maps written by the last
+    // recomputeMaps via cityIndex() (a pure reader — never perturbs the sim).
     this.history.pop.push(this.pop);
     this.history.funds.push(this.funds);
-    if (this.history.pop.length > 240) { this.history.pop.shift(); this.history.funds.shift(); }
+    this.history.net.push(this.lastBudget.net);
+    this.history.tax.push(this.lastBudget.taxes);
+    this.history.poll.push(this.cityIndex(this.poll));
+    this.history.crime.push(this.cityIndex(this.crime));
+    this.history.landv.push(this.cityIndex(this.landv));
+    // trim all seven in lockstep under the one existing >240 guard so every
+    // array stays the same length and month-aligned.
+    if (this.history.pop.length > 240)
+      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv"])
+        this.history[k].shift();
+  }
+
+  // M30: citywide mean/round of a diffuse-map field (poll/crime/landv). Divides
+  // by the live array length (== MAP*MAP for these Uint8Arrays), the identical
+  // mean/round districtStats' avg() uses, taken over the whole map. Pure reader:
+  // allocates nothing persistent, calls no recompute*, writes no sim state.
+  cityIndex(a) {
+    const n = a.length; if (!n) return 0;
+    let s = 0; for (let i = 0; i < n; i++) s += a[i];
+    return Math.round(s / n);
   }
 
   // ---------- City Hall records (M17) ----------
@@ -2443,7 +2482,7 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 10, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 11, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -2558,7 +2597,12 @@ class City {
     // iterate the registry and read this.ordinances[id], never the reverse).
     c.ordinances = (d.ordinances && typeof d.ordinances === "object")
       ? Object.assign({}, d.ordinances) : {};
-    c.history = d.history || { pop: [], funds: [] };
+    // M30 (save v11): normalise the history ring-buffer so all seven arrays
+    // exist. A pre-M30 v10 save's history has only pop/funds; the five new
+    // arrays initialise empty and record forward from the first post-load
+    // rollover (explicit back-compat, no gap for a v11 round-trip since every
+    // array serializes and restores at identical length/month-alignment).
+    c.history = normaliseHistory(d.history);
     // time-capsule events (M7): restore fired ids + live modifiers with their
     // remaining timers; a pre-M7 (v<=2) save simply has neither field, and
     // markPassedEvents() quietly retires anything the calendar already passed

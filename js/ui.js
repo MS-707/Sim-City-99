@@ -1406,7 +1406,20 @@ function openGraphs() {
   g.textAlign = "left"; g.fillText(unit + " 1", x0, y1 + 4);
   g.textAlign = "center";
   g.fillText(range === "100yr" ? "years" : "months", (x0 + x1) / 2, y1 + 4);
-  g.textAlign = "right"; g.fillText(unit + " " + maxLen, x1, y1 + 4);
+  // right-edge span label. At 100yr the annual series (pop/net/tax) store one
+  // point per YEAR while the index series (poll/crime/landv) fall back to their
+  // MONTHLY tail — so convert each series' point count to its real span before
+  // taking the max, else a long monthly index series would caption months as
+  // "yr N". 1yr/10yr are uniformly monthly, so maxLen is already in months.
+  let spanLabel;
+  if (range === "100yr") {
+    const yrs = enabled.reduce((m, s) =>
+      Math.max(m, s.desc.idx ? s.data.length / 12 : s.data.length), 0);
+    spanLabel = "yr " + Math.max(1, Math.round(yrs));
+  } else {
+    spanLabel = unit + " " + maxLen;
+  }
+  g.textAlign = "right"; g.fillText(spanLabel, x1, y1 + 4);
 
   drawGraphLegend(enabled);
   showDlg("dlg-graphs");

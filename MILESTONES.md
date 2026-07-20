@@ -6,11 +6,8 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **M30 — City history charts & trend graphs** *(next up)*: a Win95 Graphs
-  window plotting pop / cash flow / tax / pollution / crime / land value over
-  time (1yr / 10yr / 100yr zoom) on canvas, backed by the almanac records[] plus
-  a monthly ring-buffer of diffuse-map aggregates; survives save/load.
-  Proposal-stage — design + criteria set fresh by an independent reviewer.
+- (none — autonomous loop paused per user request; a graphics-quality rubric
+  workflow is generating the next visual-milestone slate to refill this queue.)
 
 ## Open
 
@@ -28,6 +25,32 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **M30 — City history charts & trend graphs**: the City Graphs window grows
+  from 2 traces to **six toggleable series** — pop, cash flow (net), tax income,
+  pollution, crime, land value — over **1yr / 10yr / 100yr** ranges on canvas.
+  Flow series (pop/net/tax) plot the annual almanac `records[]` at 100yr; the
+  three diffuse-map indices (poll/crime/landv) are backed by a **NEW monthly
+  ring-buffer** (`city.history.{poll,crime,landv}`, capped 240) recorded at the
+  month rollover *after* `recomputeMaps` as the citywide mean via `cityIndex()` —
+  a **read-only sampler** that never feeds back into the sim. Each series
+  auto-scales to the frame (0-255 indices and 5-digit § coexist); magnitude is
+  carried in the legend. Empty/sparse cities show a "Collecting data — check back
+  in February" card at every range. Save bumps to **v11** with back-compat: a
+  pre-M30 v10 save whose history has only pop/funds is normalised so the five new
+  arrays exist, then records forward. Verified 8/8 criteria via an independent
+  59-assertion headless harness against a fresh `282ca23` baseline worktree —
+  per-series isolation (each trace's color pixels appear alone with 0 foreign
+  px), save round-trip deep-equal + contiguous-at-load, non-mutating rescale,
+  sparse/empty safety, `history.{poll,crime,landv}` last element == rounded map
+  mean at MAP 64 & 128, **byte-identity vs baseline** after normalising the new
+  arrays (v10→v11 the only diff), and record-only (sim state identical with vs
+  without the sampler). The panel's one actionable note — the 100yr right x-axis
+  label printed `"yr N"` using the **monthly** sample count, mislabeling months
+  as years when the index series out-length the annual records — was fixed
+  (convert each series' point count to its real span before labeling) and
+  independently re-verified: a 160-month city now reads **"yr 13"** at 100yr
+  (was "yr 160") while 10yr still reads "mo 120"; zero console errors.
 
 - [x] **M29 — Expanded disaster roster**: four new catastrophes ride the
   existing single-disaster slot + `disasterTick()` plumbing (fire/tornado/ufo

@@ -89,6 +89,14 @@ const TOOLS = [
   { id: "statue",   name: "Statue",    key: "y", icon: null, spr: () => SPR.statue },
   { id: "eiffel",   name: "Eiffel",    key: "v", icon: null, spr: () => SPR.eiffel },
   { id: "pyramid",  name: "Pyramid",   key: "x", icon: null, spr: () => SPR.pyramid },
+  // GQ10: special-buildings gap-fill — the endgame nuclear plant plus the
+  // airport/seaport civic pair, tier-gated via TOOL_TIER like the arcos.
+  // Keys o/c/z are free (q/e are reserved for view rotation). Cost chips,
+  // padlock dimming, the shortcuts overlay and the build-cost dialog all
+  // derive from TOOLS/COST automatically.
+  { id: "nuke",    name: "Nuclear",  key: "o", icon: null, spr: () => SPR.nuke,    minTier: TOOL_TIER.nuke },
+  { id: "airport", name: "Airport",  key: "c", icon: null, spr: () => SPR.airport, minTier: TOOL_TIER.airport },
+  { id: "seaport", name: "Seaport",  key: "z", icon: null, spr: () => SPR.seaport, minTier: TOOL_TIER.seaport },
 ];
 
 /* --------- 1997 newswire --------- */
@@ -885,6 +893,7 @@ const POWERMIX_TYPES = [
   { key: "gas",   label: "Gas",   col: "#c9853b" },
   { key: "solar", label: "Solar", col: "#2f74c0" },
   { key: "wind",  label: "Wind",  col: "#5fb56a" },
+  { key: "nuke",  label: "Nuclear", col: "#d8c433" }, // GQ10: keeps the pie summing to powerSupply
 ];
 function fillPowerMix() {
   const mix = city.powerMix();
@@ -1484,7 +1493,10 @@ function openQuery(x, y) {
     "Water pipe", "Water tower", "Water pump", // M24: indices 19/20/21
     // M28: indices 22..28 — arcologies then wonder landmarks
     "Plymouth Arcology", "Forest Arcology", "Darco Arcology", "Launch Arcology",
-    "Statue of Liberty", "Eiffel Tower", "Great Pyramid"][city.over[i]];
+    "Statue of Liberty", "Eiffel Tower", "Great Pyramid",
+    // GQ10: indices 29..31 (the plant age/output row keys on isPlant and is
+    // automatic for the nuke)
+    "Nuclear plant", "Airport", "Seaport"][city.over[i]];
   // M19: for a power-plant anchor, surface its age and aged output vs nameplate
   let plantRow = "";
   if (isPlant(city.over[i]) && city.anc[i] === i) {

@@ -2035,6 +2035,8 @@ function buildSprites() {
     // M28: arcology + wonder-landmark mega-structures (large self-powered
     // footprints). forestArc (not "forest") avoids clobbering SPR.forest terrain.
     let plymouth, forestArc, darco, launch, statue, eiffel, pyramid;
+    // GQ10: special-buildings gap-fill (nuclear plant, airport, seaport)
+    let nuke, airport, seaport;
     const r1 = [], r2 = [], r3 = [], c1 = [], c2 = [], c3 = [], i1 = [], i2 = [], i3 = [];
 
   // ---- park ----
@@ -2969,6 +2971,228 @@ function buildSprites() {
     ART_RNG = prevRng;
   }
 
+  /* ---- GQ10: special buildings gap-fill (nuke / airport / seaport) ----
+     Three more large structures in the exact M28 discipline: baked in the
+     per-facing family, registered at the literal END of every seasonal set so
+     all existing evaluation order is untouched, and wrapped in a DEDICATED
+     seeded stream (gas-plant / mega snapshot-swap idiom, BR folded into the
+     seed) so windows()/any RNG here consumes ONLY the side stream — every
+     pre-existing sprite (all facings, all seasons, night/pool layers) stays
+     byte-identical. prismFrom records SNOWSPEC, so makeWinter snow-caps them. */
+  {
+    const gq10Rng = mulberry32((0x6110A ^ (BR * 0x9E3779B1)) >>> 0);
+    const prevRng = ART_RNG; ART_RNG = gq10Rng;
+    const glowDot = (x, y, r, col) => {
+      if (!GLOWG) return;
+      GLOWG.fillStyle = col; GLOWG.beginPath(); GLOWG.arc(x, y, r, 0, 7); GLOWG.fill();
+    };
+
+    // ---- Nuclear plant (3x3): twin cooling towers + containment dome +
+    //      turbine hall; radiation-yellow trefoil + hazard chevrons ----
+    nuke = withNight(3, 3, 120, (g, ox, oy) => {
+      civicApron(g, ox, oy, 3, 3);
+      const foot = corners(ox, oy, 3, 3);
+      const cx = ox, cy = (foot.N[1] + foot.S[1]) / 2;
+      // waisted hyperboloid cooling tower (quadraticCurveTo flanks, lip
+      // highlight + interior shadow, red aviation beacon on the lip)
+      const tower = (bx, by, h, wb) => {
+        const wt = wb * 0.78, ww = wb * 0.58, wy = by - h * 0.62;
+        g.fillStyle = "#c2c6cd";
+        g.beginPath();
+        g.moveTo(bx - wb / 2, by);
+        g.quadraticCurveTo(bx - ww / 2 - 2, wy, bx - wt / 2, by - h);
+        g.lineTo(bx + wt / 2, by - h);
+        g.quadraticCurveTo(bx + ww / 2 + 2, wy, bx + wb / 2, by);
+        g.closePath(); g.fill();
+        g.fillStyle = "#a9aeb8"; // shaded W flank
+        g.beginPath();
+        g.moveTo(bx - wb / 2, by);
+        g.quadraticCurveTo(bx - ww / 2 - 2, wy, bx - wt / 2, by - h);
+        g.lineTo(bx - wt / 2 + wt * 0.3, by - h);
+        g.quadraticCurveTo(bx - ww / 2 + ww * 0.28 - 2, wy, bx - wb / 2 + wb * 0.3, by);
+        g.closePath(); g.fill();
+        g.fillStyle = "#8b9099"; // interior shadow inside the lip
+        g.beginPath(); g.ellipse(bx, by - h, wt / 2, wt / 8, 0, 0, 7); g.fill();
+        g.strokeStyle = "#dde0e6"; g.lineWidth = 1.6; // sunlit lip
+        g.beginPath(); g.ellipse(bx, by - h, wt / 2, wt / 8, 0, Math.PI, Math.PI * 2); g.stroke();
+        g.fillStyle = "#ff5a5a";
+        g.beginPath(); g.arc(bx + wt / 2 - 1, by - h - 1, 1.8, 0, 7); g.fill();
+        glowDot(bx + wt / 2 - 1, by - h - 1, 3.5, "#ff8a8a");
+      };
+      tower(cx - 38, cy - 12, 64, 30);
+      tower(cx + 2, cy - 22, 56, 26);
+      // containment dome on the E side
+      const dx0 = cx + 34, dy0 = cy - 6;
+      g.fillStyle = "#d7d9de";
+      g.beginPath(); g.arc(dx0, dy0, 17, Math.PI, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(dx0, dy0, 17, 6.5, 0, 0, 7); g.fill();
+      g.fillStyle = "#b6bac2"; // shaded E cheek
+      g.beginPath(); g.ellipse(dx0, dy0, 17, 6.5, 0, -0.35, Math.PI * 0.55); g.fill();
+      g.strokeStyle = "#8f939c"; g.lineWidth = 1;
+      g.beginPath(); g.ellipse(dx0, dy0, 17, 6.5, 0, 0, 7); g.stroke();
+      g.fillStyle = lighten("#d7d9de", 0.4);
+      g.beginPath(); g.ellipse(dx0 - 6, dy0 - 9, 4.5, 6.5, -0.5, 0, 7); g.fill();
+      glowDot(dx0, dy0 - 8, 9, "#ffd9a0"); // faint warm dome wash
+      // low turbine hall front-center (windows draw from the gq10 side stream)
+      const hc = [cx - 14, cy + 14];
+      const hcn = { N: ruv(hc, -10, -5), E: ruv(hc, 10, -5), S: ruv(hc, 10, 5), W: ruv(hc, -10, 5) };
+      prismFrom(g, hcn, 20, "#b9bcc4");
+      windows(g, up(hcn.W, 0), up(hcn.S, 0), 20, 1, 4, 0.6, "#cfe6f2", "#20242c", GLOW_COOL, 0.6);
+      windows(g, up(hcn.S, 0), up(hcn.E, 0), 20, 1, 3, 0.6, "#cfe6f2", "#20242c", GLOW_COOL, 0.6);
+      // SIGNATURE ACCENT: radiation-yellow trefoil roundel on the hall's S face
+      const tfx = (hcn.S[0] + hcn.E[0]) / 2, tfy = (hcn.S[1] + hcn.E[1]) / 2 - 10;
+      g.fillStyle = "#ffd400";
+      g.beginPath(); g.arc(tfx, tfy, 5, 0, 7); g.fill();
+      g.fillStyle = "#2b2b1c";
+      for (let k = 0; k < 3; k++) {
+        const a = -Math.PI / 2 + k * (Math.PI * 2 / 3);
+        g.beginPath(); g.moveTo(tfx, tfy);
+        g.arc(tfx, tfy, 4.4, a - 0.5, a + 0.5); g.closePath(); g.fill();
+      }
+      g.beginPath(); g.arc(tfx, tfy, 1.1, 0, 7); g.fill();
+      // yellow hazard chevrons on the apron toward the S corner
+      g.strokeStyle = "#ffd400"; g.lineWidth = 2.5;
+      for (let k = 0; k < 5; k++) {
+        const sx = foot.S[0] - 24 + k * 9, sy = foot.S[1] - 16;
+        g.beginPath(); g.moveTo(sx, sy + 4.5); g.lineTo(sx + 5, sy); g.stroke();
+      }
+    });
+
+    // ---- Airport (4x4): tarmac slab, marked runway, glass-band terminal,
+    //      control tower with teal cab (>=70px over the N corner), parked
+    //      aircraft + windsock; runway edge lights on the glow layer ----
+    airport = withNight(4, 4, 90, (g, ox, oy) => {
+      const foot = corners(ox, oy, 4, 4);
+      const rc = [ox, (foot.N[1] + foot.S[1]) / 2];
+      poly(g, [foot.N, foot.E, foot.S, foot.W], "#3e4148", "rgba(0,0,0,.35)");
+      const q = (u0, u1, v0, v1, fill) =>
+        poly(g, [ruv(rc, u0, v0), ruv(rc, u1, v0), ruv(rc, u1, v1), ruv(rc, u0, v1)], fill);
+      q(-20, 16, -22, -10, "#4a4e57"); // concrete apron by the terminal
+      q(-27, 27, 6, 15, "#33363d");    // the runway strip (long W->E diagonal)
+      g.strokeStyle = "#f2f2f4"; g.lineWidth = 2;
+      for (const ue of [-25, 25]) // painted threshold bars at both ends
+        for (let k = 0; k < 4; k++) {
+          const a = ruv(rc, ue, 7 + k * 2), b = ruv(rc, ue + (ue < 0 ? 2 : -2), 7 + k * 2);
+          g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+        }
+      for (let u = -20; u <= 18; u += 5) { // dashed centerline
+        const a = ruv(rc, u, 10.5), b = ruv(rc, u + 2.4, 10.5);
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      }
+      g.strokeStyle = "#e8c33a"; g.lineWidth = 1.5; // yellow taxiway line
+      const t0 = ruv(rc, -6, -10), t1 = ruv(rc, -6, 6);
+      g.beginPath(); g.moveTo(t0[0], t0[1]); g.lineTo(t1[0], t1[1]); g.stroke();
+      // glass-band terminal prism along the N edge
+      const tc = ruv(rc, -2, -16);
+      const tcn = { N: ruv(tc, -14, -4), E: ruv(tc, 14, -4), S: ruv(tc, 14, 4), W: ruv(tc, -14, 4) };
+      prismFrom(g, tcn, 18, "#b9bfc8");
+      windows(g, up(tcn.W, 0), up(tcn.S, 0), 18, 1, 6, 0.7, "#4fd4e4", "#1b3f46", "#49e0f0", 0.8);
+      windows(g, up(tcn.S, 0), up(tcn.E, 0), 18, 1, 4, 0.7, "#4fd4e4", "#1b3f46", "#49e0f0", 0.8);
+      g.strokeStyle = "#2ec8dc"; g.lineWidth = 2.5; // SIGNATURE teal fascia band
+      g.beginPath(); g.moveTo(...up(tcn.W, 14)); g.lineTo(...up(tcn.S, 14)); g.lineTo(...up(tcn.E, 14)); g.stroke();
+      // control tower: thin shaft + wide teal glass cab + rotating beacon
+      const bx = ox - 28, by = rc[1] - 16;
+      g.fillStyle = "#cdd2d8"; g.fillRect(bx - 3.5, by - 100, 7, 100);
+      g.fillStyle = "#aab0b8"; g.fillRect(bx - 3.5, by - 100, 3, 100);
+      g.fillStyle = "#9aa0a8"; g.fillRect(bx - 7, by - 104, 14, 5);   // collar
+      g.fillStyle = "#20c4d8"; g.fillRect(bx - 9, by - 116, 18, 12);  // octagonal glass cab
+      g.fillStyle = "#137a88"; g.fillRect(bx - 9, by - 116, 4, 12);   // shaded cab cheek
+      g.strokeStyle = "#0f5560"; g.lineWidth = 1;                     // mullions
+      for (const mx of [-4, 1, 5]) {
+        g.beginPath(); g.moveTo(bx + mx, by - 116); g.lineTo(bx + mx, by - 104); g.stroke();
+      }
+      g.fillStyle = "#e8eaee"; g.fillRect(bx - 10, by - 119, 20, 3);  // cap slab
+      g.strokeStyle = "#c8ccd2"; g.lineWidth = 1.2;                   // beacon mast
+      g.beginPath(); g.moveTo(bx, by - 119); g.lineTo(bx, by - 126); g.stroke();
+      g.fillStyle = "#ff5a5a"; g.beginPath(); g.arc(bx, by - 128, 2, 0, 7); g.fill();
+      glowDot(bx, by - 128, 4, "#ff8a8a");
+      glowDot(bx, by - 110, 8, "#49e0f0"); // lit cab
+      // parked white aircraft silhouette on the apron
+      const px0 = ox + 68, py0 = rc[1] - 4;
+      g.fillStyle = "#f2f4f6";
+      g.beginPath(); g.ellipse(px0, py0, 9, 2.6, 0.46, 0, 7); g.fill();
+      poly(g, [[px0 - 2, py0 - 5], [px0 + 3, py0 + 4], [px0 - 1, py0 + 5], [px0 - 6, py0 - 4]], "#e4e8ec");
+      poly(g, [[px0 - 8, py0 - 6], [px0 - 4, py0 - 3], [px0 - 9, py0 - 1]], "#cdd3da");
+      // orange windsock at the runway threshold
+      const wsk = ruv(rc, -24, 3);
+      g.strokeStyle = "#d8dade"; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(wsk[0], wsk[1]); g.lineTo(wsk[0], wsk[1] - 12); g.stroke();
+      poly(g, [[wsk[0], wsk[1] - 12], [wsk[0] + 9, wsk[1] - 10], [wsk[0], wsk[1] - 7]], "#ff7a1a");
+      // runway edge lights, both rows, on the glow layer only
+      for (let u = -24; u <= 24; u += 6) {
+        const a = ruv(rc, u, 5.6), b = ruv(rc, u, 15.4);
+        glowDot(a[0], a[1], 1.4, "#ffe9a0");
+        glowDot(b[0], b[1], 1.4, "#ffe9a0");
+      }
+    });
+
+    // ---- Seaport (3x3): concrete quay, clerestory-roof warehouse, stacked
+    //      containers, red-orange gantry crane with a jib out over the water,
+    //      bollards + mooring line; sodium quay floodlights on the glow layer ----
+    seaport = withNight(3, 3, 80, (g, ox, oy) => {
+      const foot = corners(ox, oy, 3, 3);
+      const rc = [ox, (foot.N[1] + foot.S[1]) / 2];
+      poly(g, [foot.N, foot.E, foot.S, foot.W], "#9aa0a6", "rgba(0,0,0,.3)");
+      // quay edge beam + bollards + a slack mooring line along the SW water edge
+      const eW = foot.W, eS = foot.S;
+      g.strokeStyle = "#5d646c"; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(eW[0], eW[1]); g.lineTo(eS[0], eS[1]); g.stroke();
+      const bol = (t) => [eW[0] + (eS[0] - eW[0]) * t, eW[1] + (eS[1] - eW[1]) * t - 2];
+      g.fillStyle = "#2e3238";
+      for (let k = 1; k <= 4; k++) {
+        const p = bol(k / 5);
+        g.beginPath(); g.arc(p[0], p[1], 1.6, 0, 7); g.fill();
+      }
+      const m0 = bol(0.4), m1 = bol(0.6);
+      g.strokeStyle = "#3a3f45"; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(m0[0], m0[1]);
+      g.quadraticCurveTo((m0[0] + m1[0]) / 2, (m0[1] + m1[1]) / 2 + 5, m1[0], m1[1]); g.stroke();
+      // warehouse shed (NE) with a raised clerestory monitor roof
+      const sc = ruv(rc, 7, -7);
+      const scn = { N: ruv(sc, -8, -5), E: ruv(sc, 8, -5), S: ruv(sc, 8, 5), W: ruv(sc, -8, 5) };
+      prismFrom(g, scn, 14, "#a8927a");
+      const ridge = { N: ruv(sc, -8, -1.5), E: ruv(sc, 8, -1.5), S: ruv(sc, 8, 1.5), W: ruv(sc, -8, 1.5) };
+      prismFrom(g, raise(ridge, 14), 6, "#b8a086");
+      // roller door on the shed's SW face
+      const dm = (t) => [scn.W[0] + (scn.S[0] - scn.W[0]) * t, scn.W[1] + (scn.S[1] - scn.W[1]) * t];
+      poly(g, [up(dm(0.3), 1), up(dm(0.7), 1), up(dm(0.7), 10), up(dm(0.3), 10)], "#6f6154");
+      // stacked containers from a fixed palette
+      const cbox = (bc) => ({ N: ruv(bc, -4, -2), E: ruv(bc, 4, -2), S: ruv(bc, 4, 2), W: ruv(bc, -4, 2) });
+      const b1 = cbox([ox - 30, rc[1] + 20]);
+      prismFrom(g, b1, 8, "#3b6ea8");
+      prismFrom(g, raise(b1, 8), 7, "#b0533f");
+      prismFrom(g, cbox([ox - 11, rc[1] + 28]), 8, "#3f8a4f");
+      // SIGNATURE ACCENT: red-orange gantry crane, jib overhanging the water
+      g.strokeStyle = "#e04a28"; g.lineWidth = 3; g.lineCap = "round";
+      g.beginPath(); g.moveTo(ox - 32, rc[1]); g.lineTo(ox - 32, rc[1] - 32); g.stroke();      // W leg
+      g.beginPath(); g.moveTo(ox - 8, rc[1] + 12); g.lineTo(ox - 8, rc[1] - 20); g.stroke();   // E leg
+      g.beginPath(); g.moveTo(ox - 40, rc[1] - 36); g.lineTo(ox + 2, rc[1] - 15); g.stroke();  // bridge
+      g.beginPath(); g.moveTo(ox - 32, rc[1] - 32); g.lineTo(ox - 60, rc[1] - 18); g.stroke(); // jib
+      g.lineWidth = 2;
+      g.beginPath(); g.moveTo(ox - 32, rc[1] - 42); g.lineTo(ox - 60, rc[1] - 18); g.stroke(); // jib tie
+      g.beginPath(); g.moveTo(ox - 32, rc[1] - 32); g.lineTo(ox - 32, rc[1] - 42); g.stroke(); // mast
+      g.lineCap = "butt";
+      g.strokeStyle = "#3a3f45"; g.lineWidth = 1; // trolley cable + spreader
+      g.beginPath(); g.moveTo(ox - 52, rc[1] - 22); g.lineTo(ox - 52, rc[1] - 6); g.stroke();
+      g.fillStyle = "#e04a28"; g.fillRect(ox - 54, rc[1] - 6, 4, 3);
+      g.fillStyle = "#ff5a5a"; // crane-tip beacon
+      g.beginPath(); g.arc(ox - 60, rc[1] - 19, 1.6, 0, 7); g.fill();
+      glowDot(ox - 60, rc[1] - 19, 3, "#ff8a8a");
+      // sodium floodlight masts + quay light pools (glow layer)
+      g.strokeStyle = "#4a4f55"; g.lineWidth = 1.5;
+      for (const [mx, my] of [[ox + 22, rc[1] + 20], [ox + 54, rc[1] + 4]]) {
+        g.beginPath(); g.moveTo(mx, my); g.lineTo(mx, my - 22); g.stroke();
+        g.fillStyle = "#ffe2b0"; g.fillRect(mx - 3, my - 25, 6, 3);
+        if (GLOWG) {
+          GLOWG.fillStyle = GLOW_SODIUM;
+          GLOWG.beginPath(); GLOWG.ellipse(mx, my + 3, 13, 6, 0, 0, 7); GLOWG.fill();
+        }
+      }
+    });
+
+    ART_RNG = prevRng;
+  }
+
   /* ---- seasonal building lookup (G14) ----
      spriteFor picks a building set by season. summer & spring reuse the bake
      above (byte-identical to HEAD). winter derives a snow-capped, cool-graded
@@ -2990,6 +3214,8 @@ function buildSprites() {
     // spriteFor's B.<name> lookup resolves regardless of the month)
     plymouth: plymouth, forestArc: forestArc, darco: darco, launch: launch,
     statue: statue, eiffel: eiffel, pyramid: pyramid,
+    // GQ10: appended at the literal END so existing evaluation order holds
+    nuke: nuke, airport: airport, seaport: seaport,
   };
   const winterSet = {
     r1: seasonR1("winter"),
@@ -3007,6 +3233,9 @@ function buildSprites() {
     plymouth: makeWinter(plymouth), forestArc: makeWinter(forestArc),
     darco: makeWinter(darco), launch: makeWinter(launch),
     statue: makeWinter(statue), eiffel: makeWinter(eiffel), pyramid: makeWinter(pyramid),
+    // GQ10: appended at the literal END (makeWinter is a pure per-pixel
+    // recolor — RNG-free — so no side-stream wrap is needed here)
+    nuke: makeWinter(nuke), airport: makeWinter(airport), seaport: makeWinter(seaport),
   };
   const autumnSet = Object.assign({}, summerSet, {
     r1: seasonR1("autumn"), park: mkSprite(1, 1, 22, parkDraw("autumn")),
@@ -3019,7 +3248,9 @@ function buildSprites() {
       fams: { park, r1, r2, r3, c1, c2, c3, i1, i2, i3, police, firesta, coal,
               solar, gas, wind, school, hospital, mayor, stadium,
               // M28: exposed as SPR.plymouth / SPR.forestArc / … for the toolbar
-              plymouth, forestArc, darco, launch, statue, eiffel, pyramid },
+              plymouth, forestArc, darco, launch, statue, eiffel, pyramid,
+              // GQ10: SPR.nuke / SPR.airport / SPR.seaport
+              nuke, airport, seaport },
     };
   } // end bakeBuildingSet
 
@@ -3251,6 +3482,12 @@ function spriteFor(city, i) {
     case OV.STATUE:   return B.statue;
     case OV.EIFFEL:   return B.eiffel;
     case OV.PYRAMID:  return B.pyramid;
+    // GQ10: special buildings — same size-agnostic anchor render path, so
+    // per-facing lazy bakes, the billboard pin, winter sets and click-picking
+    // all come free, exactly like M28.
+    case OV.NUKE:     return B.nuke;
+    case OV.AIRPORT:  return B.airport;
+    case OV.SEAPORT:  return B.seaport;
   }
   return null;
 }

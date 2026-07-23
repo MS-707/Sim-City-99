@@ -52,6 +52,16 @@ const OV = {
   // range tests that can never mislabel an existing 0..21 type.
   PLYMOUTH: 22, FOREST: 23, DARCO: 24, LAUNCH: 25,
   STATUE: 26, EIFFEL: 27, PYRAMID: 28,
+  // GQ10: special-buildings gap-fill — three more ids appended after
+  // PYRAMID=28, never renumbering (over[] is a Uint8Array, so 29..31
+  // round-trip with NO save change; v stays 11). NUKE joins the isPlant()
+  // family (supply/aging/upkeep/mix all ride that one predicate); AIRPORT
+  // and SEAPORT deliberately join NO predicate — an id >= ZR outside
+  // isPlant/isWaterOv/isMega behaves exactly like OV.STADIUM in every
+  // recomputePower idiom (conducts, counts footprint tiles as powered
+  // consumers, brownout/y2k-eligible, zero pop/jobs). The 22..25 / 26..28 /
+  // 22..28 range tests (isArco/isLandmark/isMega) stay FALSE for 29..31.
+  NUKE: 29, AIRPORT: 30, SEAPORT: 31,
 };
 
 // M25: RAIL — a THIRD network, but on a SEPARATE PLANE (city.rail, a Uint8Array)
@@ -76,6 +86,8 @@ const OV_SIZE = {
   // anc = the min-corner index, and census/render/power key on anc === i.
   [OV.PLYMOUTH]: 3, [OV.FOREST]: 3, [OV.DARCO]: 4, [OV.LAUNCH]: 4,
   [OV.STATUE]: 3, [OV.EIFFEL]: 3, [OV.PYRAMID]: 4,
+  // GQ10: nuke/seaport are 3x3; the airport group is the proven 4x4 max
+  [OV.NUKE]: 3, [OV.AIRPORT]: 4, [OV.SEAPORT]: 3,
 };
 const sizeOf = (t) => OV_SIZE[t] || 1;
 
@@ -83,7 +95,10 @@ const sizeOf = (t) => OV_SIZE[t] || 1;
 // sum, upkeep, aging and the budget power mix — and are never counted as a
 // power CONSUMER by the demand scan). One predicate used everywhere so the
 // four generator types stay perfectly in sync.
-const isPlant = (t) => t === OV.COAL || t === OV.SOLAR || t === OV.GAS || t === OV.WIND;
+// GQ10: NUKE joins the family — this one line wires the whole plant plumbing
+// (supply sum, plantYear stamping, aging curve + warnings, plants*40 upkeep,
+// consumer-scan exclusions, minimap power mode, query age/output rows).
+const isPlant = (t) => t === OV.COAL || t === OV.SOLAR || t === OV.GAS || t === OV.WIND || t === OV.NUKE;
 
 // M24: the water-network overlays. isWaterOv is the ANTI-CROSSTALK predicate —
 // used at every recomputePower conducts()/demand/brownout/y2k site so a pipe,
@@ -152,7 +167,10 @@ const DISTRICT_COLS = [
    worth full nameplate and an ancient one measurably less. Bulldozing and
    rebuilding resets the build year (fresh nameplate). From PLANT_WARN_AGE on,
    a "the old plant is failing — rebuild it" notice hits the ticker. */
-const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120, [OV.GAS]: 450, [OV.WIND]: 80 };
+// GQ10: NUKE is the SC2K endgame plant — 2x the gas peaker's 450 ceiling.
+// It stays CLEAN in recomputeMaps (no smog source branch, like solar/wind);
+// that is the whole visual/sim contrast with the fossil pair.
+const POWER_CAP = { [OV.COAL]: 300, [OV.SOLAR]: 120, [OV.GAS]: 450, [OV.WIND]: 80, [OV.NUKE]: 900 };
 
 /* ---- water network capacity & reach (M24) ----
    WATER_CAP is the number of SERVED consumer tiles each energized provider can
@@ -189,6 +207,7 @@ function plantAgeFactor(age) {
 const PLANT_LABEL = {
   [OV.COAL]: "coal plant", [OV.SOLAR]: "solar array",
   [OV.GAS]: "gas plant", [OV.WIND]: "wind farm",
+  [OV.NUKE]: "nuclear plant", // GQ10
 };
 
 const COST = {
@@ -203,6 +222,8 @@ const COST = {
   // M28: arcologies (endgame vertical growth) + wonder landmarks (prestige).
   plymouth: 15000, forest: 12000, darco: 60000, launch: 100000,
   statue: 8000, eiffel: 12000, pyramid: 20000,
+  // GQ10: special-buildings gap-fill — the endgame plant + two big civics
+  nuke: 15000, airport: 10000, seaport: 5000,
 };
 
 // ---- city milestones (M2) ----
@@ -224,7 +245,10 @@ const TIERS = [
 // returns {ok:false,reason:"locked"} when TOOL_TIER[tool] > city.tier, and the
 // toolbar dims the button with a padlock via minTier. Landmarks stay ungated.
 const TOOL_TIER = { mayor: 2, stadium: 3, rail: 2, subway: 2, station: 2, // Town / City
-  plymouth: 3, forest: 3, darco: 4, launch: 4 }; // M28: City / Metropolis
+  plymouth: 3, forest: 3, darco: 4, launch: 4, // M28: City / Metropolis
+  // GQ10: seaport at Town, airport at City, the nuke at Metropolis endgame
+  // (darco/launch precedent) — same padlock/locked-place() machinery.
+  nuke: 4, airport: 3, seaport: 2 };
 
 /* ---- city ordinances (M22) ----
    Citywide policy booleans the mayor toggles from the #dlg-ordinances panel.
@@ -698,18 +722,26 @@ class City {
     // empty, enforced above) must have >=1 orthogonal TERR.WATER neighbour, else
     // it can't be built at all (a dry pump would be useless). The always-buildable
     // tower is the landlocked fallback so water is never un-buildable on a map.
-    if (tool === "pump") {
-      let adj = false;
-      for (let dy = 0; dy < 2 && !adj; dy++) for (let dx = 0; dx < 2 && !adj; dx++) {
-        const X = x + dx, Y = y + dy;
-        for (const [nx, ny] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-          const NX = X + nx, NY = Y + ny;
-          if (this.inMap(NX, NY) && this.terr[this.idx(NX, NY)] === TERR.WATER) { adj = true; break; }
-        }
-      }
-      if (!adj) return false;
-    }
+    // GQ10: the scan is hoisted into footprintTouchesWater (byte-equivalent —
+    // same order, same early-out) so the seaport can share the water-edge gate.
+    if (tool === "pump" && !this.footprintTouchesWater(x, y, 2)) return false;
+    // GQ10: a seaport needs the waterfront — same orthogonal-adjacency rule as
+    // the pump, on its 3x3 footprint. Airport/nuke place on any clear land.
+    if (tool === "seaport" && !this.footprintTouchesWater(x, y, 3)) return false;
     return true;
+  }
+
+  // GQ10: >=1 orthogonal TERR.WATER neighbour of any tile of the s x s
+  // footprint at (x, y) — the M24 pump adjacency loop, hoisted verbatim.
+  footprintTouchesWater(x, y, s) {
+    for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
+      const X = x + dx, Y = y + dy;
+      for (const [nx, ny] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const NX = X + nx, NY = Y + ny;
+        if (this.inMap(NX, NY) && this.terr[this.idx(NX, NY)] === TERR.WATER) return true;
+      }
+    }
+    return false;
   }
 
   toolCost(tool, x, y) {
@@ -1017,7 +1049,7 @@ class City {
   // plant of each type (used by the budget power-mix breakdown, M19-4). The
   // four values sum to powerSupply. A type with no plants reports 0.
   powerMix() {
-    const mix = { coal: 0, solar: 0, gas: 0, wind: 0 };
+    const mix = { coal: 0, solar: 0, gas: 0, wind: 0, nuke: 0 }; // GQ10: nuke bucket keeps Σ === powerSupply
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (this.anc[i] !== i || !isPlant(t)) continue;
@@ -1026,6 +1058,7 @@ class City {
       else if (t === OV.SOLAR) mix.solar += cap;
       else if (t === OV.GAS) mix.gas += cap;
       else if (t === OV.WIND) mix.wind += cap;
+      else if (t === OV.NUKE) mix.nuke += cap; // GQ10
     }
     return mix;
   }
@@ -2690,5 +2723,7 @@ function toolOverlay(tool) {
     // M28: arcologies + wonder landmarks
     plymouth: OV.PLYMOUTH, forest: OV.FOREST, darco: OV.DARCO, launch: OV.LAUNCH,
     statue: OV.STATUE, eiffel: OV.EIFFEL, pyramid: OV.PYRAMID,
+    // GQ10: special-buildings gap-fill
+    nuke: OV.NUKE, airport: OV.AIRPORT, seaport: OV.SEAPORT,
   })[tool] ?? OV.NONE;
 }

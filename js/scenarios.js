@@ -341,6 +341,7 @@ function startScenario(id) {
   city.tier = tierForPop(city.pop);
   // pre-ranked towns: suppress promotion front pages so the Bugle stays on story
   city.announcedTier = TIERS.length - 1;
+  zoomAnim.active = false; // GQ11: scenario camera reset cancels a pending ease
   cam.x = 0; cam.y = MAP * HH; cam.z = 1;
   city.newsQueue.push({
     headline: `📜 ${sc.title.toUpperCase()} — NEW MAYOR TAKES THE JOB NOBODY WANTED`,

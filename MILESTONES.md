@@ -6,9 +6,55 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ11 — Modern presentation & balance polish** *(graphics roadmap
-  11/11 — FINAL)* — running via the milestone workflow. Gates in
-  `docs/graphics-roadmap.json`.
+- (none — **the 11-milestone graphics roadmap is COMPLETE**. Open next:
+  M31 garbage & waste, the GQ-EPIC elevation heightmap, or new directions.)
+
+  Implementation status (under verification):
+  - **DPR-aware backing store**: one global render scale `RS` (render.js) with
+    all view math kept in CSS px (`VW`/`VH`); every raster entry point sets a
+    `setTransform(RS,0,0,RS,0,0)` base, layer canvases are device-px and blit
+    1:1 under identity, the GQ8 pan apron scales to `SHADOW_MARGIN*RS` so the
+    zero-raster pan fast path survives integer DPRs. At RS=1 every expression
+    reduces to the shipped arithmetic — verified byte-identical vs HEAD
+    `a5792f5` across 4 rotations × noon/night/winter + postcard + minimap.
+  - **Eased zoom-to-cursor**: wheel retargets `zoomAnim` (ui.js) and
+    `camEase(dt)` (called once per rAF from main.js) exponentially eases cam.z
+    (τ=70 ms), re-anchoring on the cursor with the shipped pinch math. Pinch
+    stays direct; rotate/new/load/scenario/minimap-click cancel a pending ease.
+  - **Colorblind minimap pass**: overlay-mode-only retune (City mode
+    untouched). Traffic green→amber→dark-red, poll and crime now
+    lightness-monotonic, svc red/green → deutan-safe blue/orange/near-white,
+    dead transit station white → dim slate `#78808c`, `DISTRICT_COLS`
+    re-spaced on the blue↔yellow axis (same length/index semantics — saves
+    compatible). All ramps clear ΔL* ≥ 25 and all categorical pairs ΔE ≥ 15
+    (districts ≥ 13.3) under the Machado-2009 severity-1.0 deutan matrix;
+    MM_LEGENDS mirrors every final color.
+  - **heatwave-97 fix**: `City.deserialize` no longer calls
+    `markPassedEvents()` — deserialize is a pure restore, making
+    load→serialize idempotent for direct-dated saves (the panel's
+    `firedEvents: [] → ["heatwave-97"]` signature). Redundant by construction:
+    `eventsTick` fires only on an exact year+month match at a rollover and
+    silently retires calendar-passed events, so no retro headline can fire
+    (verified: fresh/played/scenario/direct-dated saves all idempotent; the
+    loaded Aug-97 city fires no HEAT WAVE headline and retires the id at its
+    first rollover). Genuinely-fired saves already carry the id, so their
+    load, re-save and 120-rollover tick stream are bit-identical to HEAD
+    (verified cross-build). Save format unchanged, v stays 11.
+  - **100-year balance soak** (scratchpad harness, 1200 rollovers × empty /
+    standard / arco-heavy, seeded RNG): **no degeneracy predicate tripped, so
+    no balance clamp was applied** — serialized state stays finite everywhere,
+    |funds| max ≈ 1.3×10⁷ (linear tax growth, no runaway), no
+    all-three-demands deadlock window, bonds always repay ≥ principal
+    (5137 ≥ 5000 on the 12-month issue), and a plant-aging supply collapse is
+    recoverable by rebuild (supply 150 → 300 on re-place, `plantYear` resets).
+    Two audit observations, documented rather than "fixed": (1) an unattended
+    empty city ends 100 years at §18,500 — exactly §20,000 minus the designed
+    one-shot §1,500 Asian-flu event (M7), a fixed decrement, not a free-money
+    loop; (2) `demand.r` does pin at −1 in arco-heavy cities (ARCO_POP without
+    matching jobs, flagged in the design) but demand.c/demand.i stay positive,
+    so the deadlock predicate never engages — changing the demand formula
+    without a tripped predicate would violate the byte-safety contract, so it
+    is left as documented behavior.
 
 ## Open
 
@@ -35,14 +81,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ11 — Modern presentation & balance polish** *(modern-norms addendum,
-  user-directed)*: high-DPI crisp canvas (DPR-aware backing store), eased
-  zoom-to-cursor/pinch, colorblind-legible minimap modes (hue never the sole
-  channel), and a 100-year balance soak with minimal documented corrections.
-  **Gates:** DPR=2 measurably sharper, DPR=1 byte-identical · smooth zoom, mouse
-  behavior otherwise unchanged · all 7 modes distinguishable under deuteranopia
-  sim · no degenerate economy state; fixes byte-safe for unaffected saves · zero
-  regressions.
 
 > **Refined bar (user-directed):** the benchmark is **original SimCity 2000
 > fidelity** recreated procedurally, **plus tasteful modern norms** — high-DPI
@@ -58,6 +96,27 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ11 — Modern presentation & balance polish** *(graphics roadmap 11/11
+  — ROADMAP COMPLETE)*: the modern-norms finale, certified clean 8/8 with 0
+  refutes and no fix pass. **High-DPI**: a devicePixelRatio-aware backing store
+  renders vector work (bridges, shadows, labels) at true device resolution and
+  sprites as crisp nearest-neighbor — hard-edge density **2078×** the
+  DPR-ignorant baseline at DPR=2, while DPR=1 stays **byte-identical** (14/14
+  captures incl. all rotations, night, postcard) and the GQ8 pan apron keeps
+  its integer fast path. **Eased zoom-to-cursor**: exponential settle
+  (~250 ms), cursor-anchored, converging to the exact target; pinch untouched
+  and 40/40 glitch-free; all other mouse behavior unchanged. **Colorblind
+  legibility**: every minimap mode re-tuned to pair hue with lightness —
+  worst pairwise ΔE ≥ 28.9 under Machado deuteranopia simulation (traffic now
+  green→amber→dark-red, services blue/orange, districts on the blue↔yellow
+  axis, legends synced). **Balance audit**: three 100-year soaks (empty /
+  standard / arcology cities) show no funds runaway, dead demand, or
+  free-money loop; and the twice-flagged **heatwave-97 save quirk was
+  diagnosed** (deserialize called markPassedEvents, retro-appending calendar-
+  passed events) **and fixed byte-safe** — normal saves round-trip identically.
+  Deterministic (120-rollover serialize equality across independent loads);
+  zero errors.
 
 - [x] **GQ10 — Special buildings gap-fill** *(graphics roadmap 10/11)*: the
   three genuinely-missing SC2K specials shipped as new overlay ids (append-only,

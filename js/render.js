@@ -3,6 +3,14 @@
 
 const cam = { x: 0, y: 0, z: 1, r: 0 };   // world-space center + zoom + view rotation (M32a: r∈{0,1,2,3}, 90° CCW steps)
 let cvs, ctx, frame = 0;
+// GQ11: DPR-aware backing store. RS is the global render scale (device px per
+// CSS px), VW/VH the viewport size in CSS px. Every raster entry point sets a
+// setTransform(RS,0,0,RS,0,0) base transform and ALL view math downstream runs
+// unchanged in CSS-pixel space — so at RS=1 every frame is byte-identical to
+// the pre-GQ11 build by construction, while at DPR 2 vector work (shadows,
+// bridge cables, labels, cursor, cars) rasterizes at true device resolution
+// and the nearest-neighbor sprite upscale stays hard-edged.
+let RS = 1, VW = 0, VH = 0;
 const smoke = [];                    // {x, y, age, drift, fire}
 const SMOKE_MAX = 200;               // shared puff budget (G16)
 const cars = [];                     // {id, x, y, fx, fy, tx, ty, p, spd, col}
@@ -68,8 +76,19 @@ function renderInit(canvas) {
   ctx = canvas.getContext("2d");
   const fit = () => {
     const r = cvs.parentElement.getBoundingClientRect();
-    cvs.width = Math.max(64, r.width | 0);
-    cvs.height = Math.max(64, r.height | 0);
+    // GQ11: view math stays in CSS px (VW/VH); only the backing store scales
+    // by the devicePixelRatio. #game is position:absolute inset:0, so layout
+    // size is CSS-driven — no style.width/height writes needed. A cross-
+    // monitor DPR change fires resize, re-running this fit.
+    VW = Math.max(64, r.width | 0);
+    VH = Math.max(64, r.height | 0);
+    RS = Math.max(1, window.devicePixelRatio || 1);
+    cvs.width = Math.round(VW * RS);
+    cvs.height = Math.round(VH * RS);
+    // pin the CSS box to the CSS-px size the backing store was derived from,
+    // so device px map 1:1 even when the parent rect lands on a fraction
+    cvs.style.width = VW + "px";
+    cvs.style.height = VH + "px";
   };
   fit();
   window.addEventListener("resize", fit);
@@ -178,7 +197,8 @@ function nightLayerCtx() {
   g.globalCompositeOperation = "source-over";
   g.globalAlpha = 1;
   g.clearRect(0, 0, L.cv.width, L.cv.height);
-  g.translate(cvs.width / 2, cvs.height / 2);
+  g.setTransform(RS, 0, 0, RS, 0, 0); // GQ11: DPR base — view math in CSS px
+  g.translate(VW / 2, VH / 2);
   g.scale(cam.z, cam.z);
   g.translate(-cam.x, -cam.y);
   g.imageSmoothingEnabled = false;
@@ -263,14 +283,14 @@ function nightStrength(city, uiState) {
 }
 
 function worldTransform() {
-  ctx.translate(cvs.width / 2, cvs.height / 2);
+  ctx.translate(VW / 2, VH / 2);
   ctx.scale(cam.z, cam.z);
   ctx.translate(-cam.x, -cam.y);
 }
 
 function screenToTile(sx, sy) {
-  const wx = (sx - cvs.width / 2) / cam.z + cam.x;
-  const wy = (sy - cvs.height / 2) / cam.z + cam.y;
+  const wx = (sx - VW / 2) / cam.z + cam.x;
+  const wy = (sy - VH / 2) / cam.z + cam.y;
   const A = wx / HW, B = (wy - HH) / HH;
   // recover FLOAT view coords, round IN VIEW SPACE, then un-rotate — rounding
   // before unrot is mandatory or diagonal-seam tiles mis-pick (M32a).
@@ -284,8 +304,8 @@ function screenToTile(sx, sy) {
 // float u,v; at r=0 this reduces to the pre-rotation inline float inverse exactly,
 // keeping the minimap byte-identical to HEAD at orientation 0.
 function screenToTileF(sx, sy) {
-  const wx = (sx - cvs.width / 2) / cam.z + cam.x;
-  const wy = (sy - cvs.height / 2) / cam.z + cam.y;
+  const wx = (sx - VW / 2) / cam.z + cam.x;
+  const wy = (sy - VH / 2) / cam.z + cam.y;
   const A = wx / HW, B = (wy - HH) / HH;
   return unrot((A + B) / 2, (B - A) / 2, cam.r);
 }
@@ -311,7 +331,8 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
   const g = L.g;
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.clearRect(0, 0, L.cv.width, L.cv.height);
-  g.translate(cvs.width / 2, cvs.height / 2);
+  g.setTransform(RS, 0, 0, RS, 0, 0); // GQ11: DPR base — view math in CSS px
+  g.translate(VW / 2, VH / 2);
   g.scale(cam.z, cam.z);
   g.translate(-cam.x, -cam.y);
   g.imageSmoothingEnabled = false;
@@ -483,14 +504,20 @@ function fillShadowQuad(g, awx, awy, size, d) {
 // updates the composite offset — zero raster work.
 function buildShadowLayer(city, minWX, maxWX, minWY, maxWY, key) {
   const L = shadowLayer;
-  const Lw = cvs.width + 2 * SHADOW_MARGIN, Lh = cvs.height + 2 * SHADOW_MARGIN;
+  // GQ11: the apron is constant in CSS px, so the device-px apron is
+  // SHADOW_MARGIN*RS — at RS=1 every expression below reduces to the shipped
+  // arithmetic (a *1 multiply is an IEEE no-op), and at integer RS an
+  // integer-CSS-px pan stays integer in device px, keeping the zero-raster
+  // pan fast path alive at DPR 2.
+  const M = Math.round(SHADOW_MARGIN * RS);
+  const Lw = cvs.width + 2 * M, Lh = cvs.height + 2 * M;
   if (L.cv && L.cv.width === Lw && L.cv.height === Lh && L.key === key) {
     // same content, camera slid: reuse the raster while the slide is a whole
     // number of device pixels and the viewport stays inside the apron
-    const dx = (L.camX - cam.x) * cam.z, dy = (L.camY - cam.y) * cam.z;
+    const dx = (L.camX - cam.x) * cam.z * RS, dy = (L.camY - cam.y) * cam.z * RS;
     const rdx = Math.round(dx), rdy = Math.round(dy);
     if (Math.abs(dx - rdx) < 1e-7 && Math.abs(dy - rdy) < 1e-7 &&
-        Math.abs(rdx) <= SHADOW_MARGIN && Math.abs(rdy) <= SHADOW_MARGIN) {
+        Math.abs(rdx) <= M && Math.abs(rdy) <= M) {
       L.offX = rdx; L.offY = rdy;
       L.viewX = cam.x; L.viewY = cam.y;
       return;
@@ -504,15 +531,15 @@ function buildShadowLayer(city, minWX, maxWX, minWY, maxWY, key) {
   const g = L.g;
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.clearRect(0, 0, Lw, Lh);
-  g.translate(Lw / 2, Lh / 2);
+  g.setTransform(RS, 0, 0, RS, Lw / 2, Lh / 2); // GQ11: DPR base, device-center origin
   g.scale(cam.z, cam.z);
   g.translate(-cam.x, -cam.y);
   g.fillStyle = "#000";
   // world-space bounds of the layer canvas (apron included), AA-padded —
   // quads are culled by their exact bbox so nothing that could touch the
   // raster is ever skipped, at any footprint size
-  const wl = -Lw / 2 / cam.z + cam.x - 2, wr = Lw / 2 / cam.z + cam.x + 2;
-  const wt = -Lh / 2 / cam.z + cam.y - 2, wb = Lh / 2 / cam.z + cam.y + 2;
+  const wl = -Lw / 2 / (cam.z * RS) + cam.x - 2, wr = Lw / 2 / (cam.z * RS) + cam.x + 2;
+  const wt = -Lh / 2 / (cam.z * RS) + cam.y - 2, wb = Lh / 2 / (cam.z * RS) + cam.y + 2;
   const N = MAP * MAP;
   for (let i = 0; i < N; i++) {
     const ov = city.over[i];
@@ -648,22 +675,25 @@ function renderFrame(city, uiState, clearBG) {
   frame++;
   const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
   nightDrawn = 0;
+  // GQ11: DPR base transform for the whole frame — every save/restore pair
+  // below returns to it, so all view math stays in CSS px at any DPR
+  ctx.setTransform(RS, 0, 0, RS, 0, 0);
   if (clearBG) {
     // postcard photo pass (G4): transparent background — the composer lays
     // its sunset-sky gradient underneath, so past the map edge the photo
     // shows sky, never the void color
-    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    ctx.clearRect(0, 0, VW, VH);
   } else {
     ctx.fillStyle = "#0a0a12";
-    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    ctx.fillRect(0, 0, VW, VH);
   }
 
   // cull margins sized to the sprite extents: buildings reach ~64px sideways,
   // ~110px above and ~48px below their anchor tile's diamond center
-  const minWX = cam.x - cvs.width / 2 / cam.z - 80;
-  const maxWX = cam.x + cvs.width / 2 / cam.z + 80;
-  const minWY = cam.y - cvs.height / 2 / cam.z - 64;
-  const maxWY = cam.y + cvs.height / 2 / cam.z + 128;
+  const minWX = cam.x - VW / 2 / cam.z - 80;
+  const maxWX = cam.x + VW / 2 / cam.z + 80;
+  const minWY = cam.y - VH / 2 / cam.z - 64;
+  const maxWY = cam.y + VH / 2 / cam.z + 128;
 
   const blink = (frame / 24 | 0) % 2 === 0;
   // prebuilt water frame cycle — divisor 32 (G5): the water-driven terrain
@@ -673,11 +703,16 @@ function renderFrame(city, uiState, clearBG) {
 
   // flat terrain: one cached blit unless the camera / water / terrain moved —
   // or the season changed (M12): the palette swap costs exactly one rebuild
-  const tKey = `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},` +
+  const tKey = `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},${RS},` +
     `${waterFrame},${city.terrRev | 0},${city.seed},${MAP},${seasonOf(city.month)}`;
   if (terrLayer.key !== tKey)
     buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, tKey);
+  // GQ11: the layer is device-px sized — blit it 1:1 under identity (exactly
+  // today's behavior at RS=1), then restore the DPR base transform
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(terrLayer.cv, 0, 0);
+  ctx.restore();
 
   // GQ8: building cast-shadows — one cached screen-space composite OVER the
   // flat terrain, UNDER everything the painter loop draws. Faded by (1 − ns):
@@ -692,15 +727,20 @@ function renderFrame(city, uiState, clearBG) {
   if (shA > 0.01) {
     // cam.x/cam.y are NOT in the key: the quads are world-space, so a pure
     // pan reuses the raster via the scroll fast-path inside buildShadowLayer
-    const sKey = `${cam.z},${cam.r},${cvs.width},${cvs.height},` +
+    const sKey = `${cam.z},${cam.r},${cvs.width},${cvs.height},${RS},` +
       `${city.devRev},${city.tickCount},${city.seed},${MAP},${seasonOf(city.month)},` +
       `${(typeof UI !== "undefined" && UI.prefs && UI.prefs.billboard) ? 1 : 0}`;
     if (shadowLayer.key !== sKey ||
         shadowLayer.viewX !== cam.x || shadowLayer.viewY !== cam.y)
       buildShadowLayer(city, minWX, maxWX, minWY, maxWY, sKey);
+    // GQ11: device-px layer, device-px offsets — composite under identity
+    const shM = Math.round(SHADOW_MARGIN * RS);
     ctx.globalAlpha = shA;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(shadowLayer.cv,
-      shadowLayer.offX - SHADOW_MARGIN, shadowLayer.offY - SHADOW_MARGIN);
+      shadowLayer.offX - shM, shadowLayer.offY - shM);
+    ctx.restore();
     ctx.globalAlpha = 1;
   }
 
@@ -711,7 +751,7 @@ function renderFrame(city, uiState, clearBG) {
   // G2: night lights accumulate on the punched layer during the loop, in
   // depth order — but only when the cache key moved; a static night frame
   // reuses the finished layer and pays one composite
-  const nKey = ns > 0 ? `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},` +
+  const nKey = ns > 0 ? `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},${RS},` +
     `${ns},${city.tickCount},${city.terrRev},${city.devRev},${city.seed},${MAP}` : "";
   const ng = ns > 0 && nightLayer.key !== nKey ? nightLayerCtx() : null;
 
@@ -947,8 +987,8 @@ function renderFrame(city, uiState, clearBG) {
   // Skipped in the postcard pass (clearBG), which lays its own season sky (G4).
   if (!clearBG && ns < 1) {
     const gA = 1 - ns, sea = seasonOf(city.month);
-    if (sea === "winter") { ctx.globalAlpha = 0.05 * gA; ctx.fillStyle = "#ccd8e2"; ctx.fillRect(0, 0, cvs.width, cvs.height); ctx.globalAlpha = 1; }
-    else if (sea === "autumn") { ctx.globalAlpha = 0.035 * gA; ctx.fillStyle = "#cf9038"; ctx.fillRect(0, 0, cvs.width, cvs.height); ctx.globalAlpha = 1; }
+    if (sea === "winter") { ctx.globalAlpha = 0.05 * gA; ctx.fillStyle = "#ccd8e2"; ctx.fillRect(0, 0, VW, VH); ctx.globalAlpha = 1; }
+    else if (sea === "autumn") { ctx.globalAlpha = 0.035 * gA; ctx.fillStyle = "#cf9038"; ctx.fillRect(0, 0, VW, VH); ctx.globalAlpha = 1; }
   }
 
   // dusk tint: one screen-space fill over the whole scene — no per-tile work,
@@ -956,7 +996,7 @@ function renderFrame(city, uiState, clearBG) {
   if (ns > 0) {
     ctx.globalAlpha = ns * NIGHT_MAX_ALPHA;
     ctx.fillStyle = NIGHT_TINT;
-    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    ctx.fillRect(0, 0, VW, VH);
     ctx.globalAlpha = 1;
   }
 
@@ -989,8 +1029,12 @@ function renderFrame(city, uiState, clearBG) {
 // rebuild on the next live frame — a once-per-click cost, nothing per-frame.
 function renderPhotoTo(canvas, city, uiState, cx, cy, cz) {
   const oCvs = cvs, oCtx = ctx, ox = cam.x, oy = cam.y, oz = cam.z, orr = cam.r;
+  const oRS = RS, oVW = VW, oVH = VH; // GQ11: pin the photo pass to RS=1
   cvs = canvas;
   ctx = canvas.getContext("2d");
+  // GQ11: the postcard canvas keeps its fixed attribute size — shoot at 1:1
+  // so the photo is byte-identical at every display DPR.
+  RS = 1; VW = canvas.width; VH = canvas.height;
   // M32c: shoot the postcard north-up regardless of the live view rotation, so
   // the photo is a stable keepsake and matches postcardBounds' r=0 framing.
   cam.x = cx; cam.y = cy; cam.z = cz; cam.r = 0;
@@ -998,6 +1042,7 @@ function renderPhotoTo(canvas, city, uiState, cx, cy, cz) {
     renderFrame(city, uiState, true);
   } finally {
     cvs = oCvs; ctx = oCtx;
+    RS = oRS; VW = oVW; VH = oVH;
     cam.x = ox; cam.y = oy; cam.z = oz; cam.r = orr;
   }
 }
@@ -1010,7 +1055,11 @@ function renderPhotoTo(canvas, city, uiState, cx, cy, cz) {
 // depth punching doesn't apply to them.
 function drawNightLights(city, ns) {
   ctx.globalCompositeOperation = "lighter";
+  // GQ11: device-px layer — 1:1 blit under identity, then back to the DPR base
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(nightLayer.cv, 0, 0); // per-sprite alpha was clamped at draw
+  ctx.restore();
   // G16: moving car head/tail lights ride the same additive pass — queued this
   // frame by updateCars, they sparkle over the darkened streets
   if (carLightQ.length) {
@@ -1171,9 +1220,9 @@ function updateCars(city, ns, speed = 1) {
     const wx = worldX(c.x, c.y), wy = worldY(c.x, c.y);
     // cull off-screen cars: the pool is map-sized (G16) but only visible cars
     // pay draw + night-light cost, so a busy 128 map stays cheap
-    const sx = (wx - cam.x) * cam.z + cvs.width / 2;
-    const sy = (wy - cam.y) * cam.z + cvs.height / 2;
-    if (sx < -40 || sx > cvs.width + 40 || sy < -70 || sy > cvs.height + 50) continue;
+    const sx = (wx - cam.x) * cam.z + VW / 2;
+    const sy = (wy - cam.y) * cam.z + VH / 2;
+    if (sx < -40 || sx > VW + 40 || sy < -70 || sy > VH + 50) continue;
     // G16: pick the body sprite for this car's travel axis so it points down
     // the road it's on — one of two iso shapes, never an axis-aligned rect.
     // M32a: rotate the tile travel delta into view space so the axis→body pick
@@ -1398,8 +1447,8 @@ function chopperClear() { chopper = null; }
 // short-circuits to false and legacy input is untouched.
 function chopperHitTest(sx, sy) {
   if (!chopper) return false;
-  const px = (worldX(chopper.x, chopper.y) - cam.x) * cam.z + cvs.width / 2;
-  const py = (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + cvs.height / 2;
+  const px = (worldX(chopper.x, chopper.y) - cam.x) * cam.z + VW / 2;
+  const py = (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + VH / 2;
   const r = CHOPPER_HIT_R * cam.z;
   return (sx - px) * (sx - px) + (sy - py) * (sy - py) <= r * r;
 }
@@ -1408,8 +1457,8 @@ function chopperHitTest(sx, sy) {
 function chopperScreenXY() {
   if (!chopper) return null;
   return {
-    x: (worldX(chopper.x, chopper.y) - cam.x) * cam.z + cvs.width / 2,
-    y: (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + cvs.height / 2,
+    x: (worldX(chopper.x, chopper.y) - cam.x) * cam.z + VW / 2,
+    y: (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + VH / 2,
   };
 }
 
@@ -1417,9 +1466,9 @@ function chopperScreenXY() {
 // ambience scheduler's rotor thump — never used for any map scan.
 function chopperOnScreen() {
   if (!chopper) return false;
-  const sx = (worldX(chopper.x, chopper.y) - cam.x) * cam.z + cvs.width / 2;
-  const sy = (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + cvs.height / 2;
-  return sx >= -80 && sx <= cvs.width + 80 && sy >= -80 && sy <= cvs.height + 80;
+  const sx = (worldX(chopper.x, chopper.y) - cam.x) * cam.z + VW / 2;
+  const sy = (worldY(chopper.x, chopper.y) - CHOPPER_ALT - cam.y) * cam.z + VH / 2;
+  return sx >= -80 && sx <= VW + 80 && sy >= -80 && sy <= VH + 80;
 }
 
 // Per-frame chopper update + draw. Strictly O(1) — one entity, no map scans,
@@ -1714,9 +1763,9 @@ function drawDistrictLabels(city) {
   if ("letterSpacing" in ctx) ctx.letterSpacing = "2px";
   for (const c of distLabelCache.cents) {
     const wx = worldX(c.cx, c.cy), wy = worldY(c.cx, c.cy);
-    const sx = (wx - cam.x) * cam.z + cvs.width / 2;
-    const sy = (wy - cam.y) * cam.z + cvs.height / 2;
-    if (sx < -60 || sx > cvs.width + 60 || sy < -30 || sy > cvs.height + 30) continue;
+    const sx = (wx - cam.x) * cam.z + VW / 2;
+    const sy = (wy - cam.y) * cam.z + VH / 2;
+    if (sx < -60 || sx > VW + 60 || sy < -30 || sy > VH + 30) continue;
     const label = c.name.toUpperCase();
     ctx.globalAlpha = alpha;
     ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,12,20,0.85)";
@@ -1745,9 +1794,9 @@ function drawRegionLabels(city) {
     const cx = e === 0 || e === 2 ? MAP / 2 : (e === 1 ? MAP + 0.5 : -1.5);
     const cy = e === 1 || e === 3 ? MAP / 2 : (e === 2 ? MAP + 0.5 : -1.5);
     const wx = worldX(cx, cy), wy = worldY(cx, cy);
-    const sx = (wx - cam.x) * cam.z + cvs.width / 2;
-    const sy = (wy - cam.y) * cam.z + cvs.height / 2;
-    if (sx < -80 || sx > cvs.width + 80 || sy < -30 || sy > cvs.height + 30) continue;
+    const sx = (wx - cam.x) * cam.z + VW / 2;
+    const sy = (wy - cam.y) * cam.z + VH / 2;
+    if (sx < -80 || sx > VW + 80 || sy < -30 || sy > VH + 30) continue;
     const open = cn.road || cn.wire || cn.rail;
     const label = (open ? "🔌 " : "") + nb.name;
     ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,12,20,0.85)";
@@ -1790,6 +1839,21 @@ function minimapCityCol(city, i) {
   return city.terr[i] === TERR.WATER ? "#136" : (city.terr[i] === TERR.FOREST ? "#0a3a12" : "#1c4a1c");
 }
 
+// GQ11: colorblind-legible overlay ramps. mmRamp is a tiny 3-stop linear
+// interpolator; every retuned overlay ramp pairs its hue sweep with a
+// MONOTONIC CIE-lightness channel, so the gradient survives a deuteranopia
+// simulation (hue is never the sole channel). City-mode base colors
+// (minimapCityCol) are deliberately untouched — only overlay modes retune.
+const MM_TRAFFIC = [[70, 220, 60], [235, 160, 40], [140, 16, 28]];  // free → amber → dark jam
+const MM_POLL = [[46, 66, 30], [150, 110, 36], [255, 190, 50]];     // clean olive → bright foul amber
+const MM_CRIME = [[34, 18, 30], [140, 40, 90], [255, 96, 190]];     // safe dark → bright red-magenta
+function mmRamp(t, s) {
+  const u = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  const k = u < 0.5 ? 0 : 1, f = (u - k * 0.5) * 2;
+  const a = s[k], b = s[k + 1];
+  return `rgb(${a[0] + (b[0] - a[0]) * f | 0},${a[1] + (b[1] - a[1]) * f | 0},${a[2] + (b[2] - a[2]) * f | 0})`;
+}
+
 // G8: scale a #rgb/#rrggbb color to a fraction of its brightness — overlay
 // context tiles render at ~35% of their City-mode color instead of flat #111
 function minimapDim(hex, f) {
@@ -1816,24 +1880,32 @@ function renderMinimap(city, mode) {
       else if (city.over[i] !== OV.NONE) col = "#334";
       else col = city.terr[i] === TERR.WATER ? "#013" : "#111";
     } else if (mode === "poll") {
+      // GQ11: clean → foul now RISES in lightness toward a bright smog amber
+      // (the old ramp saturated at flat-lightness red, invisible to deutans)
       const v = city.poll[i];
-      col = v > 4 ? `rgb(${Math.min(255, 60 + v * 2)},${Math.max(0, 120 - v)},40)` : (city.terr[i] === TERR.WATER ? "#013" : "#131");
+      col = v > 4 ? mmRamp(Math.min(1, v / 160), MM_POLL) : (city.terr[i] === TERR.WATER ? "#013" : "#131");
     } else if (mode === "value") {
       const v = city.landv[i];
       col = `rgb(${30 + v * 0.3 | 0},${40 + v * 0.7 | 0},${60 + v * 0.5 | 0})`;
     } else if (mode === "traffic") {
       if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) { // M26: crossing shows traffic
-        const v = city.traffic[i]; // green -> yellow -> red as congestion rises
-        col = `rgb(${Math.min(255, 60 + v * 1.6) | 0},${Math.max(0, 200 - v * 1.4) | 0},40)`;
+        // GQ11: bright green → amber → DARK red — lightness falls monotonically
+        // with congestion, so free/jammed separate even where red≈green
+        const v = city.traffic[i];
+        col = mmRamp(Math.min(1, v / 200), MM_TRAFFIC);
       } else col = minimapDim(minimapCityCol(city, i), 0.35); // G8: keep district context
     } else if (mode === "svc") {
-      // education (green) + health (red) coverage
+      // GQ11: education (blue) + health (orange) coverage — the old red/green
+      // channel pair is the classic deutan blind spot; blue/orange sit on the
+      // surviving axis and full double coverage reads near-white
       const e = city.eduCov[i], h = city.medCov[i];
-      if (e || h) col = `rgb(${Math.min(255, 40 + h * 0.8) | 0},${Math.min(255, 40 + e * 0.8) | 0},60)`;
+      if (e || h) col = `rgb(${Math.min(255, 40 + h * 0.85) | 0},${Math.min(255, 40 + (e + h) * 0.4) | 0},${Math.min(255, 50 + e * 0.8) | 0})`;
       else col = city.terr[i] === TERR.WATER ? "#013" : "#111";
     } else if (mode === "crime") {
+      // GQ11: dark base rising to a BRIGHT red-magenta — lawless blocks now
+      // separate from safe ones by lightness, not hue alone
       const v = city.crime[i];
-      col = v > 6 ? `rgb(${80 + v},20,${30 + v / 2})` : (city.terr[i] === TERR.WATER ? "#013" : "#121");
+      col = v > 6 ? mmRamp(Math.min(1, v / 160), MM_CRIME) : (city.terr[i] === TERR.WATER ? "#013" : "#121");
     } else if (mode === "water") {
       // M24: providers bright, dry pipe dark, served tiles cyan scaled by the
       // citywide pressure, everything else dimmed City-mode district context
@@ -1848,7 +1920,9 @@ function renderMinimap(city, mode) {
       // dim indigo, stations a white dot (cyan when live), zones tinted by railCov
       // so the catchment reads; everything else keeps dimmed City-mode context.
       const rl = city.rail[i];
-      if (rl === RL.STATION) col = city.stationLive[i] ? "#2ff" : "#fff";
+      // GQ11: dead station drops from white to dim slate — live/dead now
+      // separate by lightness (bright cyan vs mid gray), not hue
+      if (rl === RL.STATION) col = city.stationLive[i] ? "#2ff" : "#78808c";
       else if (rl === RL.TRACK) col = "#6cf";
       else if (rl === RL.SUB) col = "#55f";
       else if (city.railCov[i]) {
@@ -1881,7 +1955,7 @@ function renderMinimap(city, mode) {
     // inverse (screenToTileF, not the rounding screenToTile) so the box bounds
     // the rotated visible region in tile space at every rotation AND stays
     // byte-identical to HEAD's float inverse at r=0.
-    for (const [sx, sy] of [[0, 0], [cvs.width, 0], [0, cvs.height], [cvs.width, cvs.height]]) {
+    for (const [sx, sy] of [[0, 0], [VW, 0], [0, VH], [VW, VH]]) {
       const { x: tx, y: ty } = screenToTileF(sx, sy);
       tx0 = Math.min(tx0, tx); tx1 = Math.max(tx1, tx);
       ty0 = Math.min(ty0, ty); ty1 = Math.max(ty1, ty);

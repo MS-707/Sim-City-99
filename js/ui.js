@@ -439,11 +439,20 @@ function bindCanvas() {
     UI.painting = false; UI.panning = false; UI.lastMouse = null;
   });
 
+  // GQ11: eased zoom-to-cursor. The wheel no longer writes cam.z directly —
+  // it retargets zoomAnim and camEase() (one call per rAF from main.js loop)
+  // exponentially eases cam.z there, re-anchoring each step on the cursor
+  // point with the exact pinch math below. Successive wheel steps compound
+  // against the pending target so fast scrolls still cover the same range.
   c.addEventListener("wheel", (e) => {
     e.preventDefault();
     const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    cam.z = Math.max(0.4, Math.min(2.5, cam.z * f));
-    clampCam();
+    const r = c.getBoundingClientRect();
+    const base = zoomAnim.active ? zoomAnim.target : cam.z;
+    zoomAnim.target = Math.max(0.4, Math.min(2.5, base * f));
+    zoomAnim.ax = e.clientX - r.left - VW / 2; // CSS px from canvas center
+    zoomAnim.ay = e.clientY - r.top - VH / 2;
+    zoomAnim.active = true;
   }, { passive: false });
 
   /* --- touch input (M15): one finger builds, two fingers pan / pinch-zoom.
@@ -469,6 +478,7 @@ function bindCanvas() {
     if (e.touches.length >= 2) {
       const { mid, dist } = pinchOf(e);
       touch.mode = "gesture"; touch.lastMid = mid; touch.lastDist = dist;
+      zoomAnim.active = false; // GQ11: pinch is DIRECT — a pending wheel ease would fight it
       UI.hover = null;
     } else if (touch.mode === null) {
       const t = e.touches[0];
@@ -491,8 +501,8 @@ function bindCanvas() {
       const r = c.getBoundingClientRect();
       // pinch: rescale about the gesture midpoint so the tile under it stays put
       const z2 = Math.max(0.4, Math.min(2.5, cam.z * (dist / touch.lastDist)));
-      const sx = mid.x - r.left - cvs.width / 2;
-      const sy = mid.y - r.top - cvs.height / 2;
+      const sx = mid.x - r.left - VW / 2; // GQ11: CSS px (DPR backing store)
+      const sy = mid.y - r.top - VH / 2;
       cam.x += sx / cam.z - sx / z2;
       cam.y += sy / cam.z - sy / z2;
       cam.z = z2;
@@ -538,13 +548,33 @@ function clampCam() {
   cam.y = Math.max(-pad, Math.min(MAP * TH + pad, cam.y));
 }
 
+/* --------- GQ11: eased zoom-to-cursor --------- */
+// Wheel zoom retargets this and camEase() glides cam.z toward it, cursor-
+// anchored, ~150-250 ms settle. Presentation-only: mutates cam alone, zero
+// RNG, and the sim never reads cam. Pinch stays direct (already continuous);
+// every camera reset (rotate, new/load city, scenario start, minimap click)
+// cancels a pending ease so a stale anchor can never drag the view.
+const zoomAnim = { target: 1, ax: 0, ay: 0, active: false };
+
+function camEase(dt) {
+  if (!zoomAnim.active) return;
+  const k = 1 - Math.exp(-dt / 70); // tau = 70 ms
+  let z2 = cam.z + (zoomAnim.target - cam.z) * k;
+  if (Math.abs(zoomAnim.target - z2) < 0.002) { z2 = zoomAnim.target; zoomAnim.active = false; }
+  // exact shipped pinch anchor math: the world point under the cursor stays put
+  cam.x += zoomAnim.ax / cam.z - zoomAnim.ax / z2;
+  cam.y += zoomAnim.ay / cam.z - zoomAnim.ay / z2;
+  cam.z = z2;
+  clampCam();
+}
+
 // M32a: 90° view rotation. dir=+1 rotates CCW (Q), dir=-1 CW (E). Pivots in
 // place: capture the tile under screen-center FIRST, advance cam.r, then
 // recenter the camera on that same tile's new projected position so the view
 // spins around what the player is looking at rather than jumping. Snap only.
 function rotateView(dir) {
-  const c = document.getElementById("game");
-  const ctr = screenToTile(c.width / 2, c.height / 2);
+  zoomAnim.active = false; // GQ11: rotation stays snap-only (M32 contract)
+  const ctr = screenToTile(VW / 2, VH / 2); // GQ11: CSS-px center (DPR store)
   cam.r = (cam.r + dir + 4) & 3;
   cam.x = worldX(ctr.x, ctr.y);
   cam.y = worldY(ctr.x, ctr.y);
@@ -623,18 +653,21 @@ function bindKeys() {
 // colors renderMinimap paints, so the strip explains what the map shows
 const MM_LEGENDS = {
   power:   '<i class="sw" style="background:#ff0"></i>plant <i class="sw" style="background:#f80"></i>powered <i class="sw" style="background:#334"></i>dark',
-  poll:    '<i class="grad" style="background:linear-gradient(90deg,#131,#7a4628,#ff3c28)"></i>clean / foul',
+  // GQ11: gradients/swatches mirror the retuned deutan-safe overlay ramps
+  // (render.js MM_POLL/MM_CRIME/MM_TRAFFIC + the blue/orange svc pair)
+  poll:    '<i class="grad" style="background:linear-gradient(90deg,#131,#966e24,#ffbe32)"></i>clean / foul',
   value:   '<i class="grad" style="background:linear-gradient(90deg,#1e283c,#6adabb)"></i>cheap / prime',
-  crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#a5143e)"></i>safe / lawless',
-  traffic: '<i class="grad" style="background:linear-gradient(90deg,#3cc828,#dcb428,#ff0028)"></i>free / jammed',
-  svc:     '<i class="sw" style="background:#28dc3c"></i>edu <i class="sw" style="background:#dc283c"></i>health <i class="sw" style="background:#dcdc3c"></i>both',
+  crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#8c285a,#ff60be)"></i>safe / lawless',
+  traffic: '<i class="grad" style="background:linear-gradient(90deg,#46dc3c,#eba028,#8c101c)"></i>free / jammed',
+  svc:     '<i class="sw" style="background:#288cfa"></i>edu <i class="sw" style="background:#fc8c32"></i>health <i class="sw" style="background:#fcf0fa"></i>both',
   // M24: water network — providers, dry pipe, and a served-pressure gradient
   water:   '<i class="sw" style="background:#0cf"></i>tower/pump <i class="sw" style="background:#234"></i>dry pipe <i class="grad" style="background:linear-gradient(90deg,#146078,#28c8f0)"></i>served',
-  // M25: rail network — track, subway, live/dead station, and the ridership catchment
-  transit: '<i class="sw" style="background:#6cf"></i>track <i class="sw" style="background:#55f"></i>subway <i class="sw" style="background:#2ff"></i>station <i class="grad" style="background:linear-gradient(90deg,#16305a,#3c78c8)"></i>catchment',
+  // M25: rail network — track, subway, live/dead station, and the ridership
+  // catchment. GQ11: the dead-station slate joins the strip (G8 contract).
+  transit: '<i class="sw" style="background:#6cf"></i>track <i class="sw" style="background:#55f"></i>subway <i class="sw" style="background:#2ff"></i>station <i class="sw" style="background:#78808c"></i>no svc <i class="grad" style="background:linear-gradient(90deg,#16305a,#3c78c8)"></i>catchment',
   // M21: static fallback string (satisfies "MM_LEGENDS.dist is a non-empty
   // string"); updateMapLegend swaps in live per-district swatches when any exist.
-  dist:    '<i class="sw" style="background:#e04040"></i>neighborhoods — paint with the 🏘️ tool',
+  dist:    '<i class="sw" style="background:#e84448"></i>neighborhoods — paint with the 🏘️ tool',
 };
 
 function updateMapLegend(mode) {
@@ -679,6 +712,7 @@ function bindMinimap() {
     const r = mm.getBoundingClientRect();
     const tx = (e.clientX - r.left) / r.width * MAP;
     const ty = (e.clientY - r.top) / r.height * MAP;
+    zoomAnim.active = false; // GQ11: recenter cancels a pending cursor-zoom
     cam.x = worldX(tx, ty); cam.y = worldY(tx, ty);
     clampCam();
   });
@@ -1790,6 +1824,7 @@ function loadCity() {
   try {
     city = City.deserialize(json);
     chopperClear(); // the chopper (M18) is never saved — no stale flyovers
+    zoomAnim.active = false; // GQ11: never ease toward a stale pre-load anchor
     clampCam(); // a save may be a different map size than the last camera spot (M11)
     setStatus("City loaded. Welcome back, Mayor.");
     return true;
@@ -1803,6 +1838,7 @@ function newCity() {
   const names = ["Llamaville", "Port Modem", "Beanieburg", "Dialup Falls",
     "Pixel Heights", "Cassette Creek", "Winsock City", "Grungetown"];
   city.cityName = names[(Math.random() * names.length) | 0];
+  zoomAnim.active = false; // GQ11: fresh city, fresh camera — no stale ease
   cam.x = 0; cam.y = MAP * HH; cam.z = 1; cam.r = 0; // M32a: reset view rotation
   UI.prefs.viewRot = 0; savePrefs();
   city.pushMsg(`🏗️ ${city.cityName} founded, January 1997. Taxes low, hopes high.`);

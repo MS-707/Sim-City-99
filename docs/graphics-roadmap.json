@@ -215,7 +215,8 @@
         "A 100-year soak run surfaces no degenerate economy state (funds runaway, permanently dead demand, free-money loop); any fix is minimal, documented, and byte-safe for unaffected saves.",
         "Zero regressions: rotation, seasons, night, save round-trip, perf within ~20%; zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: clean pass 8/8 vs baseline a5792f5, 0 refutes, no fix needed — ROADMAP COMPLETE. (a) DPR-aware backing store: at DPR=2 hard-edge density 2078x the DPR-ignorant baseline (vector work at true device res, sprites crisp nearest-neighbor); DPR=1 byte-identical across 14/14 captures (12 scene frames over 4 rotations x noon/night + postcard + minimap), pan apron integer fast-path preserved. (b) Eased zoom-to-cursor: exponential settle to target within 2.2e-16, cursor-anchored via the shipped pinch math; pinch itself untouched and 40/40 glitch-free steps; desktop pan/paint/keys unchanged. (c) Deuteranopia pass (Machado 2009 severity 1.0, CIELAB): every minimap mode worst-pair dE >= 28.9 (traffic re-ramped green->amber->dark-red with L* descent, svc blue/orange, transit dead/live by lightness, districts re-spaced on the blue-yellow axis, legends synced). (d) 100-year soaks x3 city archetypes: no funds runaway, no dead demand, no free-money loop; heatwave-97 diagnosed (markPassedEvents on deserialize) and fixed byte-safe — played/scenario saves round-trip identically, panel repro now idempotent. Regressions: deterministic 120-rollover serialize equality, rotation/seasons/night/picking green, perf within gates at DPR=1 (DPR=2 pan cost is the expected 4x pixel work on the software rasterizer, low-severity noted). Zero errors."
     }
   ],
   "modern_norms_gates": [

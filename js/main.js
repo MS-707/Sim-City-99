@@ -62,6 +62,7 @@ function loop(now) {
     }
   }
 
+  camEase(dt); // GQ11: eased zoom-to-cursor — presentation-only, one step per rAF
   renderFrame(city, UI);
   ambienceFrame(city);
   tickerFrame();

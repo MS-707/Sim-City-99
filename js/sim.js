@@ -143,10 +143,15 @@ const LANDMARK_R = { [OV.STATUE]: 14, [OV.EIFFEL]: 16, [OV.PYRAMID]: 18 };
 // same table with zero conversion. 12 saturated, mutually distinct Win95-ish
 // hues so neighbors never read as the same neighborhood.
 const DIST_MAX = 12;
+// GQ11: palette re-spaced on the deutan-surviving blue↔yellow axis with
+// staggered lightness tiers — every pair clears deltaE >= 13 under a
+// Machado-2009 deuteranopia simulation (worst pair 13.3). SAME length and
+// index semantics as before (saves store the index), so it is fully
+// save-compatible; only the hex values moved.
 const DISTRICT_COLS = [
-  "#e04040", "#e08a2a", "#d8c828", "#7cc030",
-  "#30b060", "#28b0b8", "#3878d8", "#5848c8",
-  "#9848c0", "#d84898", "#a86840", "#8890a0",
+  "#e84448", "#30b4e0", "#c0e838", "#a838c8",
+  "#38c0a8", "#a03020", "#68f4b8", "#1a4aa0",
+  "#d83890", "#48cc40", "#8a1850", "#58ecdc",
 ];
 
 /* ---- power plant capacity & aging (M19) ----
@@ -2637,9 +2642,17 @@ class City {
     // array serializes and restores at identical length/month-alignment).
     c.history = normaliseHistory(d.history);
     // time-capsule events (M7): restore fired ids + live modifiers with their
-    // remaining timers; a pre-M7 (v<=2) save simply has neither field, and
-    // markPassedEvents() quietly retires anything the calendar already passed
-    // so loading an old city never retro-fires 1997 headlines.
+    // remaining timers; a pre-M7 (v<=2) save simply has neither field.
+    // GQ11: deserialize is a PURE restore — the markPassedEvents() call that
+    // used to sit after these lines made load→serialize non-idempotent for any
+    // save whose calendar was advanced without a rollover (it appended e.g.
+    // "heatwave-97" to the restored firedEvents). It was redundant: eventsTick
+    // fires an event ONLY on an exact year+month match at a month rollover and
+    // silently retires anything already calendar-passed, so no retro-1997
+    // headline can ever fire; legacy pre-M7 saves now mark passed events at
+    // their first rollover instead of at load — behavior-equivalent. The
+    // method itself stays: scenarios.js (y2k-ready) legitimately calls it at
+    // BUILD time, after setting the 1999/6 clock and before any save exists.
     // municipal bonds (M13, save v5): restore each bond's full amortization
     // state. A v4-or-earlier save simply has no bonds field and loads
     // debt-free; the credit rating is never serialized — it's a pure function
@@ -2649,7 +2662,6 @@ class City {
     c.firedEvents = Array.isArray(d.firedEvents) ? d.firedEvents.slice() : [];
     c.activeMods = Array.isArray(d.activeMods)
       ? d.activeMods.map((m) => Object.assign({}, m)) : [];
-    c.markPassedEvents();
     c.powerDirty = true;
     // M22: restore the tier (pure data, safe to set early) and rebuild ordMods
     // BEFORE the recompute cascade — those passes read this.ordMods, and the

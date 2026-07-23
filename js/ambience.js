@@ -18,7 +18,8 @@ const amb = { last: 0, idx: 0, lastCat: {} };
 // invert the camera for the four canvas corners -> tile-space bounding box
 function ambVisibleTileRect() {
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const [sx, sy] of [[0, 0], [cvs.width, 0], [0, cvs.height], [cvs.width, cvs.height]]) {
+  // GQ11: corner sampling in CSS px (VW/VH) — the backing store is DPR-scaled
+  for (const [sx, sy] of [[0, 0], [VW, 0], [0, VH], [VW, VH]]) {
     const t = screenToTile(sx, sy);
     x0 = Math.min(x0, t.x); x1 = Math.max(x1, t.x);
     y0 = Math.min(y0, t.y); y1 = Math.max(y1, t.y);

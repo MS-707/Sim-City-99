@@ -1,6 +1,6 @@
 {
   "title": "SimCity 99 — Graphics Quality Roadmap (10 milestones to SC2K fidelity)",
-  "goal": "Raise the game's procedural art from 37/100 to the SimCity 2000 fidelity bar defined in docs/graphics-quality-rubric.json — a vibrant, sunny 1997-nostalgia isometric city that reads instantly as a colorful topographic mosaic — recreated ENTIRELY in procedural canvas (zero external art, zero dependencies, no build step). Clean-room: recreate the look and quality, never copy Maxis art. Work the milestones below top-to-bottom; each is completed by a dynamic workflow and must clear its quality gates before it ships.",
+  "goal": "Raise the game's procedural art from 37/100 to the SimCity 2000 fidelity bar defined in docs/graphics-quality-rubric.json — a vibrant, sunny 1997-nostalgia isometric city that reads instantly as a colorful topographic mosaic — recreated ENTIRELY in procedural canvas (zero external art, zero dependencies, no build step). Clean-room: recreate the look and quality, never copy Maxis art. Work the milestones below top-to-bottom; each is completed by a dynamic workflow and must clear its quality gates before it ships. REFINED BAR (user-directed): the benchmark is original SimCity 2000 fidelity PLUS tasteful modern presentation norms (see rubric.modern_norms) — high-DPI crispness, smooth camera feel, colorblind-legible overlays, minor balance corrections. Modern norms are cross-cutting gates on every milestone; dedicated work lives in GQ11.",
   "rubric_ref": "docs/graphics-quality-rubric.json",
   "scoring_baseline": "The SUMMER / DAYTIME render is the reference baseline for all gates.",
   "loop_protocol": {
@@ -29,7 +29,9 @@
     {
       "id": "GQ1",
       "title": "Daytime palette & water vibrancy",
-      "dimensions": ["palette-mood"],
+      "dimensions": [
+        "palette-mood"
+      ],
       "scope": "Push summer/noon facade + terrain saturation to full; tune NIGHT_MAX_ALPHA / the night-lerp so no sampled frame collapses to cold monochrome; add a two-tone water dither + sine-scroll highlight; lift winter water (#9fc1d9) toward cobalt. A lighting-constant + HSL re-tune — NOT a default flip (day/night already exists, default-on).",
       "quality_gates": [
         "Summer/noon render: water HSL saturation >= 60% and the most saturated blue in the frame.",
@@ -43,7 +45,10 @@
     {
       "id": "GQ2",
       "title": "Ground-material quilt",
-      "dimensions": ["groundscape", "terrain-water"],
+      "dimensions": [
+        "groundscape",
+        "terrain-water"
+      ],
       "scope": "Assign every empty tile a material (grass/dirt/sand/pavement) via low-frequency value noise, drawn with a base color + stippled/dithered noise so no flat slab fills remain; add directional/relief tonal variation so the plane never reads as one flat tone.",
       "quality_gates": [
         ">= 4 distinct ground materials visible in one view, each with per-tile noise (adjacent same-type tiles differ measurably).",
@@ -57,7 +62,10 @@
     {
       "id": "GQ3",
       "title": "Zone-correlated building palette",
-      "dimensions": ["buildings", "palette-mood"],
+      "dimensions": [
+        "buildings",
+        "palette-mood"
+      ],
       "scope": "Seed each facade base color from a curated zone/density palette (terracotta/brick-red R, tan/mustard mid-rise, cream/white civic, teal/cyan + banded glass C, drab steel/olive I); derive lit/shadow faces by HSL lightness shift.",
       "quality_gates": [
         ">= 6 distinct facade hue buckets spanning red, orange/tan, gold, teal/cyan, blue, neutral-white.",
@@ -71,7 +79,9 @@
     {
       "id": "GQ4",
       "title": "Vegetation & street trees",
-      "dimensions": ["groundscape"],
+      "dimensions": [
+        "groundscape"
+      ],
       "scope": "Cluster dense multi-tile tree stands on unbuilt tiles and line single street trees along >= 70% of straight road segments, with size/hue jitter. Placement-only — the summer-green tree recolor already shipped.",
       "quality_gates": [
         ">= 1 multi-tile dense tree stand renders on unbuilt land.",
@@ -85,7 +95,9 @@
     {
       "id": "GQ5",
       "title": "Building silhouette variety",
-      "dimensions": ["buildings"],
+      "dimensions": [
+        "buildings"
+      ],
       "scope": "Build 3-4 non-prism massings from stacked/inset iso boxes (stepped-setback mid-rise, tapering tower, pitched/hip-roof low-rise, wide sawtooth-roof industrial shed) plus a 6+ rooftop prop library with seeded placement. The top 'reads as SC2K' lever.",
       "quality_gates": [
         ">= 12 archetypes distinguishable by grayscale silhouette OUTLINE alone (not 12 barely-different boxes).",
@@ -99,7 +111,9 @@
     {
       "id": "GQ6",
       "title": "Reflective-glass facades",
-      "dimensions": ["buildings"],
+      "dimensions": [
+        "buildings"
+      ],
       "scope": "A new bake routine drawing PERIOD-CORRECT ordered-dithered / horizontally-banded curtain-wall + vertical mullions + a couple of reflection streaks (256-color-era glass, NOT a smooth modern top-to-bottom gradient). Applied to commercial high-density towers.",
       "quality_gates": [
         "Glass facades show horizontal banding / ordered dither (measured: not a smooth vertical gradient; palette-quantized).",
@@ -113,7 +127,9 @@
     {
       "id": "GQ7",
       "title": "Road markings & asphalt",
-      "dimensions": ["transport"],
+      "dimensions": [
+        "transport"
+      ],
       "scope": "Darken road fill to asphalt; bake dashed center-lines, solid lane edges and intersection crosswalk/stop-line bars into all 16 autotile mask orientations so they still read correctly after the rot4() remap.",
       "quality_gates": [
         "Straight tiles draw dashed center-line + lane edges; intersections draw crosswalk/stop-line bars.",
@@ -127,7 +143,9 @@
     {
       "id": "GQ8",
       "title": "Building cast-shadows & aliveness guard",
-      "dimensions": ["buildings"],
+      "dimensions": [
+        "buildings"
+      ],
       "scope": "Add a directional building drop-shadow pass onto neighbor tiles (matching the tree/car grounding shadows already in render.js), and formalize aliveness (traffic density, smoke plumes, animated water/train) as a regression-guarded target.",
       "quality_gates": [
         "Buildings cast a directional drop-shadow onto adjacent tiles (measured shadow pixels in the sun-opposite direction).",
@@ -141,7 +159,10 @@
     {
       "id": "GQ9",
       "title": "Shorelines & suspension bridges",
-      "dimensions": ["terrain-water", "transport"],
+      "dimensions": [
+        "terrain-water",
+        "transport"
+      ],
       "scope": "Render a beveled beach/foam ramp on every land-water border (no hard 1px seam) with a distinct lighter foam/wet-sand band; and auto-span a procedural suspension bridge when road/rail abuts a TERR.WATER run (tapered towers, quadratic main cable, evenly spaced hangers, railed deck quad, translucent water shadow). Flat-water model — no elevation needed.",
       "quality_gates": [
         "Every land tile bordering water renders a beveled beach/foam ramp — no hard 1px edge (measured luma transition).",
@@ -155,7 +176,9 @@
     {
       "id": "GQ10",
       "title": "Special buildings gap-fill",
-      "dimensions": ["specials"],
+      "dimensions": [
+        "specials"
+      ],
       "scope": "Surface & tune the shipped M28 landmarks (arcologies/statue/eiffel/pyramid/stadium/civics), then author only the genuinely-missing silhouettes: an airport group (terminal + control tower + runway/apron markings), a second visually-distinct power-plant type, and >= 1 water-edge seaport/marina. Each with a signature accent hue.",
       "quality_gates": [
         "M28 landmark family renders distinctly: >= 8 non-prism special silhouettes readable in play (incl. >= 1 hero landmark readable at 0.3 zoom).",
@@ -165,6 +188,29 @@
         "New building ids save-round-trip; each special carries a signature accent hue; zero console errors."
       ],
       "status": "todo"
+    },
+    {
+      "id": "GQ11",
+      "title": "Modern presentation & balance polish",
+      "dimensions": [
+        "palette-mood",
+        "buildings",
+        "transport"
+      ],
+      "scope": "The dedicated modern-norms pass (user-directed addendum): (a) devicePixelRatio-aware canvas backing store so all pixel art renders crisp on retina/mobile while DPR=1 output stays byte-identical; (b) eased zoom-to-cursor / pinch-midpoint camera interpolation; (c) colorblind-legibility pass over all seven minimap/data modes (hue paired with lightness or pattern); (d) a balance-correction audit: soak-test the economy/demand loops for degenerate states and apply minimal documented fixes.",
+      "quality_gates": [
+        "At DPR=2 the rendered scene is measurably sharper than the DPR-ignorant baseline (no canvas upscale blur); at DPR=1 output is byte-identical to before.",
+        "Zoom eases smoothly toward the cursor/pinch midpoint (no visual snap); mobile pinch remains glitch-free; desktop mouse behavior otherwise unchanged.",
+        "All seven minimap modes remain distinguishable under a deuteranopia simulation matrix (hue never the sole channel).",
+        "A 100-year soak run surfaces no degenerate economy state (funds runaway, permanently dead demand, free-money loop); any fix is minimal, documented, and byte-safe for unaffected saves.",
+        "Zero regressions: rotation, seasons, night, save round-trip, perf within ~20%; zero console errors."
+      ],
+      "status": "todo"
     }
+  ],
+  "modern_norms_gates": [
+    "No milestone may regress high-DPI crispness once MN1 lands (GQ11 or earlier).",
+    "New overlay/minimap art must not rely on hue alone (MN3).",
+    "Any balance tweak shipped alongside art must be minimal, documented in the milestone notes, and verified byte-safe for saves it should not affect (MN5)."
   ]
 }

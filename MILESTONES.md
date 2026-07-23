@@ -16,8 +16,9 @@ Queue policy: keep at least 5 open improvements at all times.
   weekly usage budget), so GQ1 is **not yet gate-certified**. On resume: finish
   verify (water S≥60%, day sat ≥2× night, warm night accents, parks S≥45%,
   geometry byte-identical to HEAD) + panel, fix anything found, then mark done.
-  The `/goal`+`/loop` autonomous driver is **stopped** until the budget resets
-  (Tue); GQ2–GQ10 remain queued below.
+  The `/goal`+`/loop` autonomous driver is **scheduled to auto-resume Tuesday**
+  (post budget reset) via a one-shot trigger: certify GQ1 first, then run
+  GQ2→GQ11 in order under the refined bar (SC2K fidelity + modern norms).
 
 ## Open
 
@@ -85,6 +86,20 @@ Queue policy: keep at least 5 open improvements at all times.
   **Gates:** ≥8 special silhouettes (incl. hero readable at 0.3 zoom) · airport
   placeable · 2nd plant visually distinct + sim-wired · seaport on water · new
   ids save-round-trip.
+- [ ] **GQ11 — Modern presentation & balance polish** *(modern-norms addendum,
+  user-directed)*: high-DPI crisp canvas (DPR-aware backing store), eased
+  zoom-to-cursor/pinch, colorblind-legible minimap modes (hue never the sole
+  channel), and a 100-year balance soak with minimal documented corrections.
+  **Gates:** DPR=2 measurably sharper, DPR=1 byte-identical · smooth zoom, mouse
+  behavior otherwise unchanged · all 7 modes distinguishable under deuteranopia
+  sim · no degenerate economy state; fixes byte-safe for unaffected saves · zero
+  regressions.
+
+> **Refined bar (user-directed):** the benchmark is **original SimCity 2000
+> fidelity** recreated procedurally, **plus tasteful modern norms** — high-DPI
+> crispness, smooth camera feel, colorblind-legible overlays, minor balance
+> corrections (`modern_norms` in the rubric JSON). These apply as cross-cutting
+> gates on *every* milestone's panel; GQ11 is their dedicated pass.
 
 > **Stretch (deferred, NOT one of the 10):** **GQ-EPIC — true elevation
 > heightmap** (integer per-tile height, cliffs, sea-level pooling). Effort-5;

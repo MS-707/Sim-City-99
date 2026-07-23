@@ -196,7 +196,8 @@
         "A seaport/marina places on or adjacent to water tiles and renders a water-edge structure.",
         "New building ids save-round-trip; each special carries a signature accent hue; zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: clean pass 12/12 vs baseline ef8d148, 0 refutes, no fix needed. Three new specials appended per M24/M28 discipline (OV.NUKE=29 3x3, OV.AIRPORT=30 4x4, OV.SEAPORT=31 3x3; save stays v11, pre-GQ10 saves load): NUCLEAR PLANT — isPlant-wired (POWER_CAP 900, supply 900 fresh -> ~450 at age 45, plantYear stamping, upkeep, minimap plant-yellow), clean like solar/wind, containment dome + twin waisted cooling towers + radiation-yellow trefoil, silhouette IoU vs all 4 existing plants < 0.71; AIRPORT — tier-3 4x4 dark tarmac (0.984 dark fraction) w/ runway threshold bars + centerline + white markings, glass-cab control tower (teal accent), parked aircraft + windsock, runway edge-light night rows; SEAPORT — tier-2, canPlace water-adjacency gate proven (coastal ok / inland refused), quay + sawtooth warehouse + containers + red-orange gantry crane, sodium quay floodlights. All 11 specials place + render distinctly (54/55 pairwise silhouette IoUs < 0.85), launch-arco hero readable at 0.3 zoom (2942 px), correct at all 4 rotations, night bakes lit only when grid-powered, new casters join GQ8 shadows, M28 arcos/landmarks surfaced on the minimap (#a7e/#fff). Whole-atlas audit: 8288 canvas key-paths byte-identical outside the allowed new set; deterministic; zero errors."
     },
     {
       "id": "GQ11",

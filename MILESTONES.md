@@ -6,8 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ10 — Special buildings gap-fill** *(graphics roadmap 10/11)* —
-  running via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
+- [ ] **GQ11 — Modern presentation & balance polish** *(graphics roadmap
+  11/11 — FINAL)* — running via the milestone workflow. Gates in
+  `docs/graphics-roadmap.json`.
 
 ## Open
 
@@ -34,11 +35,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ10 — Special buildings gap-fill** *(specials)*: surface/tune M28
-  landmarks, then author airport group + a 2nd power plant + a seaport/marina.
-  **Gates:** ≥8 special silhouettes (incl. hero readable at 0.3 zoom) · airport
-  placeable · 2nd plant visually distinct + sim-wired · seaport on water · new
-  ids save-round-trip.
 - [ ] **GQ11 — Modern presentation & balance polish** *(modern-norms addendum,
   user-directed)*: high-DPI crisp canvas (DPR-aware backing store), eased
   zoom-to-cursor/pinch, colorblind-legible minimap modes (hue never the sole
@@ -62,6 +58,24 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ10 — Special buildings gap-fill** *(graphics roadmap 10/11)*: the
+  three genuinely-missing SC2K specials shipped as new overlay ids (append-only,
+  save stays v11; pre-GQ10 saves load clean): a **nuclear plant** — containment
+  dome, twin waisted cooling towers, radiation-yellow trefoil — fully sim-wired
+  through `isPlant` (900 supply, ages to ~450 at year 45, upkeep, minimap plant
+  yellow) and clean like solar/wind; a **4×4 airport** — dark tarmac, runway
+  threshold bars + centerline, glass-cab control tower, parked aircraft,
+  windsock, runway edge-lights at night; and a **water-gated seaport** — quay,
+  sawtooth warehouse, stacked containers, red-orange gantry crane, sodium
+  floodlights — whose `canPlace` water-adjacency gate was proven both ways.
+  M28's arcologies/landmarks finally got minimap colors too. **Certified clean
+  12/12, 0 refutes, no fix needed** vs baseline `ef8d148`: all 11 specials
+  place + render distinctly (54/55 pairwise silhouette IoUs < 0.85), the launch
+  arco reads at 0.3 zoom, all 4 rotations correct, night bakes light only when
+  grid-powered, new buildings cast GQ8 shadows, and an **8,288-path whole-atlas
+  audit** confirms byte-identity outside the allowed new set. Deterministic;
+  zero errors.
 
 - [x] **GQ9 — Shorelines & suspension bridges** *(graphics roadmap 9/11)*:
   coastlines got their bevel — every land-water border now ramps through

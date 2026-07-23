@@ -23,6 +23,43 @@ function lighten(hex, t) {
   return `rgb(${r + (255 - r) * t | 0},${g + (255 - g) * t | 0},${b + (255 - b) * t | 0})`;
 }
 
+// GQ3: HSL face derivation for the zone-family prisms. shade() multiplies RGB
+// channels, which drags saturated hues toward black/grey; the curated zone
+// palettes keep their hue identity by shifting HSL *lightness* only — the lit
+// top and the two shadow faces stay in the family's hue band.
+function hexToHsl(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  let h = 0, s = 0;
+  if (mx !== mn) {
+    const d = mx - mn;
+    s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    h = (mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60;
+  }
+  return [h, s, l];
+}
+function hslStr(h, s, l) {
+  return `hsl(${h},${(s * 100).toFixed(1)}%,${(l * 100).toFixed(1)}%)`;
+}
+// same hue/sat, lightness shifted by dl and clamped to [0.06, 0.88] — the top
+// clamp keeps pale faces below valueJitterCopy's 255 ceiling (G10 distance)
+function faceL(hex, dl) {
+  const [h, s, l] = hexToHsl(hex);
+  return hslStr(h, s, Math.max(0.06, Math.min(0.88, l + dl)));
+}
+// GQ3 prism opts for the nine zone families: lit top (unless a roof cap
+// overrides it) + HSL-darkened shadow faces. The sun stays SCREEN-welded —
+// SW face darkest, SE face lighter — exactly like prism()'s shade() defaults,
+// so M32a/b face logic is untouched. Civic/landmark prisms keep shade().
+function zoneFaces(base, topHex) {
+  return {
+    top: topHex || faceL(base, 0.14),
+    left: faceL(base, -0.13),
+    right: faceL(base, -0.05),
+  };
+}
+
 // G13: nudge a hex color warmer (k>0) or cooler (k<0) for per-tree canopy hue
 // jitter — k in ~[-1,1]. Keeps the leaf family, just breaks the flat "every
 // tree the same green" look.
@@ -1559,13 +1596,18 @@ function buildSprites() {
 
   /* ---- residential (5 variants per level) ---- */
   const NV = 5; // zone sprite variants per level
-  // G10: residential = warm brick/cream/terracotta. Facades are muted warm
-  // greige/clay (hue 0-50, low saturation); the punch is reserved for the
-  // terracotta roofs and warm trim. R_ROOF are the saturated roof caps.
-  const houseWalls = ["#bdb2a4", "#b8aa9a", "#c0b6a6", "#b1a594", "#c3b8a8"];
+  // GQ3: zone-correlated building palette — curated CONSTANTS + deterministic
+  // fills only. This milestone adds ZERO random draws; any future per-variant
+  // jitter must fork a side mulberry32 stream (GQ2 rule), never touch the
+  // shared 0x5EED ART_RNG or reorder windows() calls.
+  // Residential = warm terracotta/tan/brick. r1 terracotta plaster (hue 16-26),
+  // r2 tan/mustard (hue 38-45 HARD BUDGET: <=45 keeps >=12deg margin to the
+  // olive I classifier boundary), r3 brick-red (hue 8-18). The punch stays in
+  // the terracotta roofs; R_ROOF are the saturated roof caps.
+  const houseWalls = ["#c07b5d", "#bf8869", "#c07154", "#c4906e", "#bf714a"];
   const houseRoofs = ["#8b4b3f", "#9a5d4e", "#855242", "#996750", "#7a4b3a"];
-  const r2Base = ["#977c6d", "#927662", "#9b806e", "#8e7263", "#9e8573"];
-  const r3Base = ["#bea997", "#c2b19c", "#b8a08e", "#c5af9b", "#b39986"];
+  const r2Base = ["#c2a051", "#c49845", "#c0a65d", "#c69739", "#c5ad63"];
+  const r3Base = ["#b3614d", "#b05545", "#b36d56", "#ab533f", "#bb7458"];
   const R_ROOF = ["#b0563c", "#a94f38", "#b5603f", "#a24a34", "#b56945"];
   // G14: r1 (cottages + a standalone tree) parameterized by season — winter
   // snows the pitched roofs and the tree, autumn turns the tree. sk null/
@@ -1585,9 +1627,9 @@ function buildSprites() {
     r1.push(withJitter(mkSprite(1, 1, 30, r1Draw(v, "summer"))));
     r2.push(withJitter(withNight(1, 1, 46, (g, ox, oy) => {
       const base = r2Base[v];
-      // G10: pale mid-rise deck top (keeps G9's roof luminance variety); the
-      // warm identity comes from the terracotta coping cap below.
-      const { W, S, E } = prism(g, ox, oy, 1, 1, 36, base);
+      // GQ3: lit/shadow faces by HSL lightness shift keep the mustard hue;
+      // the warm identity comes from the terracotta coping cap below.
+      const { W, S, E } = prism(g, ox, oy, 1, 1, 36, base, zoneFaces(base));
       windows(g, up(W, 0), up(S, 0), 36, 3, 2, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       windows(g, up(S, 0), up(E, 0), 36, 3, 3, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       // G9: tar deck behind a 1px parapet, dressed with seeded service gear
@@ -1606,9 +1648,9 @@ function buildSprites() {
     })));
     r3.push(withJitter(withNight(1, 1, 82, (g, ox, oy) => {
       const base = r3Base[v];
-      // G10: pale-cream brick tower under a saturated terracotta roof cap —
+      // GQ3: brick-red tower under the saturated terracotta roof cap —
       // the hospital's #d8d5ca helipad stays a clear >= 12 distance from these
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base, { top: R_ROOF[v] });
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base, zoneFaces(base, R_ROOF[v]));
       windows(g, up(W, 0), up(S, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       windows(g, up(S, 0), up(E, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
       // G9: no mast here — the beacon is a C3-only signature now. R3 roofs
@@ -1627,17 +1669,20 @@ function buildSprites() {
   }
 
   /* ---- commercial ---- */
-  // G10: commercial = cool glass blues / teals / grays. Facades are muted
-  // cool blue-grays (hue 180-260); the punch lives in the bright glass crowns
-  // and the saturated cool storefront awnings.
-  const c1Base = ["#a9b3bc", "#b0bbc4", "#a7b3bc", "#acb7c0", "#b4bdc5"];
-  const c2Base = ["#91a2b0", "#96a8b7", "#8c9fa7", "#92a4b7", "#9daebc"];
-  const c3Glass = ["#546d84", "#4b6d7b", "#5a6e83", "#4d727d", "#606e84"];
+  // GQ3: commercial = teal/cyan glass (constants only — see the RNG note at
+  // the residential palettes). c1 pale teal storefronts (hue 180-192), c2
+  // teal/cyan mid-rise (hue 183-195), c3 curtain-wall glass split into two
+  // buckets: variants 0,3 teal (hue 188-196), variants 1,2,4 blue (hue
+  // 210-224, S capped at .50 so summer water stays the most saturated blue
+  // in frame — GQ1). Awnings keep their cool jewel tones.
+  const c1Base = ["#93babd", "#9bbbbf", "#89bcbd", "#a3bdc2", "#85b2b7"];
+  const c2Base = ["#4f96a1", "#47999e", "#5996a6", "#468d95", "#5d99ac"];
+  const c3Glass = ["#428b9a", "#3f6aa2", "#4966a2", "#377f95", "#4660aa"];
   const C_ROOF = ["#79b0c8", "#7ec0c4", "#88b8cc", "#7ab4c6", "#8cbcce"];
   for (let v = 0; v < NV; v++) {
     c1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
       const base = c1Base[v];
-      const { W, S, E } = prism(g, ox, oy, 1, 1, 18, base);
+      const { W, S, E } = prism(g, ox, oy, 1, 1, 18, base, zoneFaces(base));
       // storefront glass band + cool jewel-tone awning (trim punch). G10:
       // the glass is a muted cool gray-blue so the facade stays low-saturation.
       const aw = ["#3d6b95", "#3a8489", "#3f5f99", "#447894", "#495e89"][v];
@@ -1649,8 +1694,8 @@ function buildSprites() {
     })));
     c2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
       const base = c2Base[v];
-      // G10: bright cool crown for roof-line punch over the muted facade
-      const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base, { top: C_ROOF[v] });
+      // GQ3: bright cool crown for roof-line punch over the teal facade
+      const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base, zoneFaces(base, C_ROOF[v]));
       windows(g, up(W, 0), up(S, 0), 44, 4, 3, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
       windows(g, up(S, 0), up(E, 0), 44, 4, 4, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
       // G9: gravel deck behind a 1px parapet plus seeded service gear
@@ -1664,7 +1709,27 @@ function buildSprites() {
     const c3spr = withNight(1, 1, 104, (g, ox, oy) => {
       const glass = c3Glass[v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
-        { top: shade(glass, 1.5), left: shade(glass, 0.62), right: shade(glass, 0.88) });
+        zoneFaces(glass, shade(glass, 1.5)));
+      // GQ3: banded curtain wall (period-correct SC2K tower skin) — 8
+      // spandrel/glass strips + 2 mullion lines per visible face. Pure loops,
+      // ZERO RNG, drawn on the day canvas only (before windows(), whose args
+      // are untouched, so the ART_RNG stream and night glow bake are
+      // bit-identical to HEAD).
+      const spandrel = faceL(glass, -0.16), band = faceL(glass, 0.08),
+            mullion = faceL(glass, -0.22);
+      for (const [p0, p1] of [[W, S], [S, E]]) {
+        for (let k = 0; k < 8; k++) {
+          poly(g, [up(p0, k * 11 + 4), up(p1, k * 11 + 4),
+                   up(p1, k * 11 + 11), up(p0, k * 11 + 11)], band);
+          poly(g, [up(p0, k * 11), up(p1, k * 11),
+                   up(p1, k * 11 + 4), up(p0, k * 11 + 4)], spandrel);
+        }
+        g.fillStyle = mullion;
+        for (const t of [1 / 3, 2 / 3]) {
+          const mx = p0[0] + (p1[0] - p0[0]) * t, my = p0[1] + (p1[1] - p0[1]) * t;
+          g.fillRect(mx - 0.5, my - 88, 1, 88);
+        }
+      }
       windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
       windows(g, up(S, 0), up(E, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
       // G9: service deck on the glass crown
@@ -1685,19 +1750,21 @@ function buildSprites() {
   }
 
   /* ---- industrial ---- */
-  // G10: industrial = desaturated ochre / rust / concrete (saturation <= 0.35,
-  // warm-neutral hue) — clearly grayer than the warm-brick residential so the
-  // two never trade places, and the smokestacks stay an industrial-only mark.
-  const i1Base = ["#a39c90", "#9b968e", "#a79e8f", "#959089", "#a79e8d"];
-  const i2Base = ["#88837b", "#847f79", "#8b847c", "#7f7d78", "#888176"];
-  const i3Base = ["#757068", "#716f6c", "#79726a", "#6f6d69", "#77706c"];
+  // GQ3: industrial = drab steel/olive (constants only — see the RNG note at
+  // the residential palettes). Hue 70-95 (HARD BUDGET: >=70 keeps >=12deg
+  // margin to mustard r2's <=45 boundary), S .10-.24, lightness DECLINING by
+  // density (.48/.42/.36) — lightness is the MN3 non-hue cue. I_ROOF rust
+  // stays the punch (roofs/trim rule), not the facade.
+  const i1Base = ["#859169", "#7d8a6a", "#8f9966", "#77856b", "#809064"];
+  const i2Base = ["#74805b", "#6c7a5c", "#778255", "#67755c", "#6f7f57"];
+  const i3Base = ["#636f4d", "#5c6a4e", "#657048", "#58664d", "#5e6e49"];
   // G10: rust/ochre roof caps — the industrial "punch" that keeps the roof
   // family saturated while the concrete facades stay grey (roofs/trim rule).
   const I_ROOF = ["#9a6a3c", "#8f6236", "#a06e3e", "#8a5e34", "#9c6a3a"];
   for (let v = 0; v < NV; v++) {
     i1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
       const base = i1Base[v];
-      const cn = prism(g, ox, oy, 1, 1, 20, base);
+      const cn = prism(g, ox, oy, 1, 1, 20, base, zoneFaces(base));
       // big loading door tagged to ONE world face (M32b) — plainer at the two
       // orientations where that face rotates to an occluded back
       onFace(FE_PX, cn, (p0, p1) => {
@@ -1709,7 +1776,7 @@ function buildSprites() {
     })));
     i2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
       const base = i2Base[v];
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base, { top: I_ROOF[v] });
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base, zoneFaces(base, I_ROOF[v]));
       windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
       // M32b: the SW screen face was bare grey at every rotation (HEAD only lit
       // the SE face). Light it too so both screen-visible faces read populated,
@@ -1734,7 +1801,7 @@ function buildSprites() {
     })));
     i3.push(withJitter(withNight(1, 1, 74, (g, ox, oy) => {
       const base = i3Base[v];
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, { top: I_ROOF[v] });
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, zoneFaces(base, I_ROOF[v]));
       windows(g, up(W, 0), up(S, 0), 38, 2, 2, 0.35, "#ffd27f", "#20242c", GLOW_SODIUM);
       // M32b: mirror of i2 — HEAD only lit the SW face, leaving the SE screen
       // face bare grey at every rotation. Light it too so both screen-visible

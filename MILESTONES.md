@@ -6,8 +6,8 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ3 — Zone-correlated building palette** *(graphics roadmap 3/11)* —
-  running via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
+- [ ] **GQ4 — Vegetation & street trees** *(graphics roadmap 4/11)* — running
+  via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
 
@@ -34,10 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ3 — Zone-correlated building palette** *(buildings)*: curated per-zone/
-  density facade hues, lit/shadow by HSL shift. **Gates:** ≥6 hue buckets ·
-  nearest-hue classifier ≥0.9 zone-correct · adjacent variants ≥10 color dist ·
-  G1 night legibility preserved · deterministic.
 - [ ] **GQ4 — Vegetation & street trees** *(groundscape)*: dense tree stands +
   street trees along ≥70% of straight roads (placement-only). **Gates:** ≥1
   multi-tile stand · ≥70% road-edge coverage · legal placement · perf within ~20% · deterministic.
@@ -90,6 +86,22 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ3 — Zone-correlated building palette** *(graphics roadmap 3/11)*: the
+  nine zone families now draw from **curated per-zone hue palettes** — terracotta
+  plaster + brick-red residential, tan/mustard + gold mid-rises, pale-teal
+  storefronts, teal/cyan commercial towers with **period-correct banded
+  curtain-wall glass + mullions** on C3 (deterministic overdraw, zero ART_RNG
+  drift), and drab steel/olive industrial whose density cue is **lightness**, not
+  hue (MN3) — with lit/shadow faces derived by pure HSL lightness shifts around
+  the screen-welded sun. **Certified clean, 8/8, no fix needed** vs baseline
+  `1a7e8d1`: 7 hue buckets present; a nearest-hue classifier over 90 rendered
+  R/C/I tiles scores **1.00 zone-correct at both cam.r=0 and r=1**; min
+  adjacent-variant color distance 11.7; **all 58 night/pool glow canvases
+  byte-identical** (G1 night legibility preserved, glow ratio 1.048); **647
+  unrelated day canvases byte-identical**; 2868 canvas hashes identical across
+  independent boots; winter ≤ summer saturation everywhere. Panel: 3/3 confirm,
+  0 refutes (three low-severity taste notes recorded for future polish).
 
 - [x] **GQ2 — Ground-material quilt** *(graphics roadmap 2/11)*: every empty
   land tile now carries a **material** — grass, dirt, sand lot, or pavement —

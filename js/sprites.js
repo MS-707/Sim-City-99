@@ -1452,18 +1452,33 @@ function buildSprites() {
   SPR.road = []; SPR.roadWinter = []; SPR.wire = [];
   // winter roads (M12): same geometry, plowed asphalt with snow banks piled
   // along both edges of every arm — baked here, selected by spriteFor
-  // G12: wide asphalt (~72% of the edge vs HEAD's 44%) with a lighter curb line
-  // on each verge; centre-line dashes run one continuous edge-to-edge stroke on
-  // straight tiles (even 4-4 rhythm carried seamlessly across tile seams) and
-  // stop short of the centre on junctions/corners so junction boxes stay clean.
+  // GQ7: road markings & asphalt. Asphalt darkened to #3e3f46 (lum≈63) so the
+  // network reads as a dark grid against GQ2 pavement (~144) / civic aprons
+  // (~150); winter keeps the same fill (identity carried by the snow banks).
+  // Solid white lane-edge lines (#dadbe0) inset at edge fractions .185/.815
+  // (inside the ±12.88px asphalt span and clear of GQ4 trunks at 15.7px)
+  // painted over curb/banks in both seasons: edge-to-edge on straights
+  // (continuous across seams), stopping 10.2px short of centre on corners/
+  // dead-ends, and omitted on junctions where the crosswalk + stop-line bars
+  // carry the paint instead. G12 centre-line dash geometry untouched (edge-
+  // anchored 4-4 rhythm, seam-phase invariant; the straight-tile stroke is
+  // passed twice so dash edge pixels stay crisp on the darker fill).
+  // Junctions (popcount(m)>=3) get a stop line + continental crosswalk bars
+  // per arm, all within d<=15.4 / |t|<=9.8 so no paint leaks past the
+  // asphalt quad. ZERO RNG calls — this bake must never touch
+  // R()/ART_RNG/groundRng/streetRng or downstream bakes shift.
   const roadSprite = (m, snow) => mkSprite(1, 1, 0, (g, ox, oy) => {
     const C = [ox, oy];
-    const asphalt = "#55565e", curb = "#93949c", line = "#d8c24a";
+    const asphalt = "#3e3f46", curb = "#93949c", line = "#d8c24a";
+    const lanePaint = "#dadbe0";
     const AW0 = 0.14, AW1 = 0.86;              // asphalt spans ~72% of each edge
+    const L0 = 0.185, L1 = 0.815;              // lane-edge paint inset fractions
     const armLen = Math.hypot(HW / 2, HH / 2); // centre → edge-midpoint distance
     const dash = armLen / 4;                   // 4-4 rhythm; a straight tile = 8 dashes
     const clearR = 9;                          // junction dashes stop this far from centre
     const straight = m === 5 || m === 10;      // 2 opposite arms => a through road
+    const arms = (m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1) + ((m >> 3) & 1);
+    const junction = arms >= 3;                // 3-way/4-way => crosswalks + stop lines
     // arms + curbs (m===0 draws all four as an isolated patch)
     for (let b = 0; b < 4; b++) {
       if (!(m & (1 << b)) && m !== 0) continue;
@@ -1474,7 +1489,28 @@ function buildSprites() {
       const c1 = [C[0] + e1[0] - mid[0], C[1] + e1[1] - mid[1]];
       const c2 = [C[0] + e2[0] - mid[0], C[1] + e2[1] - mid[1]];
       poly(g, [e1, e2, c2, c1], asphalt);
+      // solid lane-edge paint (GQ7). Straights run edge-to-edge (continuous
+      // paint across tile seams); corners/dead-ends/isolated stubs stop
+      // 10.2px short of centre so the turn reads as clean asphalt; junctions
+      // get none at all — their crosswalk + stop-line bars carry the paint
+      // (and the tile would otherwise wash out brighter than the pavement it
+      // must contrast). In winter the paint goes down BEFORE the banks so
+      // the plow line keeps its full snow pile; the inner sliver of paint
+      // still shows between the banks.
+      const paintLanes = () => {
+        if (junction) return;
+        g.strokeStyle = lanePaint; g.lineWidth = 1.7; g.lineCap = "butt";
+        const lt = straight ? 1 : 1 - 10.2 / armLen;
+        for (const f of [L0, L1]) {
+          const eL = [P0[0] + (P1[0] - P0[0]) * f, P0[1] + (P1[1] - P0[1]) * f];
+          const cL = [C[0] + eL[0] - mid[0], C[1] + eL[1] - mid[1]];
+          g.beginPath(); g.moveTo(eL[0], eL[1]);
+          g.lineTo(eL[0] + (cL[0] - eL[0]) * lt, eL[1] + (cL[1] - eL[1]) * lt);
+          g.stroke();
+        }
+      };
       if (snow) { // plowed snow banks piled along both arm edges (M12)
+        paintLanes();
         g.strokeStyle = "#e8edf3"; g.lineWidth = 2.6; g.lineCap = "round";
         g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
         g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
@@ -1483,6 +1519,7 @@ function buildSprites() {
         g.strokeStyle = curb; g.lineWidth = 1.2;
         g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
         g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
+        paintLanes();
       }
     }
     // center pad keeps junction boxes solid asphalt
@@ -1500,7 +1537,7 @@ function buildSprites() {
       const midB = [(mB[0][0] + mB[1][0]) / 2, (mB[0][1] + mB[1][1]) / 2];
       g.beginPath();
       g.moveTo(midA[0], midA[1]); g.lineTo(C[0], C[1]); g.lineTo(midB[0], midB[1]);
-      g.stroke();
+      g.stroke(); g.stroke(); // double pass firms edge pixels over dark asphalt
     } else { // junctions / corners / dead-ends: dash from each edge inward but
       // stop clearR short of center; phase 0 at the edge aligns with neighbours
       for (let b = 0; b < 4; b++) {
@@ -1512,6 +1549,38 @@ function buildSprites() {
         g.moveTo(mid[0], mid[1]);
         g.lineTo(mid[0] + ux * (armLen - clearR), mid[1] + uy * (armLen - clearR));
         g.stroke();
+      }
+    }
+    g.setLineDash([]); g.lineDashOffset = 0;
+    // ---- junction stop lines + continental crosswalk bars (GQ7) ----
+    // only 3-way/4-way junctions (popcount>=3); straights, corners, dead-ends
+    // and isolated patches stay clean. All geometry sits at d<=15.4 from the
+    // centre and |transverse|<=9.8, safely inside the asphalt quad.
+    if (junction) {
+      for (let b = 0; b < 4; b++) {
+        if (!(m & (1 << b))) continue;
+        const [P0, P1] = EDGE[b];
+        const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2];
+        const ux = (C[0] - mid[0]) / armLen, uy = (C[1] - mid[1]) / armLen;
+        const eLen = Math.hypot(P1[0] - P0[0], P1[1] - P0[1]);
+        const tx = (P1[0] - P0[0]) / eLen, ty = (P1[1] - P0[1]) / eLen;
+        const pt = (d) => [C[0] - ux * d, C[1] - uy * d]; // centre → edge
+        // stop line: solid bar just outside the clearR dash stop
+        const s = pt(10.2);
+        g.strokeStyle = "#e6e7ec"; g.lineWidth = 1.8;
+        g.beginPath();
+        g.moveTo(s[0] - tx * 8.8, s[1] - ty * 8.8);
+        g.lineTo(s[0] + tx * 8.8, s[1] + ty * 8.8);
+        g.stroke();
+        // crosswalk: four continental bars laid along the arm axis
+        g.strokeStyle = "rgba(233,234,240,.95)"; g.lineWidth = 2.4;
+        const w0 = pt(11.9), w1 = pt(15.4);
+        for (const o of [-8, -3, 2, 7]) {
+          g.beginPath();
+          g.moveTo(w0[0] + tx * o, w0[1] + ty * o);
+          g.lineTo(w1[0] + tx * o, w1[1] + ty * o);
+          g.stroke();
+        }
       }
     }
     g.setLineDash([]); g.lineDashOffset = 0;

@@ -6,8 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ7 — Road markings & asphalt** *(graphics roadmap 7/11)* — running
-  via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
+- [ ] **GQ8 — Building cast-shadows & aliveness guard** *(graphics roadmap
+  8/11)* — running via the milestone workflow. Gates in
+  `docs/graphics-roadmap.json`.
 
 ## Open
 
@@ -34,10 +35,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ7 — Road markings & asphalt** *(transport)*: asphalt fill + dashed
-  center-lines/lane-edges/crosswalks baked into all 16 masks, rotation-correct.
-  **Gates:** markings on straights + crosswalks at junctions · correct across 4
-  rotations · asphalt darker than lots · night lamps + cars unregressed · deterministic.
 - [ ] **GQ8 — Building cast-shadows & aliveness guard** *(buildings)*: directional
   drop-shadows onto neighbor tiles + a regression guard on motion. **Gates:**
   shadow pixels sun-opposite · direction matches tree/car shadows · traffic/smoke/
@@ -75,6 +72,21 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ7 — Road markings & asphalt** *(graphics roadmap 7/11)*: roads
+  darkened to true asphalt (`#3e3f46`, median luminance 90 vs pavement ground
+  142 / civic aprons 151 — the network finally reads as a dark grid), with
+  **solid white lane-edge lines** inset inside the asphalt span (clear of curb
+  and the GQ4 tree trunks), the G12 phase-aligned yellow center dashes
+  untouched, and **continental crosswalk bars + stop lines on every arm of
+  every 3+/4-way junction** — baked per mask so all four camera rotations come
+  free via the `rot4()` remap (spot-proven per orientation). Winter keeps its
+  plowed-bank identity with markings visible between banks. **Certified clean
+  8/8, 0 refutes, no fix needed** vs baseline `8235b68`: a single zero-RNG
+  function change; 32/32 road sprites at unchanged 64×32 anchors; 204/204
+  untouched canvases byte-identical; night lamps, 32 animating cars, street
+  trees and WIREROAD all unregressed; markings geometrically contained (max
+  transverse 9.17px < asphalt 12.9px); deterministic; zero errors.
 
 - [x] **GQ6 — Reflective-glass facades** *(graphics roadmap 6/11)*: the C3
   towers' glass is now certified **reflective 90s curtain-wall**: palette-

@@ -144,7 +144,8 @@
         "Night lamp compositing + car animation unchanged; traffic not regressed; all 16 masks + winter variants bake at the unchanged anchor.",
         "Deterministic; zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: clean pass 8/8 vs baseline 8235b68, 0 refutes, no fix needed. Single-function change (roadSprite, zero RNG): asphalt darkened to #3e3f46 (median lum 90 vs pavement ground 142 / civic apron 151 — the network reads as a dark grid); solid white lane-edge lines at +-10.8px insets (clear of +-12.9 asphalt span and +-15.7 tree trunks); G12 center-dash invariants untouched (7 transitions, phase-aligned); continental crosswalk bars + stop lines on every arm of every popcount>=3 mask (16/16 zones day AND winter), absent on straights/corners/dead-ends; correct at all 4 rotations via the baked-per-mask + rot4 remap (spot-proven per orientation); 32/32 sprites at unchanged 64x32/ox32/oy16 anchors; 204/204 untouched canvases byte-identical (wire/lamp/rubble/terrEdge/matFringe/reliefTint/trees); night lamps (285 lum px), 32 cars animating, street trees, WIREROAD all unregressed; deterministic; zero errors."
     },
     {
       "id": "GQ8",
@@ -203,7 +204,7 @@
         "buildings",
         "transport"
       ],
-      "scope": "The dedicated modern-norms pass (user-directed addendum): (a) devicePixelRatio-aware canvas backing store so all pixel art renders crisp on retina/mobile while DPR=1 output stays byte-identical; (b) eased zoom-to-cursor / pinch-midpoint camera interpolation; (c) colorblind-legibility pass over all seven minimap/data modes (hue paired with lightness or pattern); (d) a balance-correction audit: soak-test the economy/demand loops for degenerate states and apply minimal documented fixes.",
+      "scope": "The dedicated modern-norms pass (user-directed addendum): (a) devicePixelRatio-aware canvas backing store so all pixel art renders crisp on retina/mobile while DPR=1 output stays byte-identical; (b) eased zoom-to-cursor / pinch-midpoint camera interpolation; (c) colorblind-legibility pass over all seven minimap/data modes (hue paired with lightness or pattern); (d) a balance-correction audit: soak-test the economy/demand loops for degenerate states and apply minimal documented fixes. AUDIT ITEM (flagged twice by regression panels, pre-existing on HEAD): City.deserialize on a fresh save appends heatwave-97 to firedEvents (deserialize(s).serialize() !== s on that one field) — diagnose and fix as part of the balance/QoL audit, byte-safe for saves where the event genuinely fired.",
       "quality_gates": [
         "At DPR=2 the rendered scene is measurably sharper than the DPR-ignorant baseline (no canvas upscale blur); at DPR=1 output is byte-identical to before.",
         "Zoom eases smoothly toward the cursor/pinch midpoint (no visual snap); mobile pinch remains glitch-free; desktop mouse behavior otherwise unchanged.",

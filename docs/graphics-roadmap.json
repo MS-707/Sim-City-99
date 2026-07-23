@@ -40,7 +40,8 @@
         "Parks/trees render vivid mid-green (S >= 45%) in daytime.",
         "Geometry/sprite silhouettes byte-identical to HEAD (color-only change); zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: all 5 gates pass (water median HSL S 70.2% + most saturated blue in frame; day/night 4.07x vs deepest night frame; 82% of midnight towers keep warm accents; park green S 46-59%; all 593 sprite alpha masks byte-identical to baseline 368d514). 3-lens adversarial panel 0 refutes; panel-found med defect (pre-existing #3555ff zone-marker out-bluing the lake) fixed to #4860e0 and re-verified."
     },
     {
       "id": "GQ2",

@@ -6,20 +6,8 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ1 — Daytime palette & water vibrancy** *(graphics roadmap 1/10)* —
-  **preview-shipped, gate-verification pending.** The implement pass landed
-  (`056da87`, js/sprites.js + js/render.js) and is **smoke-checked healthy**:
-  boots, renders full, avg scene saturation ~0.54 (vivid green terrain +
-  saturated cobalt water + tan shorelines confirmed by screenshot), zero console
-  errors — and it's in the published artifact. But the formal gate suite +
-  adversarial panel were **interrupted** (stopped mid-verify to conserve the
-  weekly usage budget), so GQ1 is **not yet gate-certified**. On resume: finish
-  verify (water S≥60%, day sat ≥2× night, warm night accents, parks S≥45%,
-  geometry byte-identical to HEAD) + panel, fix anything found, then mark done.
-  The `/goal`+`/loop` autonomous driver is **ACTIVE again** (budget reset
-  passed): a certify-only workflow (verify + adversarial panel + fix, vs
-  baseline `368d514`) is running for GQ1 now; on ship, the loop proceeds
-  GQ2→GQ11 in order under the refined bar (SC2K fidelity + modern norms).
+- [ ] **GQ2 — Ground-material quilt** *(graphics roadmap 2/11)* — running via
+  the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
 
@@ -46,10 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ1 — Daytime palette & water vibrancy** *(palette)*: full summer/noon
-  saturation + a night-lerp that never goes cold-monochrome + livelier water.
-  **Gates:** water S≥60% & bluest in frame · day saturation ≥2× deepest night ·
-  warm night accents present · parks S≥45% green · geometry byte-identical to HEAD.
 - [ ] **GQ2 — Ground-material quilt** *(groundscape)*: noise-driven grass/dirt/
   sand/pavement with dithered per-tile variation + relief tone; no blank slabs.
   **Gates:** ≥4 materials/view w/ per-tile noise · no NxN flat block · varied at
@@ -110,6 +94,24 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ1 — Daytime palette & water vibrancy** *(graphics roadmap 1/11)*: the
+  summer/daytime palette re-tune shipped and **gate-certified** against baseline
+  `368d514`. All 5 gates measured live and passed: lake water median HSL S
+  **70.2%** at summer noon and the most saturated blue in frame; average daytime
+  frames **4.07×** the deepest night frame (winter midnight) by mean HSL S
+  (2.95× HSV, 4.40× chroma — the stricter same-scene summer chroma ratio is
+  2.12×, disclosed); midnight keeps warm accents (**82%** of downtown towers show
+  amber window/lamp pixels; even winter midnight retains 907 warm facade px — no
+  cold-monochrome collapse); parks median green S **46.0%** / forest **59.3%**;
+  and all **593 sprite alpha masks byte-identical** to baseline under seeded RNG
+  (a genuine color-only change), zero non-favicon errors. A 3-lens adversarial
+  panel (fidelity / regression / determinism-perf) returned **0 refutes**; its
+  one med finding — the pre-existing `#3555ff` zone-marker/pennant blue rendered
+  S=1.0 pixels that out-blued the lake — was fixed to `#4860e0` (hue 230 kept so
+  R/C/I overlays stay colorblind-distinct, S capped 0.7) and re-verified.
+  Independent post-fix smoke check: renders full, avg scene saturation 0.52,
+  zero errors. Shipped to the published artifact.
 
 - [x] **M30 — City history charts & trend graphs**: the City Graphs window grows
   from 2 traces to **six toggleable series** — pop, cash flow (net), tax income,

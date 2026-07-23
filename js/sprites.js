@@ -327,8 +327,14 @@ const SEASON_PAL = {
   spring: { // fresh greens, blossom flecks in the grass
     grass: ["#55ac4b", "#52a94e", "#57ae51", "#53a74d"],
     fleckA: "rgba(255,215,235,.4)", fleckB: "rgba(0,70,0,.15)",
-    floor: "#53a74b", leafLo: "#2a8a36", leafHi: "#4fb453", snowCap: null,
+    // GQ1 fix: spring canopy measured median S=.448, a hair under the 45%
+    // daytime-foliage bar (leafHi was #4fb453 at S=.40). Both tones lifted in
+    // the same fresh-green hue band: leafLo .53→.59, leafHi .40→.52.
+    floor: "#53a74b", leafLo: "#259032", leafHi: "#3cbe44", snowCap: null,
     waterTop: "#2a6bb5", waterBot: "#2561a7",
+    // GQ1 fix: dither + crest were summer/winter-only; spring gets the same
+    // treatment in its own softer blue family (cross-season consistency)
+    waterDith: "#3a7ac2", waterCrest: "rgba(160,205,255,.24)",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
   },
@@ -343,6 +349,9 @@ const SEASON_PAL = {
     // shows three separated modes (valleys at ~15 and ~35deg).
     leafSets: [["#c4931c", "#e8bb2c"], ["#a8511a", "#d2691e"], ["#8e1a0f", "#b92214"]],
     waterTop: "#255fa3", waterBot: "#215595",
+    // GQ1 fix: dither + crest for autumn too — the lake keeps its 256-color
+    // stipple year-round instead of flattening in spring/autumn
+    waterDith: "#336cb0", waterCrest: "rgba(150,195,250,.22)",
     wave: "rgba(210,235,255,.3)", glint: "rgba(220,240,255,.45)",
     sand: "#d8bd74", sandHi: "#dcc17b", foam: "rgba(255,255,255,.30)", iceEdge: null,
   },
@@ -1188,7 +1197,13 @@ function buildSprites() {
   });
 
   // ---- undeveloped zone markers ----
-  const zoneDef = [["zoneR", "#22c522", "R"], ["zoneC", "#3555ff", "C"], ["zoneI", "#e6c619", "I"]];
+  // GQ1 fix: the C marker was #3555ff (HSL S=1.00) — the only pixels in an
+  // ordinary daytime frame bluer than the lake, falsifying Gate 1's "water is
+  // the most saturated blue" superlative whenever an unzoned commercial tile
+  // was on screen. #4860e0 keeps the exact hue (230deg) and near-identical
+  // lightness so R/C/I overlays stay colorblind-distinct, but caps S at ~0.71,
+  // safely under the summer water's 0.776 max.
+  const zoneDef = [["zoneR", "#22c522", "R"], ["zoneC", "#4860e0", "C"], ["zoneI", "#e6c619", "I"]];
   for (const [key, col, letter] of zoneDef) {
     SPR[key] = mkSprite(1, 1, 0, (g, ox, oy) => {
       diamondPath(g, ox, oy);
@@ -1248,7 +1263,10 @@ function buildSprites() {
   // green, the flower confetti draws with the same seeded R() sequence).
   const parkDraw = (sk) => (g, ox, oy) => {
     const P = (sk && sk !== "summer" && sk !== "spring") ? SEASON_PAL[sk] : null;
-    const lawn = sk === "winter" ? "#e4e9f1" : sk === "autumn" ? "#9c9850" : "#4bb844";
+    // GQ1 fix: park lawn was #4bb844 (HSL S=.460 — 1pt over the 45% gate bar);
+    // #42be3a keeps the hue/lightness but lifts S to .533 for real margin,
+    // still under the summer canopy's .57-.61 so lawns don't out-green trees
+    const lawn = sk === "winter" ? "#e4e9f1" : sk === "autumn" ? "#9c9850" : "#42be3a";
     diamondPath(g, ox, oy);
     g.fillStyle = lawn; g.fill();
     g.strokeStyle = "rgba(0,0,0,.2)"; g.stroke();
@@ -1644,7 +1662,7 @@ function buildSprites() {
     poly(g, [[tx, ty - 40], [tx + 9, ty - 40], [tx, ty - 54]], "#5f2c1f");
     g.strokeStyle = "#d8d8e0"; g.lineWidth = 1;                   // finial + pennant
     g.beginPath(); g.moveTo(tx, ty - 54); g.lineTo(tx, ty - 61); g.stroke();
-    poly(g, [[tx, ty - 61], [tx + 8, ty - 58], [tx, ty - 55]], "#3555ff");
+    poly(g, [[tx, ty - 61], [tx + 8, ty - 58], [tx, ty - 55]], "#4860e0"); // GQ1 fix: was #3555ff (S=1.0, out-blued the lake)
   });
 
   // Hospital: white slab with a taller tower wing, a #d8d5ca helipad bearing

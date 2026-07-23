@@ -329,9 +329,26 @@ function valueJitterCopy(src, delta) {
   g.putImageData(im, 0, 0);
   return c;
 }
-function withJitter(base) {
-  base.jit = JIT_DELTAS.map((delta) => {
+function withJitter(base, deck) {
+  base.jit = JIT_DELTAS.map((delta, jk) => {
     const copy = { c: valueJitterCopy(base.c, delta), ox: base.ox, oy: base.oy };
+    if (deck) {
+      // GQ5: seeded per-jit-copy roof props, drawn on the DAY canvas only —
+      // the night/pool/beacon layers stay shared by ref (G1: props are dark
+      // after dusk) and the renderer's jit[(x+2*y)&3] pick guarantees
+      // orthogonal same-variant neighbours land on different prop layouts.
+      // pr is pure in (BR, family, variant, copy) — zero per-frame cost, no
+      // shared-stream draws. Winter jit copies get NO deck (snowed-over).
+      const pr = mulberry32((0x9F0F ^ (deck.BR * 0x9E3779B1) ^ (deck.fam * 0x85EBCA77) ^
+                             (deck.v * 193) ^ (jk * 7919)) >>> 0);
+      const g = copy.c.getContext("2d");
+      const n = 4 + (pr() * 2 | 0);
+      for (let p = 0; p < n; p++) {
+        const kind = (pr() * ROOF_PROPS.length) | 0;
+        ROOF_PROPS[kind](g, deck.cx + (pr() * 2 - 1) * deck.spread,
+                         deck.cy + (pr() * 2 - 1) * deck.spread * 0.5);
+      }
+    }
     if (base.night) copy.night = base.night; // share glow/pool/beacon by ref
     if (base.pool) copy.pool = base.pool;
     if (base.beacon) copy.beacon = base.beacon;
@@ -722,6 +739,142 @@ function planter(g, x, y) {
   g.fillStyle = "#3e8a3e"; g.fillRect(x - 4, y - 4, 8, 2);
   g.fillStyle = "#54a648"; g.fillRect(x - 3, y - 5, 3, 1); g.fillRect(x + 1, y - 5, 2, 1);
 }
+
+/* ---- GQ5: silhouette-variety massing helpers ----
+   The zone-family remassings (r2/r3/c2/c3/i1/i2) share these. All geometry
+   here is deterministic constants — ZERO RNG in any helper — so the shared
+   0x5EED R()/ART_RNG stream signature of every family bake is untouched (the
+   civic bakes downstream of the zone loops are the byte-identity canary). */
+
+// lift a whole footprint corner set by ht (hoisted from the M28 mega block so
+// the tiered zone massings can reuse it; pure, so the megas are unchanged)
+const raise = (cn, ht) => ({ N: up(cn.N, ht), E: up(cn.E, ht), S: up(cn.S, ht), W: up(cn.W, ht) });
+
+// hip/gable roof: two roof planes from the eave ring up(cn, ht) to a ridge
+// segment along tile axis `axis` (0: ridge toward W-E, the tinyHouse
+// orientation; 1: ridge toward N-S). Built from corner lerps on any corner
+// set, so it is facing-agnostic (M32: tiers/roofs stay corner-symmetric).
+// kR = ridge length as a fraction of the axis diagonal (kR -> 1 = gable).
+// Both planes + the viewer-facing eaves register on SNOWSPEC (G14 snow caps).
+function hipRoofFrom(g, cn, ht, rise, roofHi, roofLo, axis = 0, kR = 0.42) {
+  const T = raise(cn, ht);
+  const c = [(T.N[0] + T.E[0] + T.S[0] + T.W[0]) / 4,
+             (T.N[1] + T.E[1] + T.S[1] + T.W[1]) / 4];
+  const rp = (p) => [c[0] + (p[0] - c[0]) * kR, c[1] + (p[1] - c[1]) * kR - rise];
+  let back, front;
+  if (axis === 0) { // ridge along W->E: back (NE) plane lit, front in shade
+    const rA = rp(T.W), rB = rp(T.E);
+    back  = { pts: [T.W, T.N, T.E, rB, rA] };
+    front = { pts: [T.W, T.S, T.E, rB, rA], eaves: [[T.W, T.S], [T.S, T.E]] };
+    poly(g, back.pts, roofHi);
+    poly(g, front.pts, roofLo);
+  } else {          // ridge along N->S: W-side plane is the shadow side
+    const rA = rp(T.N), rB = rp(T.S);
+    back  = { pts: [T.N, T.W, T.S, rB, rA], eaves: [[T.W, T.S]] };
+    front = { pts: [T.N, T.E, T.S, rB, rA], eaves: [[T.S, T.E]] };
+    poly(g, back.pts, roofLo);
+    poly(g, front.pts, roofHi);
+  }
+  g.strokeStyle = "rgba(20,12,8,.35)"; g.lineWidth = 1; // ridge shadow line
+  g.beginPath(); g.moveTo(back.pts[3][0], back.pts[3][1]);
+  g.lineTo(back.pts[4][0], back.pts[4][1]); g.stroke();
+  if (SNOWSPEC) { SNOWSPEC.push(back); SNOWSPEC.push(front); }
+}
+
+// north-light sawtooth crown: split the top-face diamond into `teeth` strips
+// along the NE->SW tile axis (corner lerps, like civicApron's joint lines);
+// each tooth is a lit sloped plane (I_ROOF rust family) rising toward the
+// viewer with a near-vertical dark glass skylight face dropping off its high
+// edge. Every lit plane registers on SNOWSPEC so makeWinter caps the teeth.
+function sawtoothRoof(g, cn, ht, teeth, rise, roofCol) {
+  const T = raise(cn, ht);
+  const a = (t) => [T.N[0] + (T.W[0] - T.N[0]) * t, T.N[1] + (T.W[1] - T.N[1]) * t];
+  const b = (t) => [T.E[0] + (T.S[0] - T.E[0]) * t, T.E[1] + (T.S[1] - T.E[1]) * t];
+  for (let k = 0; k < teeth; k++) {
+    const f0 = k / teeth, f1 = (k + 1) / teeth;
+    const lit = { pts: [up(a(f1), rise), up(b(f1), rise), b(f0), a(f0)] };
+    poly(g, lit.pts, shade(roofCol, 1.04), shade(roofCol, 0.6));
+    // near-vertical glass face on the high edge, facing the viewer (SW)
+    poly(g, [a(f1), b(f1), up(b(f1), rise), up(a(f1), rise)], "#1c2733");
+    const gA = a(f1), gB = b(f1);
+    g.fillStyle = "#8fc3e0";
+    for (const t of [0.16, 0.5, 0.84]) {
+      const gx = gA[0] + (gB[0] - gA[0]) * t, gy = gA[1] + (gB[1] - gA[1]) * t;
+      g.fillRect(gx - 4, gy - rise + 2, 8, rise - 4);
+    }
+    if (SNOWSPEC) SNOWSPEC.push(lit);
+  }
+}
+
+// stacked setback tiers — the proven plymouth/darco idiom as a helper.
+// tiers = [{k, ht, base, opts}] bottom-up; each prism is inset by k and
+// raised by the cumulative height below it. Returns [{cn, top}] per tier
+// (cn = the tier's RAISED base corner set) so callers can dress terraces.
+function setbackTiers(g, ox, oy, w, h, tiers) {
+  const out = []; let cum = 0;
+  for (const t of tiers) {
+    const cn = raise(insetCorners(ox, oy, w, h, t.k), cum);
+    prismFrom(g, cn, t.ht, t.base, t.opts || {});
+    cum += t.ht;
+    out.push({ cn, top: cum });
+  }
+  return out;
+}
+
+/* ---- GQ5: standalone roof props ----
+   Position-parameter re-draws of the roofClutter / waterTank / planter shapes
+   with ZERO RNG inside — withJitter scatters these from a seeded side stream
+   onto each value-jitter DAY copy, so orthogonal same-variant neighbours
+   (which the renderer maps to different jit copies via (x+2*y)&3) always show
+   different roof furniture. The seeded originals are NOT touched, so every
+   civic/landmark bake that uses them stays byte-identical. */
+const ROOF_PROPS = [
+  (g, x, y) => { // AC unit on a shadow pad
+    g.fillStyle = "#23262c"; g.fillRect(x - 5, y - 2, 10, 4);
+    g.fillStyle = "#585c66"; g.fillRect(x - 5, y - 6, 10, 5);
+    g.fillStyle = "#7e838e"; g.fillRect(x - 5, y - 7, 10, 2);
+    g.fillStyle = "#2c2f36"; g.fillRect(x - 3, y - 5, 3, 2);
+  },
+  (g, x, y) => { // spinning vent
+    g.fillStyle = "#23262c"; g.fillRect(x - 2, y, 5, 2);
+    g.fillStyle = "#6c717c"; g.fillRect(x - 1, y - 4, 3, 4);
+    g.fillStyle = "#9aa0ab";
+    g.beginPath(); g.ellipse(x + 0.5, y - 5, 2.6, 1.7, 0, 0, 7); g.fill();
+  },
+  (g, x, y) => { // roof access hatch
+    g.fillStyle = "#23262c"; g.fillRect(x - 4, y - 1, 8, 3);
+    g.fillStyle = "#565a64"; g.fillRect(x - 4, y - 4, 8, 4);
+    g.fillStyle = "#787c86"; g.fillRect(x - 4, y - 5, 8, 2);
+  },
+  (g, x, y) => { // skylight
+    g.fillStyle = "#1c2733"; g.fillRect(x - 5, y - 3, 9, 5);
+    g.fillStyle = "#8fc3e0"; g.fillRect(x - 4, y - 2, 7, 3);
+  },
+  (g, x, y) => { // small water tank
+    g.fillStyle = "#23262c"; g.fillRect(x - 4, y, 8, 2);
+    g.fillStyle = "#8a7a64"; g.fillRect(x - 3, y - 7, 6, 6);
+    g.fillStyle = "#a5947c"; g.fillRect(x - 3, y - 7, 2, 6);
+    g.fillStyle = "#54493c";
+    g.beginPath(); g.moveTo(x - 4, y - 7); g.lineTo(x + 4, y - 7);
+    g.lineTo(x, y - 10); g.closePath(); g.fill();
+  },
+  (g, x, y) => { // small stair bulkhead
+    g.fillStyle = "#23262c"; g.fillRect(x - 4, y, 9, 2);
+    g.fillStyle = "#4e4a44"; g.fillRect(x - 4, y - 6, 9, 6);
+    g.fillStyle = "#6e6a62"; g.fillRect(x - 4, y - 8, 9, 3);
+    g.fillStyle = "#2e2a24"; g.fillRect(x - 1, y - 4, 3, 4);
+  },
+  (g, x, y) => { // planter box
+    g.fillStyle = "#5c4630"; g.fillRect(x - 4, y - 2, 8, 3);
+    g.fillStyle = "#3e8a3e"; g.fillRect(x - 4, y - 4, 8, 2);
+    g.fillStyle = "#54a648"; g.fillRect(x - 3, y - 5, 3, 1); g.fillRect(x + 1, y - 5, 2, 1);
+  },
+  (g, x, y) => { // pipe vent with rain cap
+    g.fillStyle = "#23262c"; g.fillRect(x - 2, y, 4, 2);
+    g.fillStyle = "#6c717c"; g.fillRect(x - 1, y - 6, 2, 6);
+    g.fillStyle = "#8a8f98"; g.fillRect(x - 3, y - 8, 6, 2);
+  },
+];
 
 // G5: scrambled coordinate hash for terrain variation (grass mottle, water
 // variant). Pure in (x, y) — every boot and every frame agrees, so the
@@ -1674,15 +1827,24 @@ function buildSprites() {
   };
   for (let v = 0; v < NV; v++) {
     r1.push(withJitter(mkSprite(1, 1, 30, r1Draw(v, "summer"))));
+    // GQ5 (A2): v0,2,4 remass as a HIP-ROOF ROWHOUSE; v1,3 keep the flat
+    // parapet box. STREAM RULE: the windows(3,2)+windows(3,3)+roofClutter(2)
+    // sequence below is preserved with identical rows/cols/counts at every
+    // variant — only geometry args change, so the shared 0x5EED stream (and
+    // every civic bake after the zone loops) is untouched.
+    const r2hip = (v % 2) === 0, r2HT = r2hip ? 26 : 36;
     r2.push(withJitter(withNight(1, 1, 46, (g, ox, oy) => {
       const base = r2Base[v];
       // GQ3: lit/shadow faces by HSL lightness shift keep the mustard hue;
-      // the warm identity comes from the terracotta coping cap below.
-      const { W, S, E } = prism(g, ox, oy, 1, 1, 36, base, zoneFaces(base));
-      windows(g, up(W, 0), up(S, 0), 36, 3, 2, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
-      windows(g, up(S, 0), up(E, 0), 36, 3, 3, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
-      // G9: tar deck behind a 1px parapet, dressed with seeded service gear
-      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 36, "#26282d", "rgba(14,12,10,.9)");
+      // the warm identity comes from the terracotta coping / hip cap below.
+      const cn = prism(g, ox, oy, 1, 1, r2HT, base, zoneFaces(base));
+      const { W, S, E } = cn;
+      windows(g, up(W, 0), up(S, 0), r2HT, 3, 2, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+      windows(g, up(S, 0), up(E, 0), r2HT, 3, 3, 0.55, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+      // G9: tar deck behind a 1px parapet, dressed with seeded service gear.
+      // On hip variants the pitched crown OVERPAINTS this whole deck — the
+      // draws still run so the R()/ART_RNG consumption matches the flat bake.
+      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, r2HT, "#26282d", "rgba(14,12,10,.9)");
       // sun-catching coping cap along the two back parapet edges (G9 kept —
       // its bright pale pixels carry the roof's luminance variety)
       g.strokeStyle = lighten(base, 0.85); g.lineWidth = 2.2;
@@ -1694,27 +1856,91 @@ function buildSprites() {
       g.fillStyle = "#1c2733"; g.fillRect(cx + 5, cy + 4, 9, 5); // skylight
       g.fillStyle = "#9fd3ef"; g.fillRect(cx + 6, cy + 5, 7, 3);
       roofClutter(g, cx + 2, cy - 2, 2, R);
-    })));
+      if (r2hip) {
+        // terracotta hip crown in the r1 house-roof family (SNOWSPEC-
+        // registered by hipRoofFrom), a brick chimney at the E ridge end,
+        // and a dormer pair riding ONE world face (M32b onFace routing)
+        hipRoofFrom(g, cn, r2HT, 22, shade(houseRoofs[v], 1.05), shade(houseRoofs[v], 0.72), 0, 0.55);
+        const ry = cy - 22;
+        g.fillStyle = "#7a4a38"; g.fillRect(ox + 5, ry - 6, 6, 10);
+        g.fillStyle = "#94604a"; g.fillRect(ox + 5, ry - 6, 2, 10);
+        g.fillStyle = "#3c3236"; g.fillRect(ox + 4, ry - 8, 8, 2);
+        onFace(FE_PX, cn, (p0, p1) => {
+          for (const t of [0.3, 0.62]) {
+            const dx = p0[0] + (p1[0] - p0[0]) * t, dy = p0[1] + (p1[1] - p0[1]) * t - r2HT;
+            g.fillStyle = shade(houseRoofs[v], 0.55); g.fillRect(dx - 3, dy - 8, 6, 5);
+            g.fillStyle = "#ffe9a0"; g.fillRect(dx - 2, dy - 7, 4, 3);
+            poly(g, [[dx - 4, dy - 8], [dx + 4, dy - 8], [dx, dy - 12]], shade(houseRoofs[v], 1.2));
+          }
+        });
+      }
+    }), { BR, fam: 2, v, cx: HW, cy: r2hip ? 29 : 26, spread: 8 }));
     r3.push(withJitter(withNight(1, 1, 82, (g, ox, oy) => {
       const base = r3Base[v];
       // GQ3: brick-red tower under the saturated terracotta roof cap —
       // the hospital's #d8d5ca helipad stays a clear >= 12 distance from these
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 68, base, zoneFaces(base, R_ROOF[v]));
-      windows(g, up(W, 0), up(S, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
-      windows(g, up(S, 0), up(E, 0), 68, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
-      // G9: no mast here — the beacon is a C3-only signature now. R3 roofs
-      // get residential furniture on a tar deck behind the parapet.
-      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 68, shade(base, 0.55), "rgba(24,20,16,.9)");
-      // G10: warm coping cap along the two back parapet edges
-      g.strokeStyle = shade(R_ROOF[v], 1.15); g.lineWidth = 1.8;
-      g.beginPath();
-      g.moveTo(cx - HW * 0.82, cy); g.lineTo(cx, cy - HH * 0.82);
-      g.lineTo(cx + HW * 0.82, cy); g.stroke();
-      waterTank(g, cx - 9 + (R() * 4 | 0), cy + 2);
-      bulkhead(g, cx + 8, cy + 1 + (R() * 3 | 0), base);
-      if (v % 2) clothesline(g, cx - 2, cy + 9, R);
-      else { planter(g, cx - 15, cy + 3); planter(g, cx + 2, cy + 9); }
-    })));
+      if (v % 2 === 0) {
+        // GQ5 (A3): STEPPED WEDDING-CAKE — three setback tiers (40/18/10,
+        // total 68 like HEAD) via the proven plymouth idiom; deterministic
+        // constants only, then the preserved seeded roof furniture below.
+        const tiers = setbackTiers(g, ox, oy, 1, 1, [
+          { k: 1.0, ht: 40, base, opts: zoneFaces(base, R_ROOF[v]) },
+          { k: 0.74, ht: 18, base, opts: zoneFaces(base, R_ROOF[v]) },
+        ]);
+        // crown tier pushed to the front (W-S) half of the tier-2 terrace —
+        // the asymmetric top keeps A3's outline apart from the symmetric
+        // boxes AND the r1 cottage cluster (corner lerps: facing-agnostic)
+        const r2r = tiers[1].cn;
+        const midp = (a, b2) => [(a[0] + b2[0]) / 2, (a[1] + b2[1]) / 2];
+        const t3cn = raise({ N: midp(r2r.N, r2r.W), E: midp(r2r.E, r2r.S), S: r2r.S, W: r2r.W }, 18);
+        prismFrom(g, t3cn, 12, base, zoneFaces(base, shade(R_ROOF[v], 1.1)));
+        tiers.push({ cn: t3cn, top: 70 });
+        const b0 = tiers[0].cn;
+        windows(g, b0.W, b0.S, 40, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+        windows(g, b0.S, b0.E, 40, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+        // preserved R() draws, order/count identical to HEAD: tank x-jitter,
+        // bulkhead y-jitter, then the v%2 branch (planters here: 0 draws)
+        const [tx3, ty3] = roofDeckFrom(g, tiers[2].cn, 12, shade(base, 0.55), "rgba(24,20,16,.9)");
+        waterTank(g, tx3 - 5 + (R() * 4 | 0), ty3 + 2);
+        bulkhead(g, ox + 16, oy - 58 + 9 + (R() * 3 | 0), base);
+        planter(g, ox - 17, oy - 58 + 8); planter(g, ox - 8, oy - 58 + 12);
+      } else {
+        // GQ5 (A12): TANK-CROWN TOWER — parapet piers + an oversized stave
+        // water tank on splayed legs clearing the roofline (~+28px silhouette)
+        const { W, S, E } = prism(g, ox, oy, 1, 1, 62, base, zoneFaces(base, R_ROOF[v]));
+        windows(g, up(W, 0), up(S, 0), 62, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+        windows(g, up(S, 0), up(E, 0), 62, 6, 3, 0.6, "#ffe9a0", "#20242c", GLOW_WARM, 0.4);
+        const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 62, shade(base, 0.55), "rgba(24,20,16,.9)");
+        // G10: warm coping cap along the two back parapet edges
+        g.strokeStyle = shade(R_ROOF[v], 1.15); g.lineWidth = 1.8;
+        g.beginPath();
+        g.moveTo(cx - HW * 0.82, cy); g.lineTo(cx, cy - HH * 0.82);
+        g.lineTo(cx + HW * 0.82, cy); g.stroke();
+        g.fillStyle = shade(base, 0.8); // corner parapet piers
+        for (const [px2, py2] of [[cx - HW, cy], [cx + HW, cy], [cx, cy - HH], [cx, cy + HH]])
+          g.fillRect(px2 - 2, py2 - 6, 4, 7);
+        // oversized rooftop tank, pushed off-center (asymmetric silhouette;
+        // consumes the SAME single R() x-jitter draw as HEAD's waterTank)
+        const tx = cx - 8 + (R() * 4 | 0), ty = cy - 3;
+        g.strokeStyle = "#3c3630"; g.lineWidth = 2;
+        for (const dx of [-8, -3, 3, 8]) {
+          g.beginPath(); g.moveTo(tx + dx * 0.45, ty - 8); g.lineTo(tx + dx, ty + 4); g.stroke();
+        }
+        g.fillStyle = "#23262c"; g.fillRect(tx - 14, ty - 9, 28, 2);      // platform
+        g.fillStyle = "#8a7a64"; g.fillRect(tx - 13, ty - 24, 26, 15);    // stave drum
+        g.fillStyle = "#a5947c"; g.fillRect(tx - 13, ty - 24, 9, 15);
+        g.strokeStyle = "#6e6152"; g.lineWidth = 1;                       // hoops
+        for (const hy of [-20, -14]) {
+          g.beginPath(); g.moveTo(tx - 13, ty + hy); g.lineTo(tx + 13, ty + hy); g.stroke();
+        }
+        g.fillStyle = "#54493c";                                          // conic cap
+        g.beginPath(); g.moveTo(tx - 15, ty - 24); g.lineTo(tx + 15, ty - 24);
+        g.lineTo(tx, ty - 30); g.closePath(); g.fill();
+        ROOF_PROPS[4](g, cx + 16, cy - 2); // companion drum on the E shoulder
+        bulkhead(g, cx + 12, cy + 4 + (R() * 3 | 0), base);
+        clothesline(g, cx - 3, cy + 8, R); // v odd: HEAD's clothesline branch
+      }
+    }), { BR, fam: 3, v, cx: HW + ((v % 2) ? 0 : 2), cy: (v % 2) ? 36 : 47, spread: 9 }));
   }
 
   /* ---- commercial ---- */
@@ -1743,59 +1969,121 @@ function buildSprites() {
     })));
     c2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
       const base = c2Base[v];
+      // GQ5 (A5): PODIUM + OFFSET SLAB — a full-lot podium (ht 14) under a
+      // half-lot slab (ht 40) pushed to the rear (N-E) or front (W-S) half by
+      // variant parity. Corner-lerp construction keeps it facing-agnostic and
+      // both slab faces coplanar with the podium faces, so the SE windows run
+      // ground-to-crown in ONE call. Stream signature preserved verbatim:
+      // windows(4,3) + windows(4,4) + roofClutter(3, R).
+      const cn = corners(ox, oy, 1, 1);
+      const mid = (a, b2) => [(a[0] + b2[0]) / 2, (a[1] + b2[1]) / 2];
+      prismFrom(g, cn, 14, base, zoneFaces(base));
+      const back2 = (v % 2) === 0;
+      const slab = back2
+        ? { N: cn.N, E: cn.E, S: mid(cn.E, cn.S), W: mid(cn.N, cn.W) }
+        : { N: mid(cn.N, cn.W), E: mid(cn.E, cn.S), S: cn.S, W: cn.W };
+      const sc = raise(slab, 14);
       // GQ3: bright cool crown for roof-line punch over the teal facade
-      const { W, S, E } = prism(g, ox, oy, 1, 1, 44, base, zoneFaces(base, C_ROOF[v]));
-      windows(g, up(W, 0), up(S, 0), 44, 4, 3, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
-      windows(g, up(S, 0), up(E, 0), 44, 4, 4, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
+      prismFrom(g, sc, 40, base, zoneFaces(base, C_ROOF[v]));
+      windows(g, sc.W, sc.S, 40, 4, 3, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
+      windows(g, slab.S, slab.E, 54, 4, 4, 0.65, "#cfe8ff", "#20242c", GLOW_COOL);
       // G9: gravel deck behind a 1px parapet plus seeded service gear
-      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 44, shade(base, 0.55), "rgba(16,16,20,.85)");
+      const [cx, cy] = roofDeckFrom(g, sc, 40, shade(base, 0.55), "rgba(16,16,20,.85)");
       roofClutter(g, cx, cy, 3, R);
-    })));
+      // deterministic skylight strip along the exposed podium half
+      const pod = raise(back2
+        ? { N: mid(cn.N, cn.W), E: mid(cn.E, cn.S), S: cn.S, W: cn.W }
+        : { N: cn.N, E: cn.E, S: mid(cn.E, cn.S), W: mid(cn.N, cn.W) }, 14);
+      for (const t of [0.3, 0.5, 0.7]) {
+        const kx = pod.W[0] + (pod.E[0] - pod.W[0]) * t;
+        const ky = pod.W[1] + (pod.E[1] - pod.W[1]) * t;
+        g.fillStyle = "#1c2733"; g.fillRect(kx - 4, ky - 2, 8, 4);
+        g.fillStyle = "#8fc3e0"; g.fillRect(kx - 3, ky - 1, 6, 2);
+      }
+    }), { BR, fam: 5, v, cx: (v % 2) ? 24 : 40, cy: (v % 2) ? 24 : 17, spread: 7 }));
     // G9: the mast + red beacon is a C3-only signature carried by exactly
     // 2 of the 5 variants; the tip bakes in its lit state and the renderer
     // blinks it live via spr.beacon (phase-offset per tower)
     const c3mast = v === 1 || v === 3;
     const c3spr = withNight(1, 1, 104, (g, ox, oy) => {
       const glass = c3Glass[v];
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
-        zoneFaces(glass, shade(glass, 1.5)));
-      // GQ3: banded curtain wall (period-correct SC2K tower skin) — 8
-      // spandrel/glass strips + 2 mullion lines per visible face. Pure loops,
-      // ZERO RNG, drawn on the day canvas only (before windows(), whose args
-      // are untouched, so the ART_RNG stream and night glow bake are
-      // bit-identical to HEAD).
+      // GQ3: banded curtain wall (period-correct SC2K tower skin) — spandrel/
+      // glass strips + 2 mullion lines per visible face. Pure loops, ZERO RNG,
+      // drawn on the day canvas only. GQ5 generalizes the loop to any corner
+      // set / height: at ht 88 it reproduces the GQ3 8-band pattern exactly.
       const spandrel = faceL(glass, -0.16), band = faceL(glass, 0.08),
             mullion = faceL(glass, -0.22);
-      for (const [p0, p1] of [[W, S], [S, E]]) {
-        for (let k = 0; k < 8; k++) {
-          poly(g, [up(p0, k * 11 + 4), up(p1, k * 11 + 4),
-                   up(p1, k * 11 + 11), up(p0, k * 11 + 11)], band);
-          poly(g, [up(p0, k * 11), up(p1, k * 11),
-                   up(p1, k * 11 + 4), up(p0, k * 11 + 4)], spandrel);
+      const skin = (cn2, ht2) => {
+        const nb = Math.max(2, Math.round(ht2 / 11)), bh = ht2 / nb;
+        for (const [p0, p1] of [[cn2.W, cn2.S], [cn2.S, cn2.E]]) {
+          for (let k = 0; k < nb; k++) {
+            poly(g, [up(p0, k * bh + bh * 4 / 11), up(p1, k * bh + bh * 4 / 11),
+                     up(p1, k * bh + bh), up(p0, k * bh + bh)], band);
+            poly(g, [up(p0, k * bh), up(p1, k * bh),
+                     up(p1, k * bh + bh * 4 / 11), up(p0, k * bh + bh * 4 / 11)], spandrel);
+          }
+          g.fillStyle = mullion;
+          for (const t of [1 / 3, 2 / 3]) {
+            const mx = p0[0] + (p1[0] - p0[0]) * t, my = p0[1] + (p1[1] - p0[1]) * t;
+            g.fillRect(mx - 0.5, my - ht2, 1, ht2);
+          }
         }
-        g.fillStyle = mullion;
-        for (const t of [1 / 3, 2 / 3]) {
-          const mx = p0[0] + (p1[0] - p0[0]) * t, my = p0[1] + (p1[1] - p0[1]) * t;
-          g.fillRect(mx - 0.5, my - 88, 1, 88);
+      };
+      // STREAM RULE: both branches consume windows(8,3) x2 then
+      // roofClutter(2+(v&1), R) — identical to HEAD in count and order.
+      if (v % 2 === 0) {
+        // GQ5 (A6): TAPERING TOWER — three curtain-wall setback tiers
+        // (42/30/18, crown at 90) + a deterministic spire on the crown deck
+        const tiers = setbackTiers(g, ox, oy, 1, 1, [
+          { k: 1.0, ht: 42, base: glass, opts: zoneFaces(glass) },
+          { k: 0.8, ht: 30, base: glass, opts: zoneFaces(glass) },
+          { k: 0.58, ht: 18, base: glass, opts: zoneFaces(glass, shade(glass, 1.5)) },
+        ]);
+        skin(tiers[0].cn, 42); skin(tiers[1].cn, 30); skin(tiers[2].cn, 18);
+        const b0 = tiers[0].cn;
+        windows(g, b0.W, b0.S, 42, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
+        windows(g, b0.S, b0.E, 42, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
+        const [cx, cy] = roofDeckFrom(g, tiers[2].cn, 18, shade(glass, 1.12), "rgba(16,20,28,.8)");
+        roofClutter(g, cx + 2, cy + 2, 2 + (v & 1), R);
+        g.strokeStyle = "#222"; g.lineWidth = 2; // crown spire (deterministic)
+        g.beginPath(); g.moveTo(ox, cy); g.lineTo(ox, cy - 18); g.stroke();
+        g.strokeStyle = "#8a9098"; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(ox - 4, cy - 12); g.lineTo(ox + 4, cy - 12); g.stroke();
+        g.fillStyle = "#c9d2da"; g.fillRect(ox - 1.5, cy - 21, 3, 4);
+        // lit lobby spilling onto the plaza (G2: own layer, suppressible)
+        groundPool(b0.S[0], b0.S[1] - 2, 12, 5, GLOW_COOL);
+      } else {
+        // GQ5 (A7): BANDED TOWER + CROWN STEP + MAST — today's banded box
+        // plus one crown setback tier (inset .7, ht 8) drawn AFTER windows;
+        // mast/beacon geometry stays verbatim (spr.beacon offset unchanged).
+        const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
+          zoneFaces(glass, shade(glass, 1.5)));
+        skin({ N, E, S, W }, 88);
+        windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
+        windows(g, up(S, 0), up(E, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
+        // G9: service deck ring on the glass crown, then the crown step
+        roofDeck(g, ox, oy, 1, 1, 88, shade(glass, 1.12), "rgba(16,20,28,.8)");
+        // half-lot crown slab on the front (W-S) half of the roof ring —
+        // the asymmetric step keeps A7's outline off the plain-box ramp
+        const rr = raise(insetCorners(ox, oy, 1, 1, 0.84), 88);
+        const midp = (a, b2) => [(a[0] + b2[0]) / 2, (a[1] + b2[1]) / 2];
+        const cc = { N: midp(rr.N, rr.W), E: midp(rr.E, rr.S), S: rr.S, W: rr.W };
+        prismFrom(g, cc, 12, glass, zoneFaces(glass, shade(glass, 1.4)));
+        const [cx, cy] = roofDeckFrom(g, cc, 12, shade(glass, 1.12), "rgba(16,20,28,.8)");
+        roofClutter(g, cx + 4, cy + 3, 2 + (v & 1), R);
+        if (c3mast) {
+          g.strokeStyle = "#222"; g.lineWidth = 2;
+          g.beginPath(); g.moveTo(ox, N[1] - 88); g.lineTo(ox, N[1] - 102); g.stroke();
+          g.fillStyle = "#f33"; g.fillRect(ox - 1.5, N[1] - 104, 3, 3);
         }
+        // lit lobby spilling onto the plaza (G2: own layer, suppressible)
+        groundPool(S[0], S[1] - 2, 12, 5, GLOW_COOL);
       }
-      windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
-      windows(g, up(S, 0), up(E, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
-      // G9: service deck on the glass crown
-      const [cx, cy] = roofDeck(g, ox, oy, 1, 1, 88, shade(glass, 1.12), "rgba(16,20,28,.8)");
-      roofClutter(g, cx + 4, cy + 3, 2 + (v & 1), R);
-      if (c3mast) {
-        g.strokeStyle = "#222"; g.lineWidth = 2;
-        g.beginPath(); g.moveTo(ox, N[1] - 88); g.lineTo(ox, N[1] - 102); g.stroke();
-        g.fillStyle = "#f33"; g.fillRect(ox - 1.5, N[1] - 104, 3, 3);
-      }
-      // lit lobby spilling onto the plaza (G2: own layer, suppressible)
-      groundPool(S[0], S[1] - 2, 12, 5, GLOW_COOL);
     });
     // beacon tip offset from the anchor center, for the live blink pass —
     // set BEFORE withJitter so every value-jittered copy inherits it (G10)
     if (c3mast) c3spr.beacon = { x: -1.5, y: -(HH + 104) };
-    c3.push(withJitter(c3spr));
+    c3.push(withJitter(c3spr, { BR, fam: 6, v, cx: HW, cy: (v % 2) ? 20 : 30, spread: 7 }));
   }
 
   /* ---- industrial ---- */
@@ -1811,22 +2099,41 @@ function buildSprites() {
   // family saturated while the concrete facades stay grey (roofs/trim rule).
   const I_ROOF = ["#9a6a3c", "#8f6236", "#a06e3e", "#8a5e34", "#9c6a3a"];
   for (let v = 0; v < NV; v++) {
+    // GQ5 (A8): v0,2,4 remass as a GABLE SHED — low walls under a full-width
+    // pitched roof whose ridge runs the N-S tile axis (the OPPOSITE axis to
+    // r2's hip, keeping the two pitched archetypes' top profiles apart);
+    // v1,3 keep the flat box. i1 makes ZERO shared-stream draws either way.
+    const i1gable = (v % 2) === 0, i1HT = i1gable ? 12 : 20;
     i1.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
       const base = i1Base[v];
-      const cn = prism(g, ox, oy, 1, 1, 20, base, zoneFaces(base));
+      const cn = prism(g, ox, oy, 1, 1, i1HT, base, zoneFaces(base));
+      if (i1gable) {
+        hipRoofFrom(g, cn, i1HT, 10, shade(I_ROOF[v], 1.05), shade(I_ROOF[v], 0.72), 1, 0.8);
+        for (const t of [-0.3, 0, 0.3]) { // 3 ridge vents (deterministic)
+          const vy = (oy - i1HT - 10) + t * 2 * HH * 0.8;
+          g.fillStyle = "#6c717c"; g.fillRect(ox - 1, vy - 3, 3, 3);
+          g.fillStyle = "#8a8f98"; g.fillRect(ox - 2, vy - 4, 5, 1);
+        }
+      }
       // big loading door tagged to ONE world face (M32b) — plainer at the two
       // orientations where that face rotates to an occluded back
       onFace(FE_PX, cn, (p0, p1) => {
         const fm = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+        const dt = i1gable ? 11 : 14; // door top stays under the gable eave
         g.fillStyle = "#5a5148";
-        poly(g, [up(p0, 2), up(p1, 2), up(p1, 14), up(p0, 14)].map(p => [
+        poly(g, [up(p0, 2), up(p1, 2), up(p1, dt), up(p0, dt)].map(p => [
           p[0] * 0.5 + fm[0] * 0.5, p[1] * 0.5 + fm[1] * 0.5]), "#5a5148");
       });
     })));
+    // GQ5 (A9): v0,2,4 remass as a SAWTOOTH SHED (3 north-light teeth on a
+    // lower hall); v1,3 keep the box+stack (A10). The two windows(2,3) calls
+    // below are preserved verbatim INCLUDING the BR===0 forked-seed swap
+    // block, so the shared-stream signature is identical at every variant.
+    const i2saw = (v % 2) === 0, i2HT = i2saw ? 22 : 28;
     i2.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
       const base = i2Base[v];
-      const { W, S, E, N } = prism(g, ox, oy, 1, 1, 28, base, zoneFaces(base, I_ROOF[v]));
-      windows(g, up(S, 0), up(E, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
+      const { W, S, E, N } = prism(g, ox, oy, 1, 1, i2HT, base, zoneFaces(base, I_ROOF[v]));
+      windows(g, up(S, 0), up(E, 0), i2HT, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
       // M32b: the SW screen face was bare grey at every rotation (HEAD only lit
       // the SE face). Light it too so both screen-visible faces read populated,
       // like the box families. At facing 0 (BR===0) the shared 0x5EED stream is
@@ -1838,16 +2145,26 @@ function buildSprites() {
       {
         const swPrev = ART_RNG;
         if (BR === 0) ART_RNG = mulberry32((0x1252A7 ^ (v * 0x9E3779B1)) >>> 0);
-        windows(g, up(W, 0), up(S, 0), 28, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
+        windows(g, up(W, 0), up(S, 0), i2HT, 2, 3, 0.4, "#ffd27f", "#20242c", GLOW_SODIUM);
         ART_RNG = swPrev;
       }
-      stack(g, ox - 10, N[1] - 24, 22, 6);
-      groundPool(ox + 8, oy + 4, 15, 6, GLOW_SODIUM); // night-shift yard flood
-      if (GLOWG) { // stack beacon stays with the window glow
-        GLOWG.fillStyle = "#ff6a4a";
-        GLOWG.fillRect(ox - 11, N[1] - 49, 3, 3);
+      if (i2saw) {
+        sawtoothRoof(g, { N, E, S, W }, i2HT, 3, 9, I_ROOF[v]);
+        stack(g, ox + 10, N[1] - 16, 20, 5); // rear-corner stack over the teeth
+        groundPool(ox + 8, oy + 4, 15, 6, GLOW_SODIUM); // night-shift yard flood
+        if (GLOWG) { // stack beacon stays with the window glow
+          GLOWG.fillStyle = "#ff6a4a";
+          GLOWG.fillRect(ox + 9, N[1] - 39, 3, 3);
+        }
+      } else {
+        stack(g, ox - 10, N[1] - 24, 22, 6);
+        groundPool(ox + 8, oy + 4, 15, 6, GLOW_SODIUM); // night-shift yard flood
+        if (GLOWG) { // stack beacon stays with the window glow
+          GLOWG.fillStyle = "#ff6a4a";
+          GLOWG.fillRect(ox - 11, N[1] - 49, 3, 3);
+        }
       }
-    })));
+    }), { BR, fam: 8, v, cx: HW, cy: 44, spread: 8 }));
     i3.push(withJitter(withNight(1, 1, 74, (g, ox, oy) => {
       const base = i3Base[v];
       const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, zoneFaces(base, I_ROOF[v]));
@@ -2148,8 +2465,8 @@ function buildSprites() {
   {
     const megaRng = mulberry32((0x2AC0DE ^ (BR * 0x9E3779B1)) >>> 0);
     const prevRng = ART_RNG; ART_RNG = megaRng;
-    // stacked-tier + face helpers (g passed in — GLOWG/up/windows are module-level)
-    const raise = (cn, ht) => ({ N: up(cn.N, ht), E: up(cn.E, ht), S: up(cn.S, ht), W: up(cn.W, ht) });
+    // face helper (g passed in — GLOWG/up/windows are module-level; raise()
+    // was hoisted to module scope for GQ5 and is byte-equivalent here)
     const facewin = (g, cn, ht, rows, cols, col, glow, gf) => {
       windows(g, cn.W, cn.S, ht, rows, cols, 0.55, col, "#20242c", glow, gf);
       windows(g, cn.S, cn.E, ht, rows, cols, 0.55, col, "#20242c", glow, gf);

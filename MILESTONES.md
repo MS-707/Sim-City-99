@@ -6,7 +6,7 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ5 — Building silhouette variety** *(graphics roadmap 5/11)* — running
+- [ ] **GQ6 — Reflective-glass facades** *(graphics roadmap 6/11)* — running
   via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
@@ -34,10 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ5 — Building silhouette variety** *(buildings)*: 3–4 non-prism massings
-  + a 6+ rooftop prop library. **Gates:** ≥12 grayscale-distinct silhouettes ·
-  levels 1–5 distinct · ≥6 seeded roof props · anchors unchanged (painter/picking
-  intact vs HEAD) · deterministic.
 - [ ] **GQ6 — Reflective-glass facades** *(buildings)*: period-correct
   banded/ordered-dither curtain-wall + mullions + reflection streaks (not a
   modern gradient). **Gates:** banding/dither measured (not smooth gradient) ·
@@ -83,6 +79,28 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ5 — Building silhouette variety** *(graphics roadmap 5/11)*: the
+  skyline's box monotony is broken — **12 grayscale-distinct archetypes** now
+  ship: hip-roof rowhouses with dormers + chimneys, an asymmetric stepped
+  wedding-cake tower, an off-center tank-crown tower, a podium + offset-slab
+  office, a 3-tier tapering curtain-wall tower, a crown-step + mast tower, a
+  gable shed, a 3-tooth sawtooth industrial shed (skylight faces), plus the
+  retained cottage/storefront/box+stack/heavy-plant forms — and an
+  **8-type rooftop prop library** (AC, vents, hatches, skylights, tanks,
+  bulkheads, planters, pipes) seeded per `(family, variant, jitCopy)` so
+  adjacent same-variant buildings differ (min 136-px prop deltas; in-situ
+  neighbors differ by 2410 px). **Certified clean 8/8, 0 refutes, no fix
+  needed** vs baseline `e640d18`: min pairwise outline distance 0.0492 (median
+  0.120, floor 0.045 — HEAD's boxes scored ~0.000); per-zone height ladders
+  strictly increasing; anchors/dims tuple-equal **1008/1008** across all 4
+  facings and picking round-trips **1200/1200** (painter order + click-picking
+  provably intact); **1552 untouched canvases byte-identical** (civic equality
+  doubling as the shared-RNG-stream canary); 2892/2892 canvases identical on
+  double-boot; changed-family night bakes 100% inside the day silhouette (G1
+  intact); frame time **0.93×** HEAD. All via the exact R()-consumption-
+  signature discipline (windows() row/col counts preserved; new geometry
+  deterministic; props on side streams).
 
 - [x] **GQ4 — Vegetation & street trees** *(graphics roadmap 4/11)*: straight
   road segments now carry **groomed street trees** — a pure deterministic

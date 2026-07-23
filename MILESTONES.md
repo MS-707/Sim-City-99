@@ -6,8 +6,8 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ2 — Ground-material quilt** *(graphics roadmap 2/11)* — running via
-  the milestone workflow. Gates in `docs/graphics-roadmap.json`.
+- [ ] **GQ3 — Zone-correlated building palette** *(graphics roadmap 3/11)* —
+  running via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
 
@@ -34,10 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ2 — Ground-material quilt** *(groundscape)*: noise-driven grass/dirt/
-  sand/pavement with dithered per-tile variation + relief tone; no blank slabs.
-  **Gates:** ≥4 materials/view w/ per-tile noise · no NxN flat block · varied at
-  1.0 & 0.4 zoom · cache rebuilds only on season/size, frame within ~20% · deterministic.
 - [ ] **GQ3 — Zone-correlated building palette** *(buildings)*: curated per-zone/
   density facade hues, lit/shadow by HSL shift. **Gates:** ≥6 hue buckets ·
   nearest-hue classifier ≥0.9 zone-correct · adjacent variants ≥10 color dist ·
@@ -94,6 +90,26 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ2 — Ground-material quilt** *(graphics roadmap 2/11)*: every empty
+  land tile now carries a **material** — grass, dirt, sand lot, or pavement —
+  from a pure two-octave value-noise field of `(city.seed, x, y)` (no sim/save
+  change; deterministic across save/load for free), each baked with sealed
+  diamonds, two-tone stipple, material signatures (dirt clods + wheel ruts, sand
+  ripples, pavement cracks + expansion joints), a within-tile relief gradient,
+  directional relief tinting from a low-frequency swell field, and stippled
+  fringe feathering on quilt-patch borders. All drawn at terrain-cache rebuild
+  time only — the per-frame path is still one `drawImage`. **Certified** vs
+  baseline `10909f1`: 4 materials in one view (color separation 52.9–123 per
+  pair); the panel's fidelity refute — variant-collided adjacent tiles too
+  similar — was fixed structurally (**8 independent bakes per material**: 4
+  variants × 2 parity, so orthogonal neighbors always draw different canvases),
+  after which **all 616** adjacent same-material pairs differ ≥15.97% (was 35
+  below 5%); largest identical-RGBA block just 2×2 px; rebuild cadence identical
+  to HEAD at **0.97–1.00×** cost (the fix also erased the 1.44× rebuild spike);
+  building sprites, save bytes, and a 60-tick sim **byte-identical** to HEAD;
+  correct at all 4 rotations; winter materials stay legible vs snowpack (MN3:
+  lightness, never hue alone); zero errors. 7-agent workflow, 3-lens panel.
 
 - [x] **GQ1 — Daytime palette & water vibrancy** *(graphics roadmap 1/11)*: the
   summer/daytime palette re-tune shipped and **gate-certified** against baseline

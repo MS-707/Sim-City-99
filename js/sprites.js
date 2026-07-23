@@ -323,6 +323,16 @@ const SEASON_PAL = {
     waterDith: "#2a72d6", waterCrest: "rgba(130,185,255,.22)",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
+    // GQ2 ground-material quilt: warm packed dirt, dull grey-gold sand LOT
+    // (distinct from the brighter shore sand #dcc37a), aged concrete pavement.
+    // 4 tones each, within a few % lightness — mottle, never checkerboard.
+    dirt: ["#8a6b42", "#86673f", "#8e6f45", "#886a41"],
+    dirtFleckA: "rgba(240,220,180,.14)", dirtFleckB: "rgba(52,34,12,.20)",
+    sandLot: ["#cbb26a", "#c7ae66", "#cfb66e", "#c9b068"],
+    sandFleckA: "rgba(255,250,230,.16)", sandFleckB: "rgba(120,98,48,.18)",
+    pave: ["#8f9095", "#8b8c91", "#939499", "#8d8e93"],
+    paveFleckA: "rgba(230,232,238,.10)", paveFleckB: "rgba(24,26,32,.16)",
+    paveCrack: "rgba(34,34,40,.35)",
   },
   spring: { // fresh greens, blossom flecks in the grass
     grass: ["#55ac4b", "#52a94e", "#57ae51", "#53a74d"],
@@ -337,6 +347,14 @@ const SEASON_PAL = {
     waterDith: "#3a7ac2", waterCrest: "rgba(160,205,255,.24)",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
+    // GQ2: same material families in spring's wetter, slightly cooler cast
+    dirt: ["#7f6440", "#7b603d", "#836843", "#7d623e"],
+    dirtFleckA: "rgba(235,215,175,.14)", dirtFleckB: "rgba(46,30,12,.20)",
+    sandLot: ["#c4ad68", "#c0a964", "#c8b16c", "#c2ab66"],
+    sandFleckA: "rgba(255,250,230,.16)", sandFleckB: "rgba(115,94,46,.18)",
+    pave: ["#8c8f94", "#888b90", "#909398", "#8a8d92"],
+    paveFleckA: "rgba(228,231,238,.10)", paveFleckB: "rgba(24,26,32,.16)",
+    paveCrack: "rgba(34,34,40,.35)",
   },
   autumn: { // dry stubble lawns, orange/red canopies
     grass: ["#9c9a48", "#98944a", "#9e9a4b", "#999545"],
@@ -354,6 +372,14 @@ const SEASON_PAL = {
     waterDith: "#336cb0", waterCrest: "rgba(150,195,250,.22)",
     wave: "rgba(210,235,255,.3)", glint: "rgba(220,240,255,.45)",
     sand: "#d8bd74", sandHi: "#dcc17b", foam: "rgba(255,255,255,.30)", iceEdge: null,
+    // GQ2: same material families in autumn's drier, warmer cast
+    dirt: ["#8f6f43", "#8b6b40", "#937346", "#8d6d41"],
+    dirtFleckA: "rgba(235,205,150,.15)", dirtFleckB: "rgba(56,36,12,.20)",
+    sandLot: ["#c9ae62", "#c5aa5e", "#cdb266", "#c7ac60"],
+    sandFleckA: "rgba(250,240,210,.16)", sandFleckB: "rgba(118,94,42,.18)",
+    pave: ["#90908c", "#8c8c88", "#949490", "#8e8e8a"],
+    paveFleckA: "rgba(232,232,226,.10)", paveFleckB: "rgba(26,26,30,.16)",
+    paveCrack: "rgba(36,34,38,.35)",
   },
   winter: { // snowed-under lawns, pine canopies with snow caps, icy shores
     grass: ["#e9edf3", "#e6eaf1", "#eceff5", "#e5e9f0"],
@@ -363,6 +389,16 @@ const SEASON_PAL = {
     waterDith: "#7aabde", waterCrest: "rgba(210,235,255,.35)",
     wave: "rgba(255,255,255,.4)", glint: "rgba(240,248,255,.7)",
     sand: "#c9d6e4", sandHi: "#e8eef5", foam: "rgba(255,255,255,.5)", iceEdge: "#7fa0bf",
+    // GQ2: snow-dusted materials, separable from the #e9edf3 snowpack by
+    // BOTH lightness and hue (colorblind norm MN3): warm grey-brown dirt,
+    // buff sand lot, plowed blue-grey pavement
+    dirt: ["#c9bfae", "#c5bbaa", "#cdc3b2", "#c7bdac"],
+    dirtFleckA: "rgba(255,255,255,.40)", dirtFleckB: "rgba(96,80,58,.28)",
+    sandLot: ["#d8d2c2", "#d4cebe", "#dcd6c6", "#d6d0c0"],
+    sandFleckA: "rgba(255,255,255,.45)", sandFleckB: "rgba(140,128,100,.25)",
+    pave: ["#aeb4bd", "#aab0b9", "#b2b8c1", "#acb2bb"],
+    paveFleckA: "rgba(240,244,250,.35)", paveFleckB: "rgba(58,64,74,.25)",
+    paveCrack: "rgba(58,64,74,.45)",
   },
 };
 
@@ -659,6 +695,50 @@ function terrHash(x, y) {
   return (h ^ (h >>> 16)) >>> 0;
 }
 
+// GQ2: seed-folding coordinate hash for the ground-material quilt — the same
+// integer mix as terrHash with city.seed folded in, normalized to [0, 1).
+// Pure O(1) in (seed, gx, gy): every boot, frame and rotation agrees, and the
+// seed is already serialized (save v11), so save/load determinism is free.
+function hash01(seed, gx, gy) {
+  let h = (gx * 374761393 + gy * 668265263 + Math.imul(seed | 0, 0x9E3779B1)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// GQ2: smoothstep-bilinear value noise on a lattice of spacing `cell` — the
+// same shape as generateTerrain's hAt, but hash-based so any (x, y) is O(1)
+// with no per-map state (buildTerrainLayer queries it only on the rare
+// terrain-layer rebuild, never per frame).
+function valNoise2(seed, x, y, cell) {
+  const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+  let fx = x / cell - cx, fy = y / cell - cy;
+  fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+  const a = hash01(seed, cx, cy), b = hash01(seed, cx + 1, cy);
+  const c = hash01(seed, cx, cy + 1), d = hash01(seed, cx + 1, cy + 1);
+  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+}
+
+// GQ2: ground material for a bare GRASS-terr tile — 0 grass, 1 dirt, 2 sand
+// lot, 3 pavement (index into fam.ground). A low-frequency quilt field
+// (cell 7 → patches of ~5-12 tile extent) broken up by a cell-3 detail
+// octave; the thresholds sit at the blend's ~8/21/79% quantiles, so an empty
+// 128 map lands near grass 58%, dirt 21%, sand 13%, pave 8%. Pure in
+// (seed, LOGICAL x, y) — quilt patches stay put under rotation (M32).
+function groundMat(seed, x, y) {
+  const v = 0.72 * valNoise2(seed, x, y, 7) + 0.28 * valNoise2(seed ^ 0x51AB, x, y, 3);
+  return v < 0.255 ? 3 : v < 0.345 ? 2 : v < 0.645 ? 0 : 1;
+}
+
+// GQ2: directional relief from a lower-frequency field — the gradient of a
+// cell-11 swell toward the fixed screen-NW light: +1 lit slope, -1 shaded,
+// 0 flat. Broad light/dark swells sweep the plane so open ground never reads
+// as one flat tone; pure in LOGICAL (x, y), so rotation-stable (M32).
+function reliefShade(seed, x, y) {
+  const s2 = seed ^ 0x7E11;
+  const d = valNoise2(s2, x - 1, y - 1, 11) - valNoise2(s2, x + 1, y + 1, 11);
+  return d > 0.045 ? 1 : d < -0.045 ? -1 : 0;
+}
+
 // G5: water bakes WATER_VARIANTS positional variants x WATER_FRAMES shimmer
 // frames per season — buildTerrainLayer picks the variant by terrHash and
 // offsets the frame by (x + y), so adjacent lake tiles never render alike.
@@ -697,6 +777,11 @@ function buildSprites() {
   // building/window/roof bakes downstream stay byte-identical to pre-G13.
   const shoreRng = mulberry32(0x5A17);
   const forestRng = mulberry32(0x0F0E);
+  // GQ2 HARD RULE: every NEW draw op in the terrain family (material tiles,
+  // extra grass flecks, relief tints, matFringe feather) consumes ONLY this
+  // side stream — the shared R()/ART_RNG call count and order are untouched,
+  // so every downstream building/window/roof bake stays byte-identical.
+  const groundRng = mulberry32(0x6D01);
 
   // ---- terrain families, baked once per season (M12) ----
   // The same draw code runs for each of the four palettes; renderFrame picks
@@ -711,6 +796,32 @@ function buildSprites() {
     // grass (or snowpack, or dry stubble) — no edge stroke (G5): interior
     // same-type seams are invisible; type-change boundaries get their line
     // from the SPR.terrEdge overlays chosen per tile in buildTerrainLayer
+    // GQ2: shared VERTICAL within-tile relief gradient — every ground bake
+    // gets the same top-lit wash, so parity twins never disagree on relief
+    const reliefGrad = (g, ox, oy) => {
+      const gr = g.createLinearGradient(ox, oy - HH, ox, oy + HH);
+      gr.addColorStop(0, "rgba(255,255,240,.05)");
+      gr.addColorStop(1, "rgba(10,16,12,.06)");
+      g.fillStyle = gr; g.fillRect(ox - HW, oy - HH, TW, TH);
+    };
+    // GQ2 fix (C2): pixel-snapped GRAIN — 2x1 flecks at INTEGER coords (no
+    // antialiasing, so the full boosted alpha lands on single pixels) in the
+    // material's own fleck tones. Every ground bake ends with its own grain
+    // layout from groundRng; since orthogonal neighbors always differ in
+    // (x+y)&1 parity and each parity is an independent bake, every adjacent
+    // same-material pair differs at dozens of full-contrast positions —
+    // fractional-coordinate stipple alone antialiased below the measurable
+    // per-channel threshold on variant-hash collisions.
+    const boostA = (rgba, f) => rgba.replace(/(\d*\.?\d+)\)\s*$/,
+      (m, a) => Math.min(0.5, parseFloat(a) * f) + ")");
+    const grain = (g, ox, oy, fa, fb) => {
+      g.fillStyle = boostA(fa, 3);
+      for (let k = 0; k < 32; k++)
+        g.fillRect((ox - HW + groundRng() * (TW - 2)) | 0, (oy - HH + groundRng() * TH) | 0, 2, 1);
+      g.fillStyle = boostA(fb, 3);
+      for (let k = 0; k < 32; k++)
+        g.fillRect((ox - HW + groundRng() * (TW - 2)) | 0, (oy - HH + groundRng() * TH) | 0, 2, 1);
+    };
     for (let v = 0; v < 4; v++) {
       fam.grass.push(mkSprite(1, 1, 0, (g, ox, oy) => {
         sealedDiamond(g, ox, oy, P.grass[v]); // opaque seam, no bleed
@@ -719,9 +830,128 @@ function buildSprites() {
         for (let k = 0; k < 14; k++) g.fillRect(ox - HW + R() * TW, oy - HH + R() * TH, 2, 1);
         g.fillStyle = P.fleckB;
         for (let k = 0; k < 10; k++) g.fillRect(ox - HW + R() * TW, oy - HH + R() * TH, 2, 1);
+        // GQ2: the same vertical relief wash the new materials get, plus 60
+        // EXTRA 2px flecks appended AFTER the untouched R() flecks above —
+        // all from groundRng, so the shared seeded stream never shifts and
+        // open lawns reach the stipple density that keeps 4-adjacent lawn
+        // tiles measurably distinct — then the pixel-snapped grain pass
+        // that guarantees full-contrast per-tile differences (C2)
+        reliefGrad(g, ox, oy);
+        g.fillStyle = P.fleckA;
+        for (let k = 0; k < 30; k++)
+          g.fillRect(ox - HW + groundRng() * TW, oy - HH + groundRng() * TH, 2, 1);
+        g.fillStyle = P.fleckB;
+        for (let k = 0; k < 30; k++)
+          g.fillRect(ox - HW + groundRng() * TW, oy - HH + groundRng() * TH, 2, 1);
+        grain(g, ox, oy, P.fleckA, P.fleckB);
         g.restore();
       }));
     }
+
+    // GQ2 fix (C2): parity-B grass — four MORE grass bakes, one per variant,
+    // drawn ONLY from groundRng (zero R() calls, so the shared seeded stream
+    // and every downstream building bake stay byte-identical to before).
+    // buildTerrainLayer indexes fam.ground[mi][variant | parity<<2], so two
+    // orthogonally-adjacent tiles ALWAYS pull different canvases with
+    // independent fleck/grain layouts, even on a terrHash&3 collision.
+    const grassAlt = [];
+    for (let v = 0; v < 4; v++) {
+      grassAlt.push(mkSprite(1, 1, 0, (g, ox, oy) => {
+        sealedDiamond(g, ox, oy, P.grass[v]); // opaque seam, no bleed
+        g.save(); diamondPath(g, ox, oy); g.clip();
+        g.fillStyle = P.fleckA; // same density as parity A (24 + 60 flecks)
+        for (let k = 0; k < 44; k++)
+          g.fillRect(ox - HW + groundRng() * TW, oy - HH + groundRng() * TH, 2, 1);
+        g.fillStyle = P.fleckB;
+        for (let k = 0; k < 40; k++)
+          g.fillRect(ox - HW + groundRng() * TW, oy - HH + groundRng() * TH, 2, 1);
+        reliefGrad(g, ox, oy);
+        grain(g, ox, oy, P.fleckA, P.fleckB);
+        g.restore();
+      }));
+    }
+
+    // GQ2: ground-material quilt tiles — dirt / sand lot / pavement, selected
+    // per tile by groundMat(city.seed, x, y) in buildTerrainLayer. 4 variants
+    // of a 1x1 sealed diamond each; every random draw pulls from groundRng.
+    const matTile = (base, fa, fb, kind, crack) => mkSprite(1, 1, 0, (g, ox, oy) => {
+      sealedDiamond(g, ox, oy, base); // opaque seam, no bleed
+      g.save(); diamondPath(g, ox, oy); g.clip();
+      reliefGrad(g, ox, oy); // (a) vertical within-tile relief
+      // (b) dense two-tone stipple — no flat run survives, and adjacent
+      // same-material tiles always differ by their relocated flecks
+      g.fillStyle = fa;
+      for (let k = 0; k < 40; k++)
+        g.fillRect(ox - HW + groundRng() * TW, oy - HH + groundRng() * TH, 1 + (groundRng() < 0.6 ? 1 : 0), 1);
+      g.fillStyle = fb;
+      for (let k = 0; k < 36; k++)
+        g.fillRect(ox - HW + groundRng() * TW, oy - HH + groundRng() * TH, 1 + (groundRng() < 0.6 ? 1 : 0), 1);
+      // (c) material signature detail
+      if (kind === 1) { // dirt: darker clod dashes + one faint wheel-rut pair
+        g.fillStyle = fb;
+        const nc = 4 + (groundRng() * 3 | 0);
+        for (let k = 0; k < nc; k++)
+          g.fillRect(ox - HW + 6 + groundRng() * (TW - 14), oy - HH + 3 + groundRng() * (TH - 6),
+                     3 + groundRng() * 3, 1);
+        g.strokeStyle = "rgba(40,26,10,.14)"; g.lineWidth = 1.3;
+        const ry = oy - 3 + groundRng() * 6;
+        // rut direction picked per BAKE (panel: the old per-tile mirror made
+        // adjacent ruts herringbone; independent bakes track both ways)
+        const rd = groundRng() < 0.5 ? 4 : -4;
+        for (const off of [-2.5, 2.5]) {
+          g.beginPath();
+          g.moveTo(ox - HW + 8, ry + off + rd); g.lineTo(ox + HW - 8, ry + off - rd);
+          g.stroke();
+        }
+      } else if (kind === 2) { // sand lot: light wind-ripple dashes
+        g.strokeStyle = fa; g.lineWidth = 1;
+        const nr = 3 + (groundRng() * 2 | 0);
+        for (let k = 0; k < nr; k++) {
+          const rx = ox - HW + 8 + groundRng() * (TW - 26), ryy = oy - HH + 4 + groundRng() * (TH - 8);
+          g.beginPath(); g.moveTo(rx, ryy);
+          g.bezierCurveTo(rx + 5, ryy - 1.5, rx + 9, ryy + 1.5, rx + 14, ryy);
+          g.stroke();
+        }
+      } else { // pavement: hairline cracks + expansion joint + corner wear
+        g.strokeStyle = crack; g.lineWidth = 1;
+        for (let k = 0; k < 2; k++) {
+          let px = ox - HW + 10 + groundRng() * (TW - 20), py = oy - HH + 4 + groundRng() * (TH - 8);
+          g.beginPath(); g.moveTo(px, py);
+          for (let sg = 0; sg < 3; sg++) {
+            px += 3 + groundRng() * 5; py += groundRng() * 6 - 3;
+            g.lineTo(px, py);
+          }
+          g.stroke();
+        }
+        // one 1px expansion joint parallel to a diamond edge: endpoints at
+        // equal fractions along the two flanking edges are exactly parallel
+        const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+        const lp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        const ft = 0.3 + groundRng() * 0.4, ne = groundRng() < 0.5;
+        const A = ne ? lp(N, W, ft) : lp(N, E, ft);
+        const B = ne ? lp(E, S, ft) : lp(W, S, ft);
+        g.strokeStyle = crack;
+        g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke();
+        g.fillStyle = fb; // corner wear patches at the E/W points
+        g.beginPath(); g.ellipse(ox + HW - 5, oy, 4 + groundRng() * 2, 2.2, 0, 0, 7); g.fill();
+        g.beginPath(); g.ellipse(ox - HW + 5, oy, 4 + groundRng() * 2, 2.2, 0, 0, 7); g.fill();
+      }
+      grain(g, ox, oy, fa, fb); // C2: full-contrast pixel-snapped grain last
+      g.restore();
+    });
+    // GQ2 fix (C2): 8 bakes per material — entries 0-3 are (x+y)-even
+    // parity, 4-7 are odd parity, each an INDEPENDENT groundRng bake, so
+    // orthogonal neighbors never share a canvas: fam.ground[mi][v | par<<2]
+    const dirtArr = [], sandLotArr = [], paveArr = [];
+    for (let par = 0; par < 2; par++) {
+      for (let v = 0; v < 4; v++) {
+        dirtArr.push(matTile(P.dirt[v], P.dirtFleckA, P.dirtFleckB, 1, null));
+        sandLotArr.push(matTile(P.sandLot[v], P.sandFleckA, P.sandFleckB, 2, null));
+        paveArr.push(matTile(P.pave[v], P.paveFleckA, P.paveFleckB, 3, P.paveCrack));
+      }
+    }
+    // index === groundMat; grass = [4 parity-A (R()-fleck) | 4 parity-B]
+    fam.ground = [fam.grass.concat(grassAlt), dirtArr, sandLotArr, paveArr];
 
     // water: WATER_VARIANTS positional variants x WATER_FRAMES shimmer
     // frames (G5) — fam.water[v][f]. No edge stroke: an open lake reads as
@@ -911,6 +1141,51 @@ function buildSprites() {
         if (!(m & (1 << b))) continue;
         const [P0, P1] = edges[b];
         g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
+      }
+      g.restore();
+    }));
+  }
+
+  // GQ2: relief tint overlays — two season-independent 1x1 diamonds (fill +
+  // clip only, low alpha, no sealedDiamond) drawn per land tile at terrain-
+  // layer rebuild time when reliefShade(seed, x, y) != 0, so broad NW-lit
+  // swells sweep the plane. ~10 groundRng alpha-jitter flecks keep the
+  // overlay itself from being one flat wash. [0] = light, [1] = dark.
+  SPR.reliefTint = [];
+  for (const [tone, aBase] of [["255,250,230", 0.055], ["12,20,16", 0.065]]) {
+    SPR.reliefTint.push(mkSprite(1, 1, 0, (g, ox, oy) => {
+      g.save(); diamondPath(g, ox, oy); g.clip();
+      g.fillStyle = `rgba(${tone},${aBase})`;
+      g.fillRect(ox - HW, oy - HH, TW, TH);
+      for (let k = 0; k < 10; k++) {
+        g.fillStyle = `rgba(${tone},${(aBase * (0.5 + groundRng())).toFixed(3)})`;
+        g.fillRect(ox - HW + groundRng() * TW, oy - HH + groundRng() * TH, 2, 1);
+      }
+      g.restore();
+    }));
+  }
+
+  // GQ2: material-fringe feather (16 masks, bit order N,E,S,W like terrEdge)
+  // — a STIPPLED band, not a stroke: ~14 jittered 1-2px dots scattered in a
+  // ~4px band inside each set edge, softening quilt-patch boundaries without
+  // a hard line. Season-independent; drawn with rot4(mask, cam.r) exactly
+  // like terrEdge, only on GRASS-terr tiles whose neighbor material differs.
+  SPR.matFringe = [];
+  for (let m = 0; m < 16; m++) {
+    SPR.matFringe.push(mkSprite(1, 1, 0, (g, ox, oy) => {
+      if (!m) return; // no differing-material neighbor: nothing drawn
+      const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+      const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
+      g.save(); diamondPath(g, ox, oy); g.clip();
+      g.fillStyle = "rgba(30,26,18,.22)";
+      for (let b = 0; b < 4; b++) {
+        if (!(m & (1 << b))) continue;
+        const [P0, P1] = edges[b];
+        for (let k = 0; k < 14; k++) {
+          const t = 0.06 + groundRng() * 0.88, q = groundRng() * 0.28;
+          const ex = P0[0] + (P1[0] - P0[0]) * t, ey = P0[1] + (P1[1] - P0[1]) * t;
+          g.fillRect(ex + (ox - ex) * q, ey + (oy - ey) * q, groundRng() < 0.4 ? 2 : 1, 1);
+        }
       }
       g.restore();
     }));
@@ -2207,6 +2482,27 @@ function terrEdgeMask(city, i) {
     if (!city.inMap(X, Y)) return false;
     const t = city.terr[city.idx(X, Y)];
     return t !== TERR.WATER && (t === TERR.FOREST) !== f;
+  };
+  if (diff(x, y - 1)) m |= 1;
+  if (diff(x + 1, y)) m |= 2;
+  if (diff(x, y + 1)) m |= 4;
+  if (diff(x - 1, y)) m |= 8;
+  return m;
+}
+
+// GQ2: for a GRASS-terr tile — bitmask of 4-neighbors that are also bare
+// land (non-water, non-forest) but carry a DIFFERENT groundMat; analogous to
+// terrEdgeMask, drawn as the SPR.matFringe stippled feather. Off-map, water
+// and forest neighbors never raise a bit — the shore band and the terrEdge
+// feather already own those seams.
+function matFringeMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  const m0 = groundMat(city.seed, x, y);
+  let m = 0;
+  const diff = (X, Y) => {
+    if (!city.inMap(X, Y)) return false;
+    const t = city.terr[city.idx(X, Y)];
+    return t !== TERR.WATER && t !== TERR.FOREST && groundMat(city.seed, X, Y) !== m0;
   };
   if (diff(x, y - 1)) m |= 1;
   if (diff(x + 1, y)) m |= 2;

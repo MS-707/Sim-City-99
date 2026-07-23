@@ -316,10 +316,22 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
         // grass/water (cache-safe, deterministic) — coasts wander in width
         if (sm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(sm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       } else {
-        // G5: grass variant by scrambled (x, y) hash — open meadows mottle
-        // organically instead of alternating with varnt's seeded stripes
-        const gs = S.grass[terrHash(x, y) & 3];
+        // G5: variant by scrambled (x, y) hash — open meadows mottle
+        // organically instead of alternating with varnt's seeded stripes.
+        // GQ2: bare GRASS-terr tiles pick their material (grass / dirt /
+        // sand lot / pavement) from the seed-pure quilt field; forest floors
+        // stay grass. Each material has 8 bakes — 4 variants x 2 (x+y)
+        // parities — and orthogonal neighbors always differ in parity, so
+        // adjacent same-material tiles ALWAYS draw two independent canvases
+        // with different fleck/grain layouts, even on a terrHash&3 collision
+        // (parity is an index, not a transform: no per-tile save/restore).
+        const mi = city.terr[i] === TERR.GRASS ? groundMat(city.seed, x, y) : 0;
+        const gs = S.ground[mi][(terrHash(x, y) & 3) | (((x + y) & 1) << 2)];
         g.drawImage(gs.c, wx - gs.ox, wy - gs.oy);
+        // GQ2: broad light/dark relief swells (logical-space gradient toward
+        // the screen-NW light) — over the material, UNDER the beach fringe
+        const rs = reliefShade(city.seed, x, y);
+        if (rs) { const rt = SPR.reliefTint[rs > 0 ? 0 : 1]; g.drawImage(rt.c, wx - rt.ox, wy - rt.oy); }
         const bm = beachMask(city, i); // shore fringe on the land side of the seam
         if (bm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(bm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       }
@@ -338,6 +350,13 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
       if (city.terr[i] === TERR.WATER) continue;
       const em = terrEdgeMask(city, i);
       if (em) { const eg = SPR.terrEdge[rot4(em, cam.r)]; g.drawImage(eg.c, wx - eg.ox, wy - eg.oy); }
+      // GQ2: stippled feather where the material quilt changes between two
+      // bare GRASS-terr tiles — after terrEdge so neighbor overdraw can't
+      // shave it; the mask rotates with rot4 exactly like terrEdge / shore
+      if (city.terr[i] === TERR.GRASS) {
+        const fm = matFringeMask(city, i);
+        if (fm) { const fg = SPR.matFringe[rot4(fm, cam.r)]; g.drawImage(fg.c, wx - fg.ox, wy - fg.oy); }
+      }
     }
   }
   L.key = key;

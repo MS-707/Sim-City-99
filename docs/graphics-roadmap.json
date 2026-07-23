@@ -58,7 +58,8 @@
         "Terrain cache still rebuilds only on season/size change (no per-frame cost); developed-128 frame within ~20% of baseline.",
         "Deterministic (same seed -> identical ground); zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: all gates pass vs baseline 10909f1. 4 materials in view (grass 412/dirt 26/sand 57/pave 20 tiles; pair color distance 52.9-123); after the panel-driven fix (8 independent bakes per material, 4 variants x 2 parity) ALL 616 adjacent same-material pairs differ >=15.97% (was 35 pairs <5%); largest identical-RGBA square 2x2 px; rebuild cadence identical to HEAD with cost ratio 0.97-1.00x (mirror-transform removal erased the 1.44x spike); building sprites + save + 60-tick sim byte-identical; correct at all 4 rotations; zero errors. Panel: fidelity refute resolved by the fix; determinism/regression lenses confirm."
     },
     {
       "id": "GQ3",

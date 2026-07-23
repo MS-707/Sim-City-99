@@ -6,7 +6,7 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ6 — Reflective-glass facades** *(graphics roadmap 6/11)* — running
+- [ ] **GQ7 — Road markings & asphalt** *(graphics roadmap 7/11)* — running
   via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
@@ -34,10 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ6 — Reflective-glass facades** *(buildings)*: period-correct
-  banded/ordered-dither curtain-wall + mullions + reflection streaks (not a
-  modern gradient). **Gates:** banding/dither measured (not smooth gradient) ·
-  mullions present · C-high-density-gated · silhouette/anchor unchanged · deterministic.
 - [ ] **GQ7 — Road markings & asphalt** *(transport)*: asphalt fill + dashed
   center-lines/lane-edges/crosswalks baked into all 16 masks, rotation-correct.
   **Gates:** markings on straights + crosswalks at junctions · correct across 4
@@ -79,6 +75,22 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ6 — Reflective-glass facades** *(graphics roadmap 6/11)*: the C3
+  towers' glass is now certified **reflective 90s curtain-wall**: palette-
+  quantized horizontal banding (≤10 color clusters, ≥10 luminance transitions,
+  smooth-pair fraction ~0.05 — provably *not* a modern gradient), in-band
+  **ordered dither** (2 dominant tones ≥92% coverage with 11 checkerboard
+  alternations), crisp mullions (97–100% column-exact at t=1/3, 2/3 on both
+  faces of all 5 variants), a two-tone sky split on upper bands, and 203–397 px
+  of **diagonal reflection glints** per variant that cross spandrels and glass —
+  the cue that reads as reflection rather than painted stripes. **Certified
+  clean 6/6, 0 refutes, no fix needed** vs baseline `7299590`: of **14,884
+  audited canvas paths**, only the 200 allowed c3-day-lineage canvases differ;
+  every non-c3 family byte-identical; silhouettes/anchors unchanged;
+  deterministic across fresh contexts **and with unstubbed Math.random** (all
+  new randomness on the `glassRng` side stream); night/pool/beacon bakes
+  bit-untouched; zero errors.
 
 - [x] **GQ5 — Building silhouette variety** *(graphics roadmap 5/11)*: the
   skyline's box monotony is broken — **12 grayscale-distinct archetypes** now

@@ -2005,6 +2005,12 @@ function buildSprites() {
     // 2 of the 5 variants; the tip bakes in its lit state and the renderer
     // blinks it live via spr.beacon (phase-offset per tower)
     const c3mast = v === 1 || v === 3;
+    // GQ6: reflective-glass side stream (GQ2/GQ5 hard rule: never the shared
+    // 0x5EED stream) — consumed ONLY inside the draw callback below, which
+    // mkSprite runs exactly once per bakeBuildingSet(BR) call, so streak
+    // placement is boot- and facing-deterministic and zero downstream bakes
+    // (civic/mega/i-family) shift by a single RNG draw.
+    const glassRng = mulberry32((0x61A55C ^ (BR * 0x9E3779B1) ^ (v * 0x85EBCA77)) >>> 0);
     const c3spr = withNight(1, 1, 104, (g, ox, oy) => {
       const glass = c3Glass[v];
       // GQ3: banded curtain wall (period-correct SC2K tower skin) — spandrel/
@@ -2013,19 +2019,88 @@ function buildSprites() {
       // set / height: at ht 88 it reproduces the GQ3 8-band pattern exactly.
       const spandrel = faceL(glass, -0.16), band = faceL(glass, 0.08),
             mullion = faceL(glass, -0.22);
-      const skin = (cn2, ht2) => {
+      // GQ6: reflective-glass tone set — palette-quantized, no alpha, no
+      // gradients. dith/dithSky are ordered-dither light cells over the glass
+      // strips; the top skyN bands swap to bandSky/dithSky (hue nudged 10°
+      // cool) so upper glass reflects sky and lower glass reflects street in
+      // hard palette steps; glint/glintLo are the diagonal reflection-streak
+      // pair, deliberately distinct from the "#eaf6ff" lit-pane color.
+      const [gh, gs, gl] = hexToHsl(glass);
+      const dith = hslStr(gh, gs, Math.min(0.88, gl + 0.13)),
+            bandSky = hslStr(gh + 10, gs, Math.min(0.88, gl + 0.17)),
+            dithSky = hslStr(gh + 10, gs, Math.min(0.88, gl + 0.22)),
+            glint = hslStr(gh + 6, gs * 0.7, 0.84),
+            glintLo = hslStr(gh + 6, gs * 0.7, 0.68);
+      const skin = (cn2, ht2, skyN) => {
         const nb = Math.max(2, Math.round(ht2 / 11)), bh = ht2 / nb;
         for (const [p0, p1] of [[cn2.W, cn2.S], [cn2.S, cn2.E]]) {
           for (let k = 0; k < nb; k++) {
+            const sky = k >= nb - skyN;
             poly(g, [up(p0, k * bh + bh * 4 / 11), up(p1, k * bh + bh * 4 / 11),
-                     up(p1, k * bh + bh), up(p0, k * bh + bh)], band);
+                     up(p1, k * bh + bh), up(p0, k * bh + bh)], sky ? bandSky : band);
             poly(g, [up(p0, k * bh), up(p1, k * bh),
                      up(p1, k * bh + bh * 4 / 11), up(p0, k * bh + bh * 4 / 11)], spandrel);
+            // GQ6: ordered dither inside the glass strip — 2px cell columns
+            // on a checkerboard whose phase flips per band. Integer-rounded
+            // rects keep AA noise down; ZERO RNG, pure loop.
+            g.fillStyle = sky ? dithSky : dith;
+            const m = Math.floor((p1[0] - p0[0]) / 2), hHi = k * bh + bh;
+            for (let j = 0; j < m; j++) {
+              if (((j + k) & 1) !== 0) continue;
+              const tj = (j + 0.5) / m;
+              const jx = p0[0] + (p1[0] - p0[0]) * tj, jy = p0[1] + (p1[1] - p0[1]) * tj;
+              g.fillRect(Math.round(jx) - 1, Math.round(jy - hHi) + 1, 2,
+                         Math.round(bh * 7 / 11) - 2);
+            }
           }
           g.fillStyle = mullion;
           for (const t of [1 / 3, 2 / 3]) {
             const mx = p0[0] + (p1[0] - p0[0]) * t, my = p0[1] + (p1[1] - p0[1]) * t;
-            g.fillRect(mx - 0.5, my - ht2, 1, ht2);
+            // GQ6: x snapped to the integer column so the mullion rasterizes
+            // crisp (un-blended) over the dither/streak texture; y span verbatim
+            g.fillRect(Math.round(mx), my - ht2, 1, ht2);
+          }
+        }
+      };
+      // GQ6: sky-glint pass — pixel-stepped diagonal reflection ribbons laid
+      // over the FINISHED curtain wall (spandrels, glass strips and window
+      // panes alike, so it reads as one reflection on the whole wall, not
+      // per-stripe paint), then the mullion grid is re-stamped on top so the
+      // grid slices every streak — the "reflective glass" cue. Ribbons are
+      // 1px-row fillRect steps (zero AA, SC2K-flat) and are clipped to the
+      // exact face parallelogram built from the same corner points, so no
+      // pixel can escape the silhouette. All randomness comes from glassRng
+      // (the GQ6 side stream) — the shared R()/ART_RNG stream is untouched.
+      const glints = (cn2, ht2) => {
+        let fi = 0;
+        for (const [p0, p1] of [[cn2.W, cn2.S], [cn2.S, cn2.E]]) {
+          const nS = fi === 1 ? 2 : (glassRng() < 0.6 ? 1 : 0);
+          if (nS) {
+            g.save();
+            g.beginPath();
+            g.moveTo(p0[0], p0[1]); g.lineTo(p1[0], p1[1]);
+            g.lineTo(p1[0], p1[1] - ht2); g.lineTo(p0[0], p0[1] - ht2);
+            g.closePath(); g.clip();
+            const ed = (u) => [p0[0] + (p1[0] - p0[0]) * u, p0[1] + (p1[1] - p0[1]) * u];
+            const echo = Math.round((p1[0] - p0[0]) * 0.09); // glintLo trail offset
+            for (let s2 = 0; s2 < nS; s2++) {
+              const u0 = 0.06 + glassRng() * 0.42, h0 = ht2 * (0.12 + glassRng() * 0.35),
+                    du = 0.45, dh = ht2 * 0.42, w2 = 2 + (glassRng() * 2 | 0);
+              const [ax, ay0] = ed(u0), [bx, by0] = ed(u0 + du);
+              const ay = Math.round(ay0 - h0), by = Math.round(by0 - h0 - dh);
+              for (let yy = by; yy < ay; yy++) { // crisp 1px ribbon rows
+                const xx = Math.round(ax + (bx - ax) * (ay - yy) / (ay - by));
+                g.fillStyle = glint; g.fillRect(xx, yy, w2, 1);
+                g.fillStyle = glintLo; g.fillRect(xx + w2 + echo, yy, 1, 1);
+              }
+            }
+            g.restore();
+          }
+          fi++;
+          g.fillStyle = mullion; // re-stamp the grid over the streaks
+          for (const t of [1 / 3, 2 / 3]) {
+            const mx = p0[0] + (p1[0] - p0[0]) * t, my = p0[1] + (p1[1] - p0[1]) * t;
+            g.fillRect(Math.round(mx), my - ht2, 1, ht2);
           }
         }
       };
@@ -2039,10 +2114,14 @@ function buildSprites() {
           { k: 0.8, ht: 30, base: glass, opts: zoneFaces(glass) },
           { k: 0.58, ht: 18, base: glass, opts: zoneFaces(glass, shade(glass, 1.5)) },
         ]);
-        skin(tiers[0].cn, 42); skin(tiers[1].cn, 30); skin(tiers[2].cn, 18);
+        // GQ6: skyN steps up the tower — street reflections low, sky high
+        skin(tiers[0].cn, 42, 0); skin(tiers[1].cn, 30, 1); skin(tiers[2].cn, 18, 2);
         const b0 = tiers[0].cn;
         windows(g, b0.W, b0.S, 42, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
         windows(g, b0.S, b0.E, 42, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
+        // GQ6: reflections catch the big shaft and the crown; the waist tier
+        // stays calm dithered glass so the setbacks don't read as one smear
+        glints(tiers[0].cn, 42); glints(tiers[2].cn, 18);
         const [cx, cy] = roofDeckFrom(g, tiers[2].cn, 18, shade(glass, 1.12), "rgba(16,20,28,.8)");
         roofClutter(g, cx + 2, cy + 2, 2 + (v & 1), R);
         g.strokeStyle = "#222"; g.lineWidth = 2; // crown spire (deterministic)
@@ -2058,9 +2137,10 @@ function buildSprites() {
         // mast/beacon geometry stays verbatim (spr.beacon offset unchanged).
         const { W, S, E, N } = prism(g, ox, oy, 1, 1, 88, glass,
           zoneFaces(glass, shade(glass, 1.5)));
-        skin({ N, E, S, W }, 88);
+        skin({ N, E, S, W }, 88, 2);
         windows(g, up(W, 0), up(S, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.45), GLOW_COOL);
         windows(g, up(S, 0), up(E, 0), 88, 8, 3, 0.75, "#eaf6ff", shade(glass, 0.5), GLOW_COOL);
+        glints({ N, E, S, W }, 88); // GQ6: reflection streaks over the full wall
         // G9: service deck ring on the glass crown, then the crown step
         roofDeck(g, ox, oy, 1, 1, 88, shade(glass, 1.12), "rgba(16,20,28,.8)");
         // half-lot crown slab on the front (W-S) half of the roof ring —

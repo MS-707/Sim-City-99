@@ -16,8 +16,9 @@ Queue policy: keep at least 5 open improvements at all times.
   weekly usage budget), so GQ1 is **not yet gate-certified**. On resume: finish
   verify (water S≥60%, day sat ≥2× night, warm night accents, parks S≥45%,
   geometry byte-identical to HEAD) + panel, fix anything found, then mark done.
-  The `/goal`+`/loop` autonomous driver is **scheduled to auto-resume Tuesday**
-  (post budget reset) via a one-shot trigger: certify GQ1 first, then run
+  The `/goal`+`/loop` autonomous driver is **ACTIVE again** (budget reset
+  passed): a certify-only workflow (verify + adversarial panel + fix, vs
+  baseline `368d514`) is running for GQ1 now; on ship, the loop proceeds
   GQ2→GQ11 in order under the refined bar (SC2K fidelity + modern norms).
 
 ## Open

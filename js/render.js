@@ -121,6 +121,13 @@ const SHADOW_ALPHA = 0.20;        // composite alpha of the whole shadow layer �
 const SHADOW_LEN = 0.35;          // δ = SHADOW_LEN * effective art height (px);
                                   // screen reach per building = (−2δ, +δ), i.e.
                                   // a c3 tower (~90px) throws ~2 tiles screen-SW
+const SHADOW_MIN_LEN = 10;        // floor on δ for anything that rises above the
+                                  // tile's N corner: low art (lvl-1 cottages,
+                                  // pumps, water towers) tops out barely 1–11px
+                                  // above the N corner, so raw SHADOW_LEN·h would
+                                  // round to nothing — every standing building
+                                  // still throws a short, visible drop-shadow
+                                  // while the tall ones keep their scaled reach
 const SHADOW_NE_PAD = 176;        // extra cull margin toward screen-NE (+x, −y):
                                   // off-viewport buildings up-right of the view
                                   // still cast their shadow INTO it
@@ -386,8 +393,25 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
    idiom) so overlapping shadows never double-darken; the single composite in
    renderFrame applies SHADOW_ALPHA once, faded by (1 − ns) so dusk melts the
    shadows linearly and deep night skips the branch entirely — the ns==1
-   frame and the G1/G2 night layer stay byte-identical to a shadowless build. */
-const shadowLayer = { cv: null, g: null, key: "" };
+   frame and the G1/G2 night layer stay byte-identical to a shadowless build.
+
+   PAN APRON (C5): the quads live in WORLD space, so a camera pan never
+   changes their content — only where the viewport window sits. The layer is
+   therefore rastered SHADOW_MARGIN px larger than the viewport on every
+   side, anchored at the camera it was built for (camX/camY), and the cache
+   key excludes cam.x/cam.y: a pan whose screen delta is a whole number of
+   device pixels inside the apron is serviced by compositing the SAME raster
+   at an integer offset — zero raster work per pan frame. Only content
+   changes (tick, devRev, season, zoom, rotation, resize), fractional-pixel
+   deltas, or pans that leave the apron trigger a full re-anchor rebuild.
+   An integer offset reproduces a fresh rebuild exactly: the world transform
+   differs by a pure integer screen translation, so every pixel's rasterized
+   coverage — AA edges included — is byte-identical. */
+const SHADOW_MARGIN = 128;
+const shadowLayer = { cv: null, g: null, key: "",
+                      camX: NaN, camY: NaN,   // camera the raster is anchored at
+                      viewX: NaN, viewY: NaN, // camera the offset was computed for
+                      offX: 0, offY: 0 };     // device-px composite offset
 
 // lazy cached effective art height (exact drawChar idiom: derive once, cache
 // on the sprite record). One-time getImageData scan of spr.c for the topmost
@@ -422,26 +446,58 @@ function castsShadow(city, i, ov) {
          isMega(ov);
 }
 
-// mirrors buildTerrainLayer exactly: reuse the offscreen canvas, set the
-// world transform, then ONE linear scan of the map (order-independent —
-// opaque fills union). Position comes from backCorner(), the SAME screen-back
-// corner the painter loop and smoke plumes draw from, so shadows stay welded
-// to their sprite at every cam.r. Runs only on a cache-key move (pan/zoom,
-// sim tick, build/doze via devRev, season, rotation) — never per frame.
+// footprint diamond with its S and W corners displaced by D = (−2δ, +δ)
+function fillShadowQuad(g, awx, awy, size, d) {
+  g.beginPath();
+  g.moveTo(awx, awy - HH);                                       // N
+  g.lineTo(awx + size * HW, awy + (size - 1) * HH);              // E
+  g.lineTo(awx - 2 * d, awy + (2 * size - 1) * HH + d);          // S'
+  g.lineTo(awx - size * HW - 2 * d, awy + (size - 1) * HH + d);  // W'
+  g.closePath();
+  g.fill();
+}
+
+// mirrors buildTerrainLayer's idiom: reuse the offscreen canvas, set the
+// world transform (anchored at the CURRENT camera, apron included), then ONE
+// linear scan of the map (order-independent — opaque fills union). Position
+// comes from backCorner(), the SAME screen-back corner the painter loop and
+// smoke plumes draw from, so shadows stay welded to their sprite at every
+// cam.r. A full raster runs only on a cache-key move (sim tick, build/doze
+// via devRev, season, zoom, rotation, resize) or when a pan leaves the
+// apron / lands on a fractional pixel; a plain integer-pixel pan just
+// updates the composite offset — zero raster work.
 function buildShadowLayer(city, minWX, maxWX, minWY, maxWY, key) {
   const L = shadowLayer;
-  if (!L.cv || L.cv.width !== cvs.width || L.cv.height !== cvs.height) {
+  const Lw = cvs.width + 2 * SHADOW_MARGIN, Lh = cvs.height + 2 * SHADOW_MARGIN;
+  if (L.cv && L.cv.width === Lw && L.cv.height === Lh && L.key === key) {
+    // same content, camera slid: reuse the raster while the slide is a whole
+    // number of device pixels and the viewport stays inside the apron
+    const dx = (L.camX - cam.x) * cam.z, dy = (L.camY - cam.y) * cam.z;
+    const rdx = Math.round(dx), rdy = Math.round(dy);
+    if (Math.abs(dx - rdx) < 1e-7 && Math.abs(dy - rdy) < 1e-7 &&
+        Math.abs(rdx) <= SHADOW_MARGIN && Math.abs(rdy) <= SHADOW_MARGIN) {
+      L.offX = rdx; L.offY = rdy;
+      L.viewX = cam.x; L.viewY = cam.y;
+      return;
+    }
+  }
+  if (!L.cv || L.cv.width !== Lw || L.cv.height !== Lh) {
     L.cv = document.createElement("canvas");
-    L.cv.width = cvs.width; L.cv.height = cvs.height;
+    L.cv.width = Lw; L.cv.height = Lh;
     L.g = L.cv.getContext("2d");
   }
   const g = L.g;
   g.setTransform(1, 0, 0, 1, 0, 0);
-  g.clearRect(0, 0, L.cv.width, L.cv.height);
-  g.translate(cvs.width / 2, cvs.height / 2);
+  g.clearRect(0, 0, Lw, Lh);
+  g.translate(Lw / 2, Lh / 2);
   g.scale(cam.z, cam.z);
   g.translate(-cam.x, -cam.y);
   g.fillStyle = "#000";
+  // world-space bounds of the layer canvas (apron included), AA-padded —
+  // quads are culled by their exact bbox so nothing that could touch the
+  // raster is ever skipped, at any footprint size
+  const wl = -Lw / 2 / cam.z + cam.x - 2, wr = Lw / 2 / cam.z + cam.x + 2;
+  const wt = -Lh / 2 / cam.z + cam.y - 2, wb = Lh / 2 / cam.z + cam.y + 2;
   const N = MAP * MAP;
   for (let i = 0; i < N; i++) {
     const ov = city.over[i];
@@ -455,24 +511,19 @@ function buildShadowLayer(city, minWX, maxWX, minWY, maxWY, key) {
       spr = SPR.station; // M25 depot on the rail plane (1x1)
     }
     if (!spr) continue;
+    const hs = sprShadowH(spr);
+    if (hs < 1) continue; // art at or below the tile's N corner casts nothing
     const ax = i % MAP, ay = (i / MAP) | 0;
     const b = backCorner(ax, ay, size);
     const awx = worldX(b.x, b.y), awy = worldY(b.x, b.y);
-    // shadows reach only −x/+y, so casters need extra margin at +x/−y only
-    if (awx < minWX || awx > maxWX + SHADOW_NE_PAD ||
-        awy < minWY - SHADOW_NE_PAD || awy > maxWY) continue;
-    const d = SHADOW_LEN * sprShadowH(spr);
-    if (d < 1) continue; // flat art casts nothing
-    // footprint diamond with its S and W corners displaced by D = (−2δ, +δ)
-    g.beginPath();
-    g.moveTo(awx, awy - HH);                                       // N
-    g.lineTo(awx + size * HW, awy + (size - 1) * HH);              // E
-    g.lineTo(awx - 2 * d, awy + (2 * size - 1) * HH + d);          // S'
-    g.lineTo(awx - size * HW - 2 * d, awy + (size - 1) * HH + d);  // W'
-    g.closePath();
-    g.fill();
+    // low art still throws a short shadow (SHADOW_MIN_LEN floor)
+    const d = Math.max(SHADOW_MIN_LEN, SHADOW_LEN * hs);
+    if (awx + size * HW < wl || awx - size * HW - 2 * d > wr ||
+        awy + (2 * size - 1) * HH + d < wt || awy - HH > wb) continue;
+    fillShadowQuad(g, awx, awy, size, d);
   }
-  L.key = key;
+  L.key = key; L.camX = cam.x; L.camY = cam.y;
+  L.viewX = cam.x; L.viewY = cam.y; L.offX = 0; L.offY = 0;
 }
 
 function renderFrame(city, uiState, clearBG) {
@@ -521,13 +572,17 @@ function renderFrame(city, uiState, clearBG) {
   // season pick changes the art heights the quads derive from.
   const shA = SHADOW_ALPHA * (1 - ns);
   if (shA > 0.01) {
-    const sKey = `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},` +
+    // cam.x/cam.y are NOT in the key: the quads are world-space, so a pure
+    // pan reuses the raster via the scroll fast-path inside buildShadowLayer
+    const sKey = `${cam.z},${cam.r},${cvs.width},${cvs.height},` +
       `${city.devRev},${city.tickCount},${city.seed},${MAP},${seasonOf(city.month)},` +
       `${(typeof UI !== "undefined" && UI.prefs && UI.prefs.billboard) ? 1 : 0}`;
-    if (shadowLayer.key !== sKey)
+    if (shadowLayer.key !== sKey ||
+        shadowLayer.viewX !== cam.x || shadowLayer.viewY !== cam.y)
       buildShadowLayer(city, minWX, maxWX, minWY, maxWY, sKey);
     ctx.globalAlpha = shA;
-    ctx.drawImage(shadowLayer.cv, 0, 0);
+    ctx.drawImage(shadowLayer.cv,
+      shadowLayer.offX - SHADOW_MARGIN, shadowLayer.offY - SHADOW_MARGIN);
     ctx.globalAlpha = 1;
   }
 

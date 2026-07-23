@@ -6,9 +6,8 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ8 — Building cast-shadows & aliveness guard** *(graphics roadmap
-  8/11)* — running via the milestone workflow. Gates in
-  `docs/graphics-roadmap.json`.
+- [ ] **GQ9 — Shorelines & suspension bridges** *(graphics roadmap 9/11)* —
+  running via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
 
@@ -35,10 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ8 — Building cast-shadows & aliveness guard** *(buildings)*: directional
-  drop-shadows onto neighbor tiles + a regression guard on motion. **Gates:**
-  shadow pixels sun-opposite · direction matches tree/car shadows · traffic/smoke/
-  water/train ≥ HEAD baseline · shadows day-only (no night bleed) · deterministic.
 - [ ] **GQ9 — Shorelines & suspension bridges** *(terrain-water + transport)*:
   beveled beach/foam ramps on every water border + auto-spanning bridges over
   flat water gaps. **Gates:** no hard 1px shoreline · foam/wet-sand band · bridge
@@ -72,6 +67,24 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ8 — Building cast-shadows & aliveness guard** *(graphics roadmap
+  8/11)*: every building now casts a **directional drop-shadow toward
+  screen-SW** (sun-opposite, consistent with the existing tree/car shadows) —
+  one swept-hull quad per caster on a cached screen-space layer composited over
+  terrain and under the painter loop, height-scaled (a c3 tower reaches ~2
+  tiles; a minimum length keeps lvl-1 cottages visible), correct at all four
+  rotations, and **day-only by construction**: the deep-night frame and the
+  G1/G2 night layer are byte-identical to HEAD, with dusk fading on the night
+  lerp. **Aliveness is now a guarded target** via `alivenessStats()` (cars,
+  smoke, water shimmer measured = HEAD baseline; train slot N/A until a train
+  ships). This milestone earned its panel: **all three lenses initially
+  refuted** — invisible shadows on low buildings (shH=1 cottages) and a real
+  **1.33× pan-perf regression** (layer rebuilt every pan frame) — both fixed
+  (SHADOW_MIN_LEN=10; a world-space pan apron making integer pans a pure
+  composite offset, **0.977× pan ratio**, 0.0ms rebuild during pans) and the
+  full gate suite re-measured green vs baseline `19f72b6`: save byte-identical,
+  picking 172/172, deterministic cross-boot, zero errors.
 
 - [x] **GQ7 — Road markings & asphalt** *(graphics roadmap 7/11)*: roads
   darkened to true asphalt (`#3e3f46`, median luminance 90 vs pavement ground

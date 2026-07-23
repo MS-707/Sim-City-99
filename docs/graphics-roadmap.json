@@ -161,7 +161,8 @@
         "Shadows are day-only and do not bleed into the night glow layer.",
         "Deterministic; zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: 6 gates certified vs baseline 19f72b6 after a real panel catch-and-fix cycle (all 3 lenses initially refuted). Directional SW cast-shadows: single swept-hull quad per caster on a cached screen-space layer (over terrain, under painter loop), height-scaled (c3 delta 33px, min-length 10px so lvl-1 cottages/pumps/watertowers still cast — the panel caught their shH=1 invisible shadows), sun-consistent with tree/car shadows, correct at all 4 rotations (SW drop 22-25 lum, NE contamination 0.00). Day-only by construction: deep-night game canvas AND G1/G2 nightLayer byte-identical to HEAD; dusk fades at the night lerp (ratio 0.642). Panel-caught 1.33x pan-perf regression fixed with a world-space pan apron (layer rastered 128px oversize, integer-pan = composite offset only): pan ratio 0.977-0.982, buildShadowLayer 0.0ms median during pans. Aliveness guard shipped (alivenessStats: cars 205 = HEAD, smoke 200 = HEAD, water shimmer 1277 px = HEAD; train slot N/A until a train ships). Deterministic (byte-identical cross-boot, 0 Math.random in bakes); save byte-identical; picking 172/172; zero errors."
     },
     {
       "id": "GQ9",

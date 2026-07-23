@@ -114,6 +114,17 @@ const NIGHT_LIGHT_ALPHA = 0.7;    // G1: clamp on the additive night-light pass 
                                   // baked glows never blit at full alpha
 const NIGHT_MAX_DRAWS = 700;      // per-frame cap on night-light sprite draws
 
+/* ---- building cast-shadows (GQ8) ---- */
+const SHADOW_ALPHA = 0.20;        // composite alpha of the whole shadow layer —
+                                  // family-consistent with the G13 tree grounding
+                                  // ellipse (0.16) and the car ground quad (0.5)
+const SHADOW_LEN = 0.35;          // δ = SHADOW_LEN * effective art height (px);
+                                  // screen reach per building = (−2δ, +δ), i.e.
+                                  // a c3 tower (~90px) throws ~2 tiles screen-SW
+const SHADOW_NE_PAD = 176;        // extra cull margin toward screen-NE (+x, −y):
+                                  // off-viewport buildings up-right of the view
+                                  // still cast their shadow INTO it
+
 /* ---- fire visuals (G3) ---- */
 const FIRE_GLOW_CORE = 0.35;      // cap on the additive night fire-bloom core
                                   // alpha — per-glow alpha further scales by
@@ -362,6 +373,108 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
   L.key = key;
 }
 
+/* ---- building cast-shadow layer (GQ8) ----
+   The screen-welded sun sits NE (the SW prism face is the darkest bake), so
+   every shadow falls along screen-SW — the projection of view +v, per-unit
+   delta (−HW, +HH) = (−2, +1)·16px. The iso footprint diamond's NW and SE
+   edges are PARALLEL to that vector, so the swept hull of the diamond along
+   D = (−2δ, +δ) is exactly the diamond with its S and W corners displaced by
+   D: one 4-point polygon per building, no sheared-silhouette drawImage, no
+   per-frame allocation. Square s×s footprints are rotation-invariant in view
+   space, so the same formula holds at all 4 cam.r with zero per-rotation
+   code. Quads fill OPAQUE black into a cached screen-space layer (terrLayer
+   idiom) so overlapping shadows never double-darken; the single composite in
+   renderFrame applies SHADOW_ALPHA once, faded by (1 − ns) so dusk melts the
+   shadows linearly and deep night skips the branch entirely — the ns==1
+   frame and the G1/G2 night layer stay byte-identical to a shadowless build. */
+const shadowLayer = { cv: null, g: null, key: "" };
+
+// lazy cached effective art height (exact drawChar idiom: derive once, cache
+// on the sprite record). One-time getImageData scan of spr.c for the topmost
+// opaque row; subtracting HH removes the N-corner ground offset so flat art
+// (roads, pipes) degenerates to ~0. Pure pixel read, zero RNG, runs once per
+// unique sprite canvas — winter/facing variants are distinct records and
+// cache independently.
+function sprShadowH(spr) {
+  if (spr.shH === undefined) {
+    const w = spr.c.width, h = spr.c.height;
+    const px = spr.c.getContext("2d").getImageData(0, 0, w, h).data;
+    let top = h;
+    outer: for (let yy = 0; yy < h; yy++)
+      for (let xx = 0; xx < w; xx++)
+        if (px[(yy * w + xx) * 4 + 3] > 0) { top = yy; break outer; }
+    spr.shH = Math.max(0, spr.oy - top - HH);
+  }
+  return spr.shH;
+}
+
+// which over[] carriers throw a cast shadow: developed zones, the tall civic
+// and utility structures, and the M28 mega-structures. Explicitly EXCLUDED:
+// road/wire/crossing/pipe (flat), PARK and RUBBLE (low clutter), undeveloped
+// zone markers, and forest / GQ4 street trees — those keep their existing
+// baked G13/GQ4 grounding ellipses (direction-consistent, not replaced).
+function castsShadow(city, i, ov) {
+  if (ov >= OV.ZR && ov <= OV.ZI) return city.lvl[i] > 0;
+  return ov === OV.POLICE || ov === OV.FIRESTA || ov === OV.SCHOOL ||
+         ov === OV.HOSPITAL || ov === OV.COAL || ov === OV.SOLAR ||
+         ov === OV.GAS || ov === OV.WIND || ov === OV.MAYOR ||
+         ov === OV.STADIUM || ov === OV.WATERTOWER || ov === OV.PUMP ||
+         isMega(ov);
+}
+
+// mirrors buildTerrainLayer exactly: reuse the offscreen canvas, set the
+// world transform, then ONE linear scan of the map (order-independent —
+// opaque fills union). Position comes from backCorner(), the SAME screen-back
+// corner the painter loop and smoke plumes draw from, so shadows stay welded
+// to their sprite at every cam.r. Runs only on a cache-key move (pan/zoom,
+// sim tick, build/doze via devRev, season, rotation) — never per frame.
+function buildShadowLayer(city, minWX, maxWX, minWY, maxWY, key) {
+  const L = shadowLayer;
+  if (!L.cv || L.cv.width !== cvs.width || L.cv.height !== cvs.height) {
+    L.cv = document.createElement("canvas");
+    L.cv.width = cvs.width; L.cv.height = cvs.height;
+    L.g = L.cv.getContext("2d");
+  }
+  const g = L.g;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, L.cv.width, L.cv.height);
+  g.translate(cvs.width / 2, cvs.height / 2);
+  g.scale(cam.z, cam.z);
+  g.translate(-cam.x, -cam.y);
+  g.fillStyle = "#000";
+  const N = MAP * MAP;
+  for (let i = 0; i < N; i++) {
+    const ov = city.over[i];
+    let spr = null, size = 1;
+    if (castsShadow(city, i, ov)) {
+      // anchor gate: multi-tile footprints cast ONE shadow, from the anchor
+      if (city.anc[i] !== -1 && city.anc[i] !== i) continue;
+      size = sizeOf(ov);
+      spr = spriteFor(city, i);
+    } else if (city.rail[i] === RL.STATION) {
+      spr = SPR.station; // M25 depot on the rail plane (1x1)
+    }
+    if (!spr) continue;
+    const ax = i % MAP, ay = (i / MAP) | 0;
+    const b = backCorner(ax, ay, size);
+    const awx = worldX(b.x, b.y), awy = worldY(b.x, b.y);
+    // shadows reach only −x/+y, so casters need extra margin at +x/−y only
+    if (awx < minWX || awx > maxWX + SHADOW_NE_PAD ||
+        awy < minWY - SHADOW_NE_PAD || awy > maxWY) continue;
+    const d = SHADOW_LEN * sprShadowH(spr);
+    if (d < 1) continue; // flat art casts nothing
+    // footprint diamond with its S and W corners displaced by D = (−2δ, +δ)
+    g.beginPath();
+    g.moveTo(awx, awy - HH);                                       // N
+    g.lineTo(awx + size * HW, awy + (size - 1) * HH);              // E
+    g.lineTo(awx - 2 * d, awy + (2 * size - 1) * HH + d);          // S'
+    g.lineTo(awx - size * HW - 2 * d, awy + (size - 1) * HH + d);  // W'
+    g.closePath();
+    g.fill();
+  }
+  L.key = key;
+}
+
 function renderFrame(city, uiState, clearBG) {
   frame++;
   const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
@@ -396,6 +509,27 @@ function renderFrame(city, uiState, clearBG) {
   if (terrLayer.key !== tKey)
     buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, tKey);
   ctx.drawImage(terrLayer.cv, 0, 0);
+
+  // GQ8: building cast-shadows — one cached screen-space composite OVER the
+  // flat terrain, UNDER everything the painter loop draws. Faded by (1 − ns):
+  // at deep night the branch is skipped entirely (no rebuild, no draw, no
+  // RNG), so the ns==1 frame stays byte-identical to a shadowless build.
+  // tickCount is in the key because organic zone growth (lvl 0→3) does NOT
+  // bump devRev — the same discipline the nightLayer key uses; rebuild cost
+  // is bounded to once per sim tick plus camera moves, the terrLayer class.
+  // Billboard pref + season + cam.r are keyed because spriteFor's facing/
+  // season pick changes the art heights the quads derive from.
+  const shA = SHADOW_ALPHA * (1 - ns);
+  if (shA > 0.01) {
+    const sKey = `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},` +
+      `${city.devRev},${city.tickCount},${city.seed},${MAP},${seasonOf(city.month)},` +
+      `${(typeof UI !== "undefined" && UI.prefs && UI.prefs.billboard) ? 1 : 0}`;
+    if (shadowLayer.key !== sKey)
+      buildShadowLayer(city, minWX, maxWX, minWY, maxWY, sKey);
+    ctx.globalAlpha = shA;
+    ctx.drawImage(shadowLayer.cv, 0, 0);
+    ctx.globalAlpha = 1;
+  }
 
   ctx.save();
   worldTransform();
@@ -1128,6 +1262,17 @@ function updateChopper(city) {
   ctx.drawImage(SPR.chop.c, wx - SPR.chop.ox, by - SPR.chop.oy);
   const rot = SPR.chopRotor[(frame / 3 | 0) % 3];
   ctx.drawImage(rot.c, wx - rot.ox, by - 15 - rot.oy);
+}
+
+// GQ8: aliveness instrumentation — an O(1) snapshot of every ambient-motion
+// pool for the regression harness (traffic, smoke, night car lights, the
+// chopper, animated water). Globally reachable as a bare name; never called
+// per frame by the renderer itself. (No animated train exists yet — the rail
+// bakes are static track — so there is deliberately no train slot to report.)
+function alivenessStats() {
+  return { cars: cars.length, carCap: carCap(), smoke: smoke.length,
+           smokeMax: SMOKE_MAX, carLights: carLightQ.length / 4,
+           chopper: !!chopper, waterFrames: WATER_FRAMES };
 }
 
 function drawDisaster(city) {

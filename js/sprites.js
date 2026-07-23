@@ -1411,24 +1411,28 @@ function buildSprites() {
     // sprite per mask, season-tinted via P.shoalDeep.
     fam.shoal = [];
     for (let m = 0; m < 16; m++) {
-      fam.shoal.push(mkSprite(1, 1, 4, (g, ox, oy) => {
-        if (!m) return;
+      // hand-rolled padded sprite (not mkSprite): the band must NOT be
+      // clipped to the tile diamond — the diamond's acute corners amputate
+      // any normal-offset band into a mid-edge blob (per-tile "fangs").
+      // Unclipped butt-capped strips from collinear shore edges abut exactly
+      // (a stroke is a thin parallelogram: coverage is by edge-projection),
+      // so the band is seamless along a run; it is drawn in the terrain
+      // layer's SECOND sweep, after every tile fill, so the spill past the
+      // diamond can never be overpainted by a later neighbor's water tile.
+      const c = document.createElement("canvas");
+      c.width = 104; c.height = 76;
+      const g = c.getContext("2d");
+      const ox = 52, oy = 38;
+      if (m) {
         const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
         const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
-        diamondPath(g, ox, oy);
-        g.save(); g.clip();
-        // BUTT caps and EXACT endpoints: a stroke is a thin parallelogram, so
-        // consecutive collinear shore edges' bands abut along the shared
-        // corner plane with zero overlap and zero gap — round caps or
-        // past-corner extensions double-stack at every tile seam and read as
-        // dark "fangs" along the waterline (first-cut bug).
         g.lineCap = "butt";
         g.strokeStyle = P.shoalDeep;
         // parallel full-length strokes at increasing TRUE-perpendicular depth
-        // (screen-space normal, not the center lerp — the diamond is squashed,
-        // so center-lerp distances are not perpendicular distances). Alphas
-        // accumulate multiplicatively into a smooth ramp that levels off deep,
-        // then tapers back toward open water so the band has no hard outer rim.
+        // (screen-space normal — the diamond is squashed, so center-lerp
+        // distances are not perpendicular distances). Alphas accumulate
+        // multiplicatively into a smooth ramp that levels off deep, then
+        // tapers back toward open water so the band has no hard outer rim.
         const STEPS = [
           [4.0, 2.4, 0.08], [5.4, 2.4, 0.11], [6.8, 2.5, 0.15],
           [8.2, 2.6, 0.18], [9.6, 3.0, 0.24], [11.0, 3.0, 0.32],
@@ -1452,8 +1456,8 @@ function buildSprites() {
           }
         }
         g.globalAlpha = 1;
-        g.restore();
-      }));
+      }
+      fam.shoal.push({ c, ox, oy });
     }
 
     // GQ9 fix: LAND-side-only wrack/berm seam — the dark damp line where the

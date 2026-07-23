@@ -332,14 +332,7 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
         const sm = shoreMask(city, i); // sand / rime ice on land-facing edges
         // G13: per-tile shore-width variant by the same scrambled hash used for
         // grass/water (cache-safe, deterministic) — coasts wander in width
-        if (sm) {
-          // GQ9 fix: depth falloff UNDER the shore bands — water-tile draw
-          // only (the land-side beachMask draw below never gets it), so the
-          // near-shore water plateau separates from every land material
-          const sl = S.shoal[rot4(sm, cam.r)];
-          if (!window.__noShoal) g.drawImage(sl.c, wx - sl.ox, wy - sl.oy);
-          const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(sm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy);
-        }
+        if (sm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(sm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
       } else {
         // G5: variant by scrambled (x, y) hash — open meadows mottle
         // organically instead of alternating with varnt's seeded stripes.
@@ -378,7 +371,15 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
       const wx = worldX(x, y), wy = worldY(x, y);
       if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
       const i = y * MAP + x;
-      if (city.terr[i] === TERR.WATER) continue;
+      if (city.terr[i] === TERR.WATER) {
+        // GQ9 fix: near-shore depth falloff — water-tile draw only (the
+        // land side never gets it, so beaches stay bright). Drawn in THIS
+        // sweep, unclipped past the diamond, so the strips of consecutive
+        // shore tiles join seamlessly and no later tile fill can shave them.
+        const sm = shoreMask(city, i);
+        if (sm) { const sl = S.shoal[rot4(sm, cam.r)]; g.drawImage(sl.c, wx - sl.ox, wy - sl.oy); }
+        continue;
+      }
       const em = terrEdgeMask(city, i);
       if (em) { const eg = SPR.terrEdge[rot4(em, cam.r)]; g.drawImage(eg.c, wx - eg.ox, wy - eg.oy); }
       // GQ2: stippled feather where the material quilt changes between two

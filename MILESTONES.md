@@ -6,7 +6,7 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ9 — Shorelines & suspension bridges** *(graphics roadmap 9/11)* —
+- [ ] **GQ10 — Special buildings gap-fill** *(graphics roadmap 10/11)* —
   running via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
@@ -34,11 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ9 — Shorelines & suspension bridges** *(terrain-water + transport)*:
-  beveled beach/foam ramps on every water border + auto-spanning bridges over
-  flat water gaps. **Gates:** no hard 1px shoreline · foam/wet-sand band · bridge
-  towers+cable+hangers+deck on road/rail-over-water · rotation-correct + picking
-  intact · save unchanged.
 - [ ] **GQ10 — Special buildings gap-fill** *(specials)*: surface/tune M28
   landmarks, then author airport group + a 2nd power plant + a seaport/marina.
   **Gates:** ≥8 special silhouettes (incl. hero readable at 0.3 zoom) · airport
@@ -67,6 +62,22 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ9 — Shorelines & suspension bridges** *(graphics roadmap 9/11)*:
+  coastlines got their bevel — every land-water border now ramps through
+  underwater shoal → dry sand → **wet-sand band → foam core + halo with
+  scalloped surf** (profile: median 8 intermediate pixels, hard-seam metric
+  0.41 vs ~1.0 for a cliff; the panel-cycle fix added the shoal falloff that
+  killed a plateau collapse against dirt shores) — and roads/rails crossing
+  water now render a **procedural suspension bridge**: tapered international-
+  orange towers at the banks, closed-form quadratic main cables that join
+  exactly across tile seams (12/12 segments at all four rotations), hangers at
+  even global stations (spacing CV 0.017), railed deck fascia and a translucent
+  water shadow that keeps the shimmer visible. Cars drive the spans (5,726
+  crossing hits), picking stays exact 8/8 at every rotation, rail bridges work,
+  the GQ8 shadow layer is zero-diff, and noon **and** deep-night frames are
+  byte-identical to baseline `8201e50` away from the new art. Save format
+  unchanged (visual-only); deterministic; zero errors.
 
 - [x] **GQ8 — Building cast-shadows & aliveness guard** *(graphics roadmap
   8/11)*: every building now casts a **directional drop-shadow toward

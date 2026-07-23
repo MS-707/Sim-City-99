@@ -179,7 +179,8 @@
         "Bridge + shoreline render correctly across all 4 rotations; picking/traffic through the bridge intact.",
         "Save format unchanged (visual-only); zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: certified vs baseline 8201e50 after a catch-and-fix cycle. Shorelines: beveled beach ramp (underwater shoal falloff + dry sand + wet-sand band + foam core/halo with scallop surf + corner wedges) — profile median 8 intermediate px (min 3, was 0 at dirt-adjacent shores pre-fix), transition sharpness B 0.41 (hard seam ~1.0), foam band 24/24 profiles brighter than land+water+dry-sand. Bridges: road/rail over TERR.WATER runs render tapered international-orange towers at the banks (640/208 px vs HEAD 3/0), closed-form quadratic main cables that join exactly across tile seams (12/12 segments at ALL 4 rotations), hangers at even global stations (gap CV 0.017), railed deck fascia + translucent water shadow (band delta 23 lum with shimmer preserved); L=1 degrades gracefully. Picking exact 8/8 at all rotations; cars cross bridges (5726 hits); rail bridges too (tier-gated); GQ8 shadow layer zero-diff; noon AND deep-night frames byte-identical to HEAD away from new art; save format unchanged; deterministic; zero errors. Panel 0 refutes post-fix (low notes: L=2 droop aesthetics, single tower pair on very long spans, cable-over-railing at max zoom)."
     },
     {
       "id": "GQ10",

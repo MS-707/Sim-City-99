@@ -5,9 +5,15 @@ name: Deploy to GitHub Pages
 # just the repo's index.html + js/ + css/ (zero external requests), served
 # straight from this branch via the GitHub Actions Pages pipeline.
 
+# NOTE: manual-trigger only for now. Pages enablement is a repo-owner action
+# (Settings → change visibility to Public, then Settings → Pages → Source =
+# "GitHub Actions"). Until that's done, a push-triggered run fails in seconds
+# with "Resource not accessible by integration" and emails a failure alert on
+# every push. Once Pages is enabled: run this workflow once from the Actions
+# tab, and restore the push trigger for auto-deploys:
+#   push:
+#     branches: ["claude/simcity-2000-aaa-1997-ofveog"]
 on:
-  push:
-    branches: ["claude/simcity-2000-aaa-1997-ofveog"]
   workflow_dispatch:
 
 permissions:

@@ -819,6 +819,28 @@ function buildSprites() {
   // side stream — the shared R()/ART_RNG call count and order are untouched,
   // so every downstream building/window/roof bake stays byte-identical.
   const groundRng = mulberry32(0x6D01);
+  // GQ4 HARD RULE (same as GQ2): the street-tree bakes consume ONLY this side
+  // stream — zero R()/ART_RNG/shoreRng/forestRng/groundRng calls — so every
+  // existing bake (buildings, windows, roofs, terrain) stays byte-identical.
+  const streetRng = mulberry32(0x57EE7);
+  // GQ4 panel fix: roll the 6 street-tree variant parameters ONCE, up front,
+  // so a given variant is the SAME tree (size/silhouette/tint) in all four
+  // seasonal bakes — only the foliage palette changes with the season
+  // (G12/G14), never the tree itself. Sizes 5.4-8.4px stay well below the
+  // 10-14px forest canopies (groomed parkway scale) so canopies no longer
+  // reach the centre-line dashes, and the hue centres are pinned one per
+  // autumn leaf-set band (gold / orange / red at v%3 = 0/1/2, jitter +-0.15
+  // stays inside the +-0.27 band edges) so an autumn street shows the same
+  // mixed-colour canopy row as the forests instead of a monotone red run.
+  const STREET_TREE_VAR = [];
+  for (let v = 0; v < 6; v++) {
+    STREET_TREE_VAR.push({
+      s: 5.4 + (v % 3) * 1.1 + streetRng() * 0.8,
+      sil: v < 4 ? 0 : 2,                       // round / occasional wide oak
+      hue: [0.55, -0.05, -0.55][v % 3] + (streetRng() * 0.3 - 0.15),
+      tint: 0.9 + streetRng() * 0.25,
+    });
+  }
 
   // ---- terrain families, baked once per season (M12) ----
   // The same draw code runs for each of the four palettes; renderFrame picks
@@ -1147,6 +1169,33 @@ function buildSprites() {
         }));
       }
       fam.forest.push(tier);
+    }
+
+    // GQ4: street trees — 6 groomed parkway variants per season, smaller than
+    // the 10-14px forest canopies so they read as tended verge planting.
+    // Mostly round crowns with the occasional wide oak (the conifer stays a
+    // forest signature). Parameters come from STREET_TREE_VAR (rolled once
+    // from the dedicated streetRng before the season loop) so the SAME tree
+    // re-bakes in each season's palette; drawTree itself calls no RNG, so
+    // seasons (winter snowCap, autumn leafSets via P) come free and every
+    // other bake stays byte-identical. The trunk base sits exactly at the
+    // sprite anchor (no +2 shift) so the render-side worldX/worldY verge
+    // point IS the trunk base — the tree stands where the placement says.
+    fam.streetTree = [];
+    for (let v = 0; v < 6; v++) {
+      const q = STREET_TREE_VAR[v];
+      // Tight bake (panel perf headroom): the largest street tree spans
+      // ~14px wide by ~15px above its base, so baking on the full 64x56
+      // mkSprite tile canvas made every per-frame drawImage blit ~9x more
+      // pixels than the tree covers. A 20x22 canvas with the trunk base
+      // anchored at (10, 17) holds every variant (canopy top 1.75*s <= 14.7
+      // above base, oak halfwidth 0.78*s <= 6.6, shadow 0.23*s <= 2 below)
+      // with AA margin. Same { c, ox, oy } shape mkSprite returns; SNOWSPEC
+      // is not involved (drawTree paints its snow cap directly from P).
+      const c = document.createElement("canvas");
+      c.width = 20; c.height = 22;
+      drawTree(c.getContext("2d"), 10, 17, q.s, q.tint, P, q.sil, q.hue, true);
+      fam.streetTree.push({ c, ox: 10, oy: 17 });
     }
 
     SPR.season[sk] = fam;
@@ -2595,6 +2644,42 @@ function forestSprite(city, i) {
   // decorrelate; the (x+y) flip in the render pass then guarantees adjacent
   // forest tiles never draw an identical arrangement. Pure in (x, y).
   return fam[terrHash(x, y) % fam.length];
+}
+
+// GQ4: street trees along straight road verges — the SINGLE source of truth
+// for placement. Pure in (city.seed, over[], terr[], fire[], LOGICAL x, y):
+// boot-stable, rotation-stable (M32), save/load-stable (seed is serialized,
+// v11), and it reacts to road build/doze automatically because roadMask is an
+// input. Returns null (no tree) or { dx, dy, variant }: a fractional verge
+// offset inside the road tile's own diamond (|off| < 0.5, so the tree
+// functionally occupies nothing — no over[]/terr[]/rail[] writes, no sim
+// state, no save-format change, no click-picking change) plus the baked
+// fam.streetTree variant index. Straight segments only (mask 5 = N-S,
+// 10 = E-W); intersections, corners and dead-ends excluded by construction.
+const ST_COVER = 0.85;
+// GQ4 panel fix: the road bake's asphalt spans perpendicular offsets
+// -0.36..+0.36 (AW0/AW1 = 0.14/0.86), so the trunk must stand BEYOND 0.36 to
+// read as planted on the grass verge, yet under 0.5 to stay inside the road
+// tile's own diamond. 0.44 is the centre of that verge strip — trunk and
+// grounding shadow land on the verge, clear of the curb line.
+const ST_OFF = 0.44;
+// NOTE (panel, low): the fresh result object per visible straight-road tile
+// (~83/frame at z=1) is deliberately KEPT — it is short-lived nursery garbage
+// with no measured cost, and a reused scratch object would alias in every
+// caller that holds the result across another streetTreeInfo/renderFrame
+// call (the verification harnesses do exactly that).
+function streetTreeInfo(city, i) {
+  const ov = city.over[i];
+  if (ov !== OV.ROAD && ov !== OV.WIREROAD) return null;
+  if (city.terr[i] === TERR.WATER) return null;   // never on a water-bridging road span
+  if (city.fire[i]) return null;                   // burning tile shows fire, not a tidy tree
+  const m = roadMask(city, i);
+  if (m !== 5 && m !== 10) return null;            // straight N-S / E-W only
+  const x = i % MAP, y = (i / MAP) | 0;
+  if (hash01(city.seed ^ 0x57EE, x, y) >= ST_COVER) return null; // ~85% of straight tiles
+  const h2 = hash01(city.seed ^ 0x7A31, x, y);
+  const side = h2 < 0.5 ? -ST_OFF : ST_OFF;        // verge side, deterministic per tile
+  return { dx: m === 5 ? side : 0, dy: m === 10 ? side : 0, variant: (h2 * 4096 | 0) % 6 };
 }
 
 function wireMask(city, i) {

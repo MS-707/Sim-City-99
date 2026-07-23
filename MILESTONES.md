@@ -6,7 +6,7 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GQ4 — Vegetation & street trees** *(graphics roadmap 4/11)* — running
+- [ ] **GQ5 — Building silhouette variety** *(graphics roadmap 5/11)* — running
   via the milestone workflow. Gates in `docs/graphics-roadmap.json`.
 
 ## Open
@@ -34,9 +34,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > advances. Clean-room throughout — recreate the look procedurally, never copy
 > Maxis art. Gates are summarized here; the authoritative list is the roadmap JSON.
 
-- [ ] **GQ4 — Vegetation & street trees** *(groundscape)*: dense tree stands +
-  street trees along ≥70% of straight roads (placement-only). **Gates:** ≥1
-  multi-tile stand · ≥70% road-edge coverage · legal placement · perf within ~20% · deterministic.
 - [ ] **GQ5 — Building silhouette variety** *(buildings)*: 3–4 non-prism massings
   + a 6+ rooftop prop library. **Gates:** ≥12 grayscale-distinct silhouettes ·
   levels 1–5 distinct · ≥6 seeded roof props · anchors unchanged (painter/picking
@@ -86,6 +83,25 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GQ4 — Vegetation & street trees** *(graphics roadmap 4/11)*: straight
+  road segments now carry **groomed street trees** — a pure deterministic
+  function of `(seed, x, y)` + `roadMask` (no sim/save state; reacts to
+  build/doze automatically), covering **89%** of straight tiles (gate 70%),
+  drawn in the painter loop through the rotation-aware fractional projection so
+  the verge lands correctly at every camera rotation. Six per-variant trees
+  (size/silhouette/hue jitter from a dedicated `streetRng` stream) baked
+  per-season on tight 20×22 canvases. The **panel's fidelity lens caught a real
+  high-severity defect — trees standing on the asphalt itself** (±0.34 offset,
+  inside the ±0.36 asphalt span) — fixed to the true grass verge (±0.44, trunk
+  1.6px clear of the curb), autumn re-pinned to an exact 2/2/2 gold/orange/red
+  spread, variants made season-consistent, and the tight bake cut blit area 9×,
+  bringing developed-128 with **1,818 trees to 1.16×** frame cost (gate ≤1.20).
+  Fully re-verified: 0 legality violations (incl. water-bridge roads,
+  intersections, burning tiles), 12/12 tiles render at all 4 rotations,
+  placement byte-stable across contexts and save/load, empty-city frame + 537
+  bake hashes + night layer byte-identical to baseline `1caa0a3`, zero errors.
+  The existing 922-tile forest stand verified as the dense-stand gate.
 
 - [x] **GQ3 — Zone-correlated building palette** *(graphics roadmap 3/11)*: the
   nine zone families now draw from **curated per-zone hue palettes** — terracotta

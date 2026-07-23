@@ -502,6 +502,22 @@ function renderFrame(city, uiState, clearBG) {
             ctx.closePath(); ctx.fill();
             ctx.globalAlpha = 1;
           }
+          // GQ4: street trees on straight road verges — placement is the pure
+          // streetTreeInfo (seed + logical x,y + roadMask), position goes
+          // through fractional worldX/worldY so the verge lands on the correct
+          // screen side at every cam.r (M32) with no per-rotation code. Drawn
+          // live like forests (the canopy rises above the flat plane) within
+          // this tile's own painter depth, so nearer tiles still paint over
+          // it. Deliberately NO nightPunch/nightAdd: the canopy is small and
+          // the G1/G2 night-light layer stays byte-identical.
+          if (ov === OV.ROAD || ov === OV.WIREROAD) {
+            const st = streetTreeInfo(city, i);
+            if (st) {
+              const ts = SPR.season[seasonOf(city.month)].streetTree[st.variant];
+              const tx = worldX(x + st.dx, y + st.dy), ty = worldY(x + st.dx, y + st.dy);
+              ctx.drawImage(ts.c, tx - ts.ox, ty - ts.oy);
+            }
+          }
           if (ng) {
             // night lights at this tile's own depth (G2): street lamps on
             // road tiles, prebaked lit-window glow on powered zones, plus

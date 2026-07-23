@@ -93,7 +93,8 @@
         "Perf: tree draw reuses the baked sprite; developed-128 frame within ~20% of baseline.",
         "Deterministic; zero console errors."
       ],
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-23: 8/8 criteria vs baseline 1caa0a3 + panel high-defect fixed and fully re-verified. Street trees: deterministic pure function of (seed,x,y)+roadMask on straight road tiles (~89% coverage, gate 70%), drawn in the painter loop at the TRUE grass verge (+-0.44, outside the +-0.36 asphalt span — the panel caught trees standing on the pavement at +-0.34 and the fix moved them), trunk 1.6px clear of the curb; 0 legality violations incl. water-bridge/intersection/burning adversarial fixtures; correct at all 4 rotations (12/12); autumn spreads 2/2/2 gold/orange/red; variants consistent across seasons; tight 20x22 bake canvas cut blit area 9x -> developed-128 with 1818 trees at 1.16-1.17x (gate 1.20); empty-city frame + 537 bake hashes + night layer + save round-trip byte-identical; deterministic; zero errors. Dense stands: existing 922-tile forest verified rendering (21/25 foliage). 7-agent workflow, 3-lens panel."
     },
     {
       "id": "GQ5",

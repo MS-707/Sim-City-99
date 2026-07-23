@@ -377,6 +377,15 @@ const SEASON_PAL = {
     waterDith: "#2a72d6", waterCrest: "rgba(130,185,255,.22)",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
+    // GQ9 shoreline bevel: damp strip / surf ridge / underwater sand tint —
+    // pure palette keys (zero RNG), consumed only by the shore bake
+    sandWet: "#b99e5e", foamBand: "rgba(240,250,255,.55)", shelf: "rgba(215,195,140,.30)",
+    berm: "rgba(58,62,48,.62)",
+    // GQ9 fix (CR1 per-profile floor): near-shore depth falloff tone — the
+    // water deepens to this navy just past the shelf, so the waterside
+    // plateau separates from EVERY GQ2 land material (dirt ~110 luma
+    // collided with crest-lit water ~116 before)
+    shoalDeep: "#0b2848",
     // GQ2 ground-material quilt: warm packed dirt, dull grey-gold sand LOT
     // (distinct from the brighter shore sand #dcc37a), aged concrete pavement.
     // 4 tones each, within a few % lightness — mottle, never checkerboard.
@@ -401,6 +410,7 @@ const SEASON_PAL = {
     waterDith: "#3a7ac2", waterCrest: "rgba(160,205,255,.24)",
     wave: "rgba(210,235,255,.35)", glint: "rgba(220,240,255,.5)",
     sand: "#dcc37a", sandHi: "#e0c87f", foam: "rgba(255,255,255,.32)", iceEdge: null,
+    sandWet: "#b39a5c", foamBand: "rgba(240,250,255,.55)", shelf: "rgba(215,195,140,.30)", berm: "rgba(58,62,48,.62)", shoalDeep: "#102f52", // GQ9
     // GQ2: same material families in spring's wetter, slightly cooler cast
     dirt: ["#7f6440", "#7b603d", "#836843", "#7d623e"],
     dirtFleckA: "rgba(235,215,175,.14)", dirtFleckB: "rgba(46,30,12,.20)",
@@ -426,6 +436,7 @@ const SEASON_PAL = {
     waterDith: "#336cb0", waterCrest: "rgba(150,195,250,.22)",
     wave: "rgba(210,235,255,.3)", glint: "rgba(220,240,255,.45)",
     sand: "#d8bd74", sandHi: "#dcc17b", foam: "rgba(255,255,255,.30)", iceEdge: null,
+    sandWet: "#b0985a", foamBand: "rgba(240,250,255,.50)", shelf: "rgba(210,190,135,.30)", berm: "rgba(54,58,44,.62)", shoalDeep: "#0d2a4a", // GQ9
     // GQ2: same material families in autumn's drier, warmer cast
     dirt: ["#8f6f43", "#8b6b40", "#937346", "#8d6d41"],
     dirtFleckA: "rgba(235,205,150,.15)", dirtFleckB: "rgba(56,36,12,.20)",
@@ -443,6 +454,13 @@ const SEASON_PAL = {
     waterDith: "#7aabde", waterCrest: "rgba(210,235,255,.35)",
     wave: "rgba(255,255,255,.4)", glint: "rgba(240,248,255,.7)",
     sand: "#c9d6e4", sandHi: "#e8eef5", foam: "rgba(255,255,255,.5)", iceEdge: "#7fa0bf",
+    // GQ9 winter: ice-shelf shades — the frozen-coast identity (iceEdge crack)
+    // is kept; these bands read as rime, not summer surf
+    sandWet: "#a9bccd", foamBand: "rgba(240,250,255,.62)", shelf: "rgba(200,215,230,.30)",
+    berm: "rgba(150,165,180,.40)",
+    // GQ9 fix: winter's falloff stays in the icy family (dark water under
+    // the rime shelf, never a summer navy) so the frozen-coast identity holds
+    shoalDeep: "#3e6da0",
     // GQ2: snow-dusted materials, separable from the #e9edf3 snowpack by
     // BOTH lightness and hue (colorblind norm MN3): warm grey-brown dirt,
     // buff sand lot, plowed blue-grey pavement
@@ -966,6 +984,12 @@ function buildSprites() {
   // seeded streams so they never shift the shared R()/ART_RNG sequence — the
   // building/window/roof bakes downstream stay byte-identical to pre-G13.
   const shoreRng = mulberry32(0x5A17);
+  // GQ9 HARD RULE: every NEW shore jitter (wet-band widths, foam scallop
+  // phases) draws ONLY from this dedicated stream — the 4 existing shoreRng
+  // width calls per mask sprite stay first and in their exact order, so the
+  // dry-sand widths are numerically unchanged and every non-shore bake stays
+  // byte-identical (shore bakes still consume zero R()/ART_RNG/groundRng).
+  const foamRng = mulberry32(0x0F0A);
   const forestRng = mulberry32(0x0F0E);
   // GQ2 HARD RULE: every NEW draw op in the terrain family (material tiles,
   // extra grass flecks, relief tints, matFringe feather) consumes ONLY this
@@ -1228,6 +1252,12 @@ function buildSprites() {
     // wedge fills so the coast bevels around corners instead of pinching into
     // bowties at diagonal water contacts, a DIMMED dry lip (so the beach stops
     // reading as a rampart), and — in winter — a dark ice-edge crack instead.
+    // GQ9: the band stack now forms a beveled RAMP instead of a cliff (summer
+    // luma path grass → dry sand → wet sand → foam ridge → underwater shelf →
+    // water). The sprite still draws from BOTH sides of every seam (shoreMask
+    // on the water tile, beachMask on the land tile), so the water-tile draw
+    // owns the waterward half of the stack and the land-tile draw the landward
+    // half — the same bake serves both with no render.js change.
     for (let sv = 0; sv < SHORE_VARIANTS; sv++) {
       const svar = [];
       for (let m = 0; m < 16; m++) {
@@ -1237,9 +1267,14 @@ function buildSprites() {
           const cpts = [N, E, S, W];
           const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
           // per-edge sand width, 5..9px — jittered from the shore stream so
-          // the four variants differ and adjacent coast tiles wander in width
+          // the four variants differ and adjacent coast tiles wander in width.
+          // GQ9 HARD RULE: these 4 shoreRng calls stay FIRST and in order —
+          // all new jitter below draws only from the dedicated foamRng.
           const wdt = [0, 0, 0, 0];
           for (let b = 0; b < 4; b++) wdt[b] = 5 + shoreRng() * 4;
+          // GQ9: per-edge wet-band width, 2.5..3.5px (foam stream only)
+          const wet = [0, 0, 0, 0];
+          for (let b = 0; b < 4; b++) wet[b] = 2.5 + foamRng();
           // clip to a slightly expanded diamond so the band hugs both sides of the seam
           g.save();
           g.translate(ox, oy); g.scale((TW + 6) / TW, (TH + 3) / TH); g.translate(-ox, -oy);
@@ -1247,30 +1282,76 @@ function buildSprites() {
           g.restore();
           g.save(); g.clip();
           const lerp = (P0, t) => [P0[0] + (ox - P0[0]) * t, P0[1] + (oy - P0[1]) * t];
+          // every diamond edge sits 14.31px from the center, so lerp t = d/14.31
+          // places a band exactly d px inward of the seam (perpendicular)
+          const LT = (d) => d / 14.31;
           g.lineCap = "butt";
-          // 1) main sand band per set edge, jittered width
+          // GQ9: corner wedge fill at a given inset scale — where BOTH edges
+          // meeting at a diamond corner are shore edges, fill a triangle so the
+          // band bevels around the corner (kills the 90-degree notch /
+          // diagonal-contact bowtie). scale 1 reproduces the G13 sand wedge
+          // exactly; the wet/foam bands reuse it scaled toward the corner.
+          const wedges = (scale, style) => {
+            g.fillStyle = style;
+            for (let c = 0; c < 4; c++) {
+              const eA = (c + 3) & 3, eB = c;               // the two edges at corner c
+              if (!((m & (1 << eA)) && (m & (1 << eB)))) continue;
+              const CP = cpts[c];
+              const oA = edges[eA][0] === CP ? edges[eA][1] : edges[eA][0]; // far ends
+              const oB = edges[eB][0] === CP ? edges[eB][1] : edges[eB][0];
+              const fl = (Q0, Q1, t) => [Q0[0] + (Q1[0] - Q0[0]) * t, Q0[1] + (Q1[1] - Q0[1]) * t];
+              const fA = fl(CP, oA, 0.34 * scale), fB = fl(CP, oB, 0.34 * scale);
+              const apex = [CP[0] + (ox - CP[0]) * 0.5 * scale, CP[1] + (oy - CP[1]) * 0.5 * scale];
+              g.beginPath(); g.moveTo(fA[0], fA[1]); g.lineTo(apex[0], apex[1]);
+              g.lineTo(fB[0], fB[1]); g.closePath(); g.fill();
+            }
+          };
+          // 1) main sand band per set edge, jittered width (unchanged widths)
           for (let b = 0; b < 4; b++) {
             if (!(m & (1 << b))) continue;
             const [P0, P1] = edges[b];
             g.strokeStyle = P.sand; g.lineWidth = wdt[b];
             g.beginPath(); g.moveTo(P0[0], P0[1]); g.lineTo(P1[0], P1[1]); g.stroke();
           }
-          // 2) corner wedge fills: where BOTH edges meeting at a diamond corner
-          // are shore edges, fill a triangle so the sand bevels around the
-          // corner (kills the 90-degree notch / diagonal-contact bowtie)
-          g.fillStyle = P.sand;
-          for (let c = 0; c < 4; c++) {
-            const eA = (c + 3) & 3, eB = c;                 // the two edges at corner c
-            if (!((m & (1 << eA)) && (m & (1 << eB)))) continue;
-            const CP = cpts[c];
-            const oA = edges[eA][0] === CP ? edges[eA][1] : edges[eA][0]; // far ends
-            const oB = edges[eB][0] === CP ? edges[eB][1] : edges[eB][0];
-            const fl = (Q0, Q1, t) => [Q0[0] + (Q1[0] - Q0[0]) * t, Q0[1] + (Q1[1] - Q0[1]) * t];
-            const fA = fl(CP, oA, 0.34), fB = fl(CP, oB, 0.34);
-            const apex = [CP[0] + (ox - CP[0]) * 0.5, CP[1] + (oy - CP[1]) * 0.5];
-            g.beginPath(); g.moveTo(fA[0], fA[1]); g.lineTo(apex[0], apex[1]);
-            g.lineTo(fB[0], fB[1]); g.closePath(); g.fill();
+          // 2) corner wedge fills (the existing G13 sand wedge)
+          wedges(1, P.sand);
+          // 2b) GQ9 underwater shelf ramp: fixed-depth translucent strokes
+          // drawn AFTER the sand so they read (the design's lerp −0.06 spot is
+          // fully overpainted by the 5-9px sand straddle). On the water-tile
+          // draw they land waterward of the seam: a near-opaque damp-sand
+          // plate caps the dry sand at ~2px past the seam (covering the
+          // jittered sand edge so the underlying sand→water switch can't pop),
+          // then shallow sand fades with depth — ~150 → 128 → 118 → 106 luma
+          // over summer water — turning the old cliff into a measured ramp.
+          // On the land-tile draw the same offsets feather the sand landward.
+          // The ramp ends ~9px out, so open-water plateaus stay untinted.
+          for (let b = 0; b < 4; b++) {
+            if (!(m & (1 << b))) continue;
+            const [P0, P1] = edges[b];
+            const step = (dpx, wpx, style, ga) => {
+              if (ga) g.globalAlpha = ga;
+              g.strokeStyle = style; g.lineWidth = wpx;
+              g.beginPath();
+              g.moveTo(...lerp(P0, LT(dpx))); g.lineTo(...lerp(P1, LT(dpx)));
+              g.stroke();
+              g.globalAlpha = 1;
+            };
+            step(2.7, 3.0, P.sandWet, 0.85);          // damp waterline plate
+            step(4.8, 1.8, P.sandWet, 0.52);
+            step(6.3, 2.0, boostA(P.shelf, 0.8), 0);  // shallow shelf, ~.24
+            step(7.8, 2.4, boostA(P.shelf, 0.55), 0); // deep shelf, ~.17
+            // (the wrack/berm seam moved to the LAND-ONLY dune bake below —
+            // shared here it also fell mid-ramp on the water side and broke
+            // the shelf's monotone descent)
           }
+          // 2c) GQ9 wet-sand band: the damp strip between dry sand and waterline
+          for (let b = 0; b < 4; b++) {
+            if (!(m & (1 << b))) continue;
+            const [P0, P1] = edges[b];
+            g.strokeStyle = P.sandWet; g.lineWidth = wet[b];
+            g.beginPath(); g.moveTo(...lerp(P0, 0.05)); g.lineTo(...lerp(P1, 0.05)); g.stroke();
+          }
+          wedges(0.7, P.sandWet); // convex corners keep the full bevel
           // 3) outer lip: winter draws a DARK ice-edge crack on the seam so the
           // frozen coast stays legible against the snowpack; other seasons draw
           // a DIMMED dry highlight that no longer reads as a raised rampart
@@ -1285,17 +1366,131 @@ function buildSprites() {
               g.beginPath(); g.moveTo(...lerp(P0, 0.10)); g.lineTo(...lerp(P1, 0.10)); g.stroke();
             }
           }
-          // 4) surf foam / ice fringe
+          // 4) GQ9 surf foam band (replaces the old 1.4px alpha-.32 stroke):
+          // a soft halo under a bright core hugging the waterline, plus
+          // foamRng-phased scallop bulges bowing toward the seam so the
+          // waterline reads as surf. Kept within ~3px of the seam so the
+          // shelf ramp beyond it stays a clean monotone descent.
+          const foamHalo = boostA(P.foamBand, 0.35);
           for (let b = 0; b < 4; b++) {
             if (!(m & (1 << b))) continue;
             const [P0, P1] = edges[b];
-            g.strokeStyle = P.foam; g.lineWidth = 1.4;
-            g.beginPath(); g.moveTo(...lerp(P0, 0.24)); g.lineTo(...lerp(P1, 0.24)); g.stroke();
+            g.strokeStyle = foamHalo; g.lineWidth = 3.0;
+            g.beginPath(); g.moveTo(...lerp(P0, 0.12)); g.lineTo(...lerp(P1, 0.12)); g.stroke();
+            g.strokeStyle = P.foamBand; g.lineWidth = 2.4;
+            g.beginPath(); g.moveTo(...lerp(P0, 0.12)); g.lineTo(...lerp(P1, 0.12)); g.stroke();
+            const edgePt = (u) => [P0[0] + (P1[0] - P0[0]) * u, P0[1] + (P1[1] - P0[1]) * u];
+            const nsc = 3 + (foamRng() < 0.5 ? 0 : 1);
+            g.lineWidth = 1.5;
+            for (let k = 0; k < nsc; k++) {
+              const tc = (k + 0.2 + foamRng() * 0.6) / nsc; // phase along the edge
+              const hs = 0.07 + foamRng() * 0.05;           // half-span
+              const A = lerp(edgePt(tc - hs), 0.12), B = lerp(edgePt(tc + hs), 0.12);
+              const CQ = lerp(edgePt(tc), 0.01);            // bows ~1.6px toward the seam
+              g.beginPath(); g.moveTo(A[0], A[1]);
+              g.quadraticCurveTo(CQ[0], CQ[1], B[0], B[1]); g.stroke();
+            }
           }
+          wedges(0.45, P.foamBand);
           g.restore();
         }));
       }
       fam.shore.push(svar);
+    }
+
+    // GQ9 fix (CR1 per-profile floor): water-side-only depth falloff, drawn
+    // UNDER the shore bands on WATER tiles only (buildTerrainLayer) — the
+    // land-side beachMask draw never sees it, so beaches stay bright. The
+    // near-shore water deepens smoothly past the underwater shelf and
+    // saturates to a distinctly darker plateau by ~9px from the seam. This
+    // guarantees a wide luma corridor between the near-shore water and EVERY
+    // GQ2 land material: before this, packed dirt (~110 luma) met crest-lit
+    // open water (~116) with a plateau delta of ~1 and the bevel corridor
+    // vanished even though the ramp itself was present. Baked with ZERO RNG
+    // (no stream advances), so every other bake stays byte-identical; one
+    // sprite per mask, season-tinted via P.shoalDeep.
+    fam.shoal = [];
+    for (let m = 0; m < 16; m++) {
+      fam.shoal.push(mkSprite(1, 1, 4, (g, ox, oy) => {
+        if (!m) return;
+        const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+        const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
+        diamondPath(g, ox, oy);
+        g.save(); g.clip();
+        // BUTT caps and EXACT endpoints: a stroke is a thin parallelogram, so
+        // consecutive collinear shore edges' bands abut along the shared
+        // corner plane with zero overlap and zero gap — round caps or
+        // past-corner extensions double-stack at every tile seam and read as
+        // dark "fangs" along the waterline (first-cut bug).
+        g.lineCap = "butt";
+        g.strokeStyle = P.shoalDeep;
+        // parallel full-length strokes at increasing TRUE-perpendicular depth
+        // (screen-space normal, not the center lerp — the diamond is squashed,
+        // so center-lerp distances are not perpendicular distances). Alphas
+        // accumulate multiplicatively into a smooth ramp that levels off deep,
+        // then tapers back toward open water so the band has no hard outer rim.
+        const STEPS = [
+          [4.0, 2.4, 0.08], [5.4, 2.4, 0.11], [6.8, 2.5, 0.15],
+          [8.2, 2.6, 0.18], [9.6, 3.0, 0.24], [11.0, 3.0, 0.32],
+          [12.5, 3.2, 0.36], [14.0, 3.8, 0.38],
+          [16.5, 3.0, 0.14], [18.4, 2.6, 0.07],
+        ];
+        for (let b = 0; b < 4; b++) {
+          if (!(m & (1 << b))) continue;
+          const [P0, P1] = edges[b];
+          const ex = P1[0] - P0[0], ey = P1[1] - P0[1];
+          let nx = -ey, ny = ex;
+          const nl = Math.hypot(nx, ny); nx /= nl; ny /= nl;
+          // orient the normal inward (toward the tile center = waterward)
+          if (nx * (ox - (P0[0] + P1[0]) / 2) + ny * (oy - (P0[1] + P1[1]) / 2) < 0) { nx = -nx; ny = -ny; }
+          for (const [dp, wpx, a] of STEPS) {
+            g.globalAlpha = a; g.lineWidth = wpx;
+            g.beginPath();
+            g.moveTo(P0[0] + nx * dp, P0[1] + ny * dp);
+            g.lineTo(P1[0] + nx * dp, P1[1] + ny * dp);
+            g.stroke();
+          }
+        }
+        g.globalAlpha = 1;
+        g.restore();
+      }));
+    }
+
+    // GQ9 fix: LAND-side-only wrack/berm seam — the dark damp line where the
+    // beach meets the ground, drawn over the beachMask edges of LAND tiles
+    // only (buildTerrainLayer), so the beach steps DOWN through the ground
+    // tone on the land half of the bevel without ever falling mid-ramp on the
+    // water side. Zero RNG; season-tinted via the strengthened P.berm.
+    fam.dune = [];
+    for (let m = 0; m < 16; m++) {
+      fam.dune.push(mkSprite(1, 1, 4, (g, ox, oy) => {
+        if (!m) return;
+        const N = [ox, oy - HH], E = [ox + HW, oy], S = [ox, oy + HH], W = [ox - HW, oy];
+        const edges = [[N, E], [E, S], [S, W], [W, N]]; // bit order N,E,S,W
+        diamondPath(g, ox, oy);
+        g.save(); g.clip();
+        g.lineCap = "round";
+        g.strokeStyle = P.berm;
+        // soft halo landward of the core so the seam feathers, not outlines
+        const STEPS = [[5.2, 1.6, 0.40], [6.5, 2.4, 0.90]];
+        for (let b = 0; b < 4; b++) {
+          if (!(m & (1 << b))) continue;
+          const [P0, P1] = edges[b];
+          const ex = P1[0] - P0[0], ey = P1[1] - P0[1];
+          let nx = -ey, ny = ex;
+          const nl = Math.hypot(nx, ny); nx /= nl; ny /= nl;
+          if (nx * (ox - (P0[0] + P1[0]) / 2) + ny * (oy - (P0[1] + P1[1]) / 2) < 0) { nx = -nx; ny = -ny; }
+          for (const [dp, wpx, a] of STEPS) {
+            g.globalAlpha = a; g.lineWidth = wpx;
+            g.beginPath();
+            g.moveTo(P0[0] + nx * dp, P0[1] + ny * dp);
+            g.lineTo(P1[0] + nx * dp, P1[1] + ny * dp);
+            g.stroke();
+          }
+        }
+        g.globalAlpha = 1;
+        g.restore();
+      }));
     }
 
     // forest: 3 density tiers x 3 canopy-mix variants (tier picked by neighbor
@@ -2942,6 +3137,48 @@ function buildSprites() {
     g.fill(); g.stroke();
     return { c, ox: 8, oy: 22 };
   })();
+
+  /* ---- GQ9: suspension-bridge towers ----
+     Appended at the very END of buildSprites with ZERO RNG of any stream, so
+     every prior bake stays byte-identical. Two view-axis variants —
+     SPR.bridgeTower[0] for a run along view u, [1] for view v — anchored at
+     the end tile's deck center; render.js picks the variant from the run axis
+     and cam.r, so all four rotations come free. Two tapered trapezoid legs
+     (5px base → 3px top) straddle the deck at perp ±7px and rise 38px above
+     the deck plane, tied by a portal cross-beam at −26px and topped by saddle
+     caps, in the international-orange family (#a63c2e body, #c25a48 NE-lit
+     face, #6e2419 shade) so the silhouette is identifiable at 1x. */
+  SPR.bridgeTower = [1, -1].map((sgn) => {
+    const c = document.createElement("canvas");
+    c.width = 44; c.height = 58;
+    const g = c.getContext("2d");
+    const ox = 22, oy = 44;                 // anchor = deck center
+    const body = "#a63c2e", lit = "#c25a48", shd = "#6e2419";
+    // the perp ground axis projects to (∓2,±1)/√5 for a u-run (sgn +1) and
+    // mirrors for a v-run (sgn −1): ±7px perp ⇒ leg centers (∓6.26, ±3.13)
+    const legs = [[ox - sgn * 6.26, oy + 3.13], [ox + sgn * 6.26, oy - 3.13]];
+    // portal cross-beam first, so the legs cap its ends
+    const bx0 = Math.min(legs[0][0], legs[1][0]), bx1 = Math.max(legs[0][0], legs[1][0]);
+    g.fillStyle = body; g.fillRect(bx0, oy - 27.5, bx1 - bx0, 3);
+    g.fillStyle = lit; g.fillRect(bx0, oy - 27.5, bx1 - bx0, 1);
+    // far (screen-upper) leg first so the near one overlaps it
+    legs.sort((a, b) => a[1] - b[1]);
+    for (const [lx, ly] of legs) {
+      const yB = ly + 8, yT = ly - 38;      // base dips into the water plane
+      g.beginPath();
+      g.moveTo(lx - 2.5, yB); g.lineTo(lx + 2.5, yB);
+      g.lineTo(lx + 1.5, yT); g.lineTo(lx - 1.5, yT);
+      g.closePath();
+      g.fillStyle = body; g.fill();
+      g.strokeStyle = lit; g.lineWidth = 1.2; // NE-lit right face
+      g.beginPath(); g.moveTo(lx + 1.9, yB); g.lineTo(lx + 1.1, yT); g.stroke();
+      g.strokeStyle = shd; g.lineWidth = 1;   // shaded left face
+      g.beginPath(); g.moveTo(lx - 2.1, yB); g.lineTo(lx - 1.2, yT); g.stroke();
+      g.fillStyle = shd; g.fillRect(lx - 2.5, yT - 2.5, 5, 2.5); // saddle cap
+      g.fillStyle = lit; g.fillRect(lx - 2.5, yT - 2.5, 5, 1);
+    }
+    return { c, ox, oy };
+  });
 }
 
 // sprite lookup for an overlay tile (returns null when tile isn't the drawn anchor)
@@ -3024,6 +3261,55 @@ function roadMask(city, i) {
   if (road(x, y + 1)) m |= 4;
   if (road(x - 1, y)) m |= 8;
   return m;
+}
+
+/* ---- GQ9: suspension-bridge run finder ----
+   For a WATER tile carrying a road (OV.ROAD / OV.WIREROAD) or surface rail
+   (RL.TRACK): the contiguous straight water run of the same carrier class, as
+   { x0, y0, ax, ay, L, d } — start tile, logical axis unit, run length and
+   this tile's index along it. Pure in city state (zero RNG, never reads
+   cam), memoized per (terrRev, devRev): place()/bulldoze/waterfill all bump
+   one of the two (rail place/doze bumps devRev too, sim.js), so a doze never
+   leaves a ghost bridge and the map is never rescanned per frame. */
+const bridgeMemo = { city: null, key: "", runs: new Map() };
+function bridgeRun(city, i) {
+  // GQ9 fix: the memo keys on the CITY OBJECT IDENTITY as well as the revs —
+  // City's constructor resets terrRev/devRev to 0, so two different loaded
+  // cities would otherwise collide at key "0|0" and serve stale runs (wrong
+  // tower/cable geometry) until any place/doze bumped a rev. Same discipline
+  // as tKey carrying city.seed.
+  const key = `${city.terrRev}|${city.devRev}`;
+  if (bridgeMemo.city !== city || bridgeMemo.key !== key) {
+    bridgeMemo.city = city; bridgeMemo.key = key; bridgeMemo.runs.clear();
+  }
+  const isRoad = city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD;
+  const mk = (i << 1) | (isRoad ? 0 : 1); // road + rail runs memoize apart
+  const hit = bridgeMemo.runs.get(mk);
+  if (hit !== undefined) return hit;
+  const x = i % MAP, y = (i / MAP) | 0;
+  const carrier = (X, Y) => {
+    if (!city.inMap(X, Y)) return false;
+    const j = city.idx(X, Y);
+    if (city.terr[j] !== TERR.WATER) return false;
+    return isRoad ? (city.over[j] === OV.ROAD || city.over[j] === OV.WIREROAD)
+                  : city.rail[j] === RL.TRACK;
+  };
+  // axis: follow the water-carrier run at x±1, else y±1; a single ambiguous
+  // tile reads its carrier mask's opposite-arm pair (default y)
+  let ax = 0, ay = 1;
+  if (carrier(x - 1, y) || carrier(x + 1, y)) { ax = 1; ay = 0; }
+  else if (!carrier(x, y - 1) && !carrier(x, y + 1)) {
+    const cm = isRoad ? roadMask(city, i) : railMask(city, i);
+    if (cm === 10) { ax = 1; ay = 0; } // E+W arm pair ⇒ an x-axis deck
+  }
+  let x0 = x, y0 = y;
+  while (carrier(x0 - ax, y0 - ay)) { x0 -= ax; y0 -= ay; }
+  let x1 = x, y1 = y;
+  while (carrier(x1 + ax, y1 + ay)) { x1 += ax; y1 += ay; }
+  const run = { x0, y0, ax, ay, L: ax ? x1 - x0 + 1 : y1 - y0 + 1,
+                d: ax ? x - x0 : y - y0 };
+  bridgeMemo.runs.set(mk, run);
+  return run;
 }
 
 // for a WATER tile: bitmask of 4-neighbors that are land (off-map counts as

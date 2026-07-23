@@ -332,7 +332,14 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
         const sm = shoreMask(city, i); // sand / rime ice on land-facing edges
         // G13: per-tile shore-width variant by the same scrambled hash used for
         // grass/water (cache-safe, deterministic) — coasts wander in width
-        if (sm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(sm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        if (sm) {
+          // GQ9 fix: depth falloff UNDER the shore bands — water-tile draw
+          // only (the land-side beachMask draw below never gets it), so the
+          // near-shore water plateau separates from every land material
+          const sl = S.shoal[rot4(sm, cam.r)];
+          if (!window.__noShoal) g.drawImage(sl.c, wx - sl.ox, wy - sl.oy);
+          const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(sm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy);
+        }
       } else {
         // G5: variant by scrambled (x, y) hash — open meadows mottle
         // organically instead of alternating with varnt's seeded stripes.
@@ -351,7 +358,13 @@ function buildTerrainLayer(city, waterFrame, minWX, maxWX, minWY, maxWY, key) {
         const rs = reliefShade(city.seed, x, y);
         if (rs) { const rt = SPR.reliefTint[rs > 0 ? 0 : 1]; g.drawImage(rt.c, wx - rt.ox, wy - rt.oy); }
         const bm = beachMask(city, i); // shore fringe on the land side of the seam
-        if (bm) { const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(bm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy); }
+        if (bm) {
+          const sh = S.shore[terrHash(x, y) % SHORE_VARIANTS][rot4(bm, cam.r)]; g.drawImage(sh.c, wx - sh.ox, wy - sh.oy);
+          // GQ9 fix: wrack/berm seam OVER the beach — land-tile draw only,
+          // so the water-side shelf ramp stays a clean monotone descent
+          const dn = S.dune[rot4(bm, cam.r)];
+          g.drawImage(dn.c, wx - dn.ox, wy - dn.oy);
+        }
       }
     }
   }
@@ -526,6 +539,109 @@ function buildShadowLayer(city, minWX, maxWX, minWY, maxWY, key) {
   L.viewX = cam.x; L.viewY = cam.y; L.offX = 0; L.offY = 0;
 }
 
+/* ---- GQ9: suspension bridges over water ----
+   Visual-only, drawn LIVE in the painter loop at each bridge tile's own depth
+   slot (painter order s = x + y and click-picking untouched); the shipped
+   road/rail sprite stays the deck surface, so GQ7 lane paint is preserved.
+   All geometry goes through fractional worldX/worldY (rot() is linear — the
+   GQ4 street-tree idiom), so all 4 rotations come free. Every value is pure
+   in (city state, cam): zero RNG, zero per-frame allocation beyond the O(1)
+   memoized bridgeRun lookup. Deliberately NOT part of buildShadowLayer /
+   castsShadow (roads/rails never cast there by design) and NO new
+   nightAdd/nightPunch calls — the GQ8 shadow layer and G1/G2 night layer
+   stay byte-identical; the existing road street lamp on bridge tiles stays. */
+const BRIDGE_HT = 38;  // main-cable height above deck at the towers (saddle)
+const BRIDGE_HS = 10;  // main-cable sag height above deck at mid-span
+
+// world point at run fraction f (tiles along the run) and perp offset p
+// (tiles across it): the perp of logical axis (ax, ay) is (ay, ax)
+function bridgePt(run, f, p) {
+  const bx = run.x0 + f * run.ax + p * run.ay;
+  const by = run.y0 + f * run.ay + p * run.ax;
+  return [worldX(bx, by), worldY(bx, by)];
+}
+
+// UNDER pass — beneath the deck sprite: translucent water shadow + slab fascia
+function drawBridgeUnder(run, wx, wy) {
+  // water shadow: the tile diamond offset (−6, +3) — translucent, so the
+  // baked water shimmer stays visible under the span
+  ctx.fillStyle = "rgba(4,18,34,.30)";
+  ctx.beginPath();
+  ctx.moveTo(wx - 6, wy - HH + 3); ctx.lineTo(wx + HW - 6, wy + 3);
+  ctx.lineTo(wx - 6, wy + HH + 3); ctx.lineTo(wx - HW - 6, wy + 3);
+  ctx.closePath(); ctx.fill();
+  // deck fascia: 2px slab sides along both travel edges, at perp ±0.38 —
+  // just outside the road bake's ±0.36 asphalt span so the slab edge shows
+  ctx.strokeStyle = "#565a63"; ctx.lineWidth = 2;
+  const f0 = run.d - 0.5, f1 = run.d + 0.5;
+  for (const p of [-0.38, 0.38]) {
+    const A = bridgePt(run, f0, p), B = bridgePt(run, f1, p);
+    ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
+  }
+}
+
+// OVER pass — above the deck sprite: railings, towers, main cables, hangers
+function drawBridgeOver(run) {
+  const L = run.L, d = run.d;
+  const f0 = d - 0.5, f1 = d + 0.5;
+  // railings at perp ±0.27: light top rail 3px above the deck plus a mid
+  // rail, posts every ¼ tile. 1.3px width — a 1px diagonal stroke antialiases
+  // to ~half coverage on the dark asphalt and the guard rail stops reading.
+  ctx.strokeStyle = "#c9ccd4"; ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  for (const p of [-0.27, 0.27]) {
+    const A = bridgePt(run, f0, p), B = bridgePt(run, f1, p);
+    ctx.moveTo(A[0], A[1] - 3); ctx.lineTo(B[0], B[1] - 3);
+    ctx.moveTo(A[0], A[1] - 1.6); ctx.lineTo(B[0], B[1] - 1.6);
+    for (let k = 0; k < 4; k++) {
+      const Q = bridgePt(run, f0 + (k + 0.5) * 0.25, p);
+      ctx.moveTo(Q[0], Q[1]); ctx.lineTo(Q[0], Q[1] - 3);
+    }
+  }
+  ctx.stroke();
+  if (L < 2) return; // single-tile span: deck + fascia + railing + shadow only
+  // towers at both ends — variant 0 spans along view u, 1 along view v
+  if (d === 0 || d === L - 1) {
+    const tw = SPR.bridgeTower[(run.ax !== 0) === ((cam.r & 1) === 0) ? 0 : 1];
+    const C = bridgePt(run, d, 0);
+    ctx.drawImage(tw.c, C[0] - tw.ox, C[1] - tw.oy);
+  }
+  // main cables: global span parameter t = f/(L−1); h(t) = HS + (HT−HS)(2t−1)²
+  // — every tile strokes its slice of the SAME closed-form world-space curve
+  // (8 segments per side), so slices join exactly across tile seams
+  const ch = (t) => BRIDGE_HS + (BRIDGE_HT - BRIDGE_HS) * (2 * t - 1) * (2 * t - 1);
+  const cf = (v) => v < 0 ? 0 : v > L - 1 ? L - 1 : v;
+  for (const p of [-0.26, 0.26]) {
+    for (const [col, lw, dy] of [["#22242c", 1.6, 0], ["#484c58", 0.6, -0.8]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = lw;
+      ctx.beginPath();
+      for (let s8 = 0; s8 <= 8; s8++) {
+        const f = cf(f0 + s8 / 8);
+        const Q = bridgePt(run, f, p);
+        const Y = Q[1] - ch(f / (L - 1)) + dy;
+        s8 ? ctx.lineTo(Q[0], Y) : ctx.moveTo(Q[0], Y);
+      }
+      ctx.stroke();
+    }
+  }
+  // hangers at even GLOBAL stations every ½ tile (t_k = ½k/(L−1)); the tile
+  // owning f ∈ [d−½, d+½) draws station k — even spacing across seams by
+  // construction. The towers own the two span ends.
+  ctx.strokeStyle = "#33363e"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let k = 2 * d - 1; k <= 2 * d + 1; k++) {
+    const f = k / 2;
+    if (f < f0 || f >= f1 || f <= 0 || f >= L - 1) continue;
+    const hy = ch(f / (L - 1));
+    for (const p of [-0.26, 0.26]) {
+      const Q = bridgePt(run, f, p);
+      ctx.moveTo(Q[0], Q[1] - hy);
+      ctx.lineTo(Q[0], Q[1] - 3); // down to the rail top
+    }
+  }
+  ctx.stroke();
+}
+
 function renderFrame(city, uiState, clearBG) {
   frame++;
   const ns = nightStrength(city, uiState); // 0 ⇒ the whole night path is skipped
@@ -658,6 +774,13 @@ function renderFrame(city, uiState, clearBG) {
         const size = sizeOf(ov);
         if (size === 1) {
           const spr = spriteFor(city, i);
+          // GQ9: a road carried over open water is a suspension bridge — the
+          // UNDER pass (water shadow + slab fascia) goes beneath the deck
+          // sprite, the OVER pass (railings/towers/cables) above it, all in
+          // this tile's own painter slot
+          const roadBridge = (ov === OV.ROAD || ov === OV.WIREROAD) &&
+            t === TERR.WATER ? bridgeRun(city, i) : null;
+          if (roadBridge) drawBridgeUnder(roadBridge, wx, wy);
           if (spr) {
             ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
             // M26: a WIREROAD draws the road footprint (spr, above) PLUS an
@@ -667,6 +790,7 @@ function renderFrame(city, uiState, clearBG) {
               const ws = SPR.wire[rot4(wireMask(city, i), cam.r)];
               ctx.drawImage(ws.c, wx - ws.ox, wy - ws.oy);
             }
+            if (roadBridge) drawBridgeOver(roadBridge);
             // G3: burning buildings char — darkened while city.fire[i] is
             // set, reverting the moment the fire ends
             if (city.fire[i]) drawChar(spr, wx, wy);
@@ -760,8 +884,15 @@ function renderFrame(city, uiState, clearBG) {
       // invisible except a vent grate in the transit overlay; stations are a
       // depot sprite that lights up when live and shows a no-power bolt otherwise.
       if (rl === RL.TRACK) {
+        // GQ9: surface track over water rides its own suspension bridge —
+        // unless the tile already drew a road bridge (road wins on
+        // grade-crossing bridges: one bridge, two decks)
+        const railBridge = t === TERR.WATER &&
+          ov !== OV.ROAD && ov !== OV.WIREROAD ? bridgeRun(city, i) : null;
+        if (railBridge) drawBridgeUnder(railBridge, wx, wy);
         const rs = SPR.rail[rot4(railMask(city, i), cam.r)];
         ctx.drawImage(rs.c, wx - rs.ox, wy - rs.oy);
+        if (railBridge) drawBridgeOver(railBridge);
       } else if (rl === RL.STATION) {
         const ss = SPR.station;
         ctx.drawImage(ss.c, wx - ss.ox, wy - ss.oy);

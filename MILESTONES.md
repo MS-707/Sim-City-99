@@ -6,8 +6,8 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- (none — **the 11-milestone graphics roadmap is COMPLETE**. Open next:
-  M31 garbage & waste, the GQ-EPIC elevation heightmap, or new directions.)
+- [ ] **GP1 — The Growth Truth Table** *(gameplay roadmap 1/10)* — running via
+  the milestone workflow. Gates in `docs/gameplay-roadmap.json`.
 
   Implementation status (under verification):
   - **DPR-aware backing store**: one global render scale `RS` (render.js) with
@@ -62,11 +62,47 @@ Queue policy: keep at least 5 open improvements at all times.
 > gameplay-queue designs + 8-criteria specs for M22/M24/M25 live in
 > `docs/queue-specs.json` (ultracode design workflows, judge-approved).
 
-- [ ] **M31 — Garbage & waste management**: zones generate garbage by activity;
-  dispose via a paint-style Landfill (scars land value/pollution as it
-  saturates) or a tier-gated Waste-to-Energy incinerator (2×2, eats garbage,
-  trickles power); a recycling ordinance cuts the stream; overflow becomes a
-  growing pollution + complaint source.
+### Gameplay depth roadmap — 10 milestones (rubric-gated)
+
+
+> **The plan.** `docs/gameplay-roadmap.json` holds the measurable bar: six
+> weighted dimensions audited against the SC2K gameplay benchmark by critics
+> reading the real sim, scored **47/100** today, plus these 10
+> **independently-shippable** milestones (stopping between any two leaves a
+> coherent game). Same pipeline as the graphics roadmap: design+criteria →
+> implement → verify vs pinned baseline → adversarial panel → fix → ship.
+> **Save-version ladder:** GP1 owns v12; each later state-adding milestone takes
+> the next integer with backward-compatible loading.
+
+- [ ] **GP1 — The Growth Truth Table** *(I5/E3, save+)*: A player who zones a perfect block and watches it stall is finally told, in the game, exactly which gate is holding it — including the two invisible ones ('demand 0.10, needs 0.15' and 'upgrade odds ~0.3%/yr: land value 18, conges
+  **Gates:** Gate-table fidelity, not self-reference: an instrumented growthPass lo · The two missed stalls are caught: a tile with 0 < dem <= 0 · Determinism becomes real: with Math …
+
+- [ ] **GP2 — Working Ports** *(I4/E3)*: The two most expensive buildings in the game stop being ornaments — a port becomes a specialization bet that pays only if you dedicate a corridor to it and site it where its smog or its approach noise costs you least.
+  **Gates:** A powered, road-connected seaport with >=200 industrial jobs in catchm · An unpowered or unconnected port produces zero demand delta, zero reve · Airport tradeoff: demand …
+
+- [ ] **GP3 — Commute Model & Job Access** *(I5/E4, save+)*: Where you put housing relative to jobs finally matters — the one bridge into downtown genuinely carries every trip from the far shore and lights up red, and a second crossing measurably drains it.
+  **Gates:** Spatial sensitivity: identical zone counts in two layouts — housing be · Bottleneck emergence: in the single-bridge layout the bridge tiles lan · Load is not degenerate: on a uniform grid with 4 equally-short routes  …
+
+- [ ] **GP4 — Expressways, Ramps & the First Moving Train** *(I5/E3, save+)*: The red bridge finally has an answer that is a decision and not just more asphalt — a high-capacity route you must pay for, route around good neighbourhoods, and deliberately plug into the grid — and the rail line you built years 
+  **Gates:** Capacity is real: replacing a congested arterial with an expressway pl · Ramps gate access: an expressway with zero ramps carries zero trips an · Siting tradeoff bites: mean landv of residential tiles within 2 of an  …
+
+- [ ] **GP5 — Service Strain, Visible Coverage & the Education Payoff** *(I5/E4, save+)*: Every thousand new residents re-opens the six-way budget fight — and for the first time schools PAY: two decades of sustained education turns your smokestack district into clean high-tech industry, while you can finally SEE police
+  **Gates:** Strain bites and relief works: doubling population against a fixed sch · Education and health are mechanically distinct: two cities, one with m · The slow stock pays off: a city holding >=80% education coverage for 2 …
+
+- [ ] **GP6 — Citizen Opinion Poll** *(I4/E3, save+)*: The headline 'how am I doing' number stops being a tax readout in costume and becomes a prioritized, clickable to-do list that points the camera at the city's actual worst block — and a city that scores well on it unlocks a rank n
+  **Gates:** Sensitivity: 6 single-variable perturbations from one saved city (tax  · Ranked list correctness: for each perturbation the induced problem app · No double-charging: with the demand damper cut, a city held at minimum …
+
+- [ ] **GP7 — Assessed-Value Taxation, the Debt Ladder & the Stabilizer** *(I5/E4, save+)*: Parks, clean air, schools and transit finally show up as rent — raising land value literally pays the bills — and borrowing becomes a real instrument with a term, a ceiling and a reputation instead of one fixed button.
+  **Gates:** The spike is published first: a committed seed/size/script produces a  · Land value earns money: two cities with identical pop/jobs but mean la · Separability, or an honest single rate: raising only the industrial ra …
+
+- [ ] **GP8 — Coupled Hazard, the Risk Readout & Emergency Response** *(I5/E5, save+)*: Disasters stop being arbitrary weather and become the itemized bill for decisions the player could see coming on a risk panel — and when one lands, the allowance is always smaller than the fire front, so the player must choose wha
+  **Gates:** Reachability and difficulty axis (phase 1, independently verifiable):  · Coupling: across 10 seeded 50-year headless runs, a city with full fir · Honest meters: the panel's per-year odds match the measured empirical  …
+
+- [ ] **GP9 — Garbage & Waste Management (M31)** *(I4/E4, save+)*: Growth now produces something the player must physically put somewhere — cheap landfill that poisons the ground it sits on, or an expensive incinerator that turns the problem into a trickle of power and a cloud over its own neighb
+  **Gates:** Stream scales with the city: generated tonnage is monotone in develope · The two routes genuinely differ: sufficient landfill capacity zeroes o · Anti-crosstalk audit passes: waste ids conduct no power, register no p …
+
+- [ ] **GP10 — Blight & Urban Renewal** *(I4/E4, save+)*: Neglect finally costs something — a neighbourhood can die and sit as a blighted hole dragging its neighbours down — but the mayor has a renewal campaign to run against it rather than a timer to wait out.
+  **Gates:** Causation on a deterministic sweep: a district cut off from power for  · Hysteresis: restoring power does not immediately revive — measured rev · Blight radiates and the campaign beats waiting: mean landv within 4 ti …
 
 ### Graphics quality roadmap — 10 milestones to SC2K fidelity
 

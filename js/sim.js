@@ -13,12 +13,37 @@ function setMapSize(n) { MAP = n; }
 // M30: guarantee the history ring-buffer has all seven arrays. Any missing key
 // (a pre-M30 v10 save, whose history has only pop/funds) becomes []. Copies each
 // array so the loaded city owns its own buffers. Used by City.deserialize.
+// GP1 re-assertion (deliberately unchanged): the key list here is HARDCODED
+// and normaliseHistory DROPS anything not on it. GP1 adds no history key, so
+// this is a no-op for v12 — but the drop-unknown behavior is stated, not
+// silently inherited, because the next milestone that adds a history array
+// MUST extend this list or its data will be discarded at load with no error.
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
   for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv"])
     out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
   return out;
+}
+
+/* ---- GP1: the save ladder ----
+   The canonical v11..vN chain. Runs FIRST in City.deserialize, on the parsed
+   object, and upgrades it in place one integer at a time; every later
+   milestone appends exactly one `if (v < N)` step and never edits an earlier
+   one. Rungs so far:
+     v <= 10  every pre-v11 field is already absent-tolerant downstream
+              (each restore site is a defensive Array.isArray / typeof guard),
+              so there is nothing to rewrite — just declare the floor.
+     v 11 -> 12  GP1 adds the five rng cursors. A v11 save has none; setting
+              them to null makes initRng fall back to the PURE (seed,
+              tickCount) derivation, so the save loads deterministically and
+              re-saves at v12. */
+function migrateSave(d) {
+  let v = (d && typeof d.v === "number") ? d.v : 0;
+  if (v < 11) v = 11;
+  if (v < 12) { d.rng = null; v = 12; }
+  d.v = v;
+  return d;
 }
 
 const TERR = { GRASS: 0, WATER: 1, FOREST: 2 };
@@ -469,6 +494,52 @@ function mulberry32(a) {
   };
 }
 
+/* ========================= GP1: SEEDED SIM STREAMS =========================
+   makeStream reproduces mulberry32's recurrence EXACTLY but exposes its single
+   int32 of state so a cursor can be serialized and restored. mulberry32 itself
+   is deliberately NOT touched: sprites.js (ART_RNG + ~12 frozen side-streams)
+   and computeNeighbors depend on its exact identity, and any edit there
+   renumbers every baked sprite variant.
+
+   Five named streams carry every SIM-AFFECTING draw. PRESENTATION code
+   (render.js particles + chopperMonthTick, ui.js news/name picks, audio.js)
+   stays on global Math.random forever: render cadence is frame-rate dependent,
+   so letting it advance a sim cursor would make the sim frame-rate dependent.
+   chopperMonthTick is called from inside City.tick() (sim.js) but lives in
+   render.js and is pure presentation — that is the ONE documented carve-out to
+   "no global Math.random inside tick()". */
+function makeStream(seed) {
+  let a = seed | 0;
+  const f = function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  f.state = () => a | 0;
+  f.setState = (v) => { a = v | 0; };
+  return f;
+}
+
+// Per-stream salts. growth/traffic/fire reuse the four EDGE_SALT primes (they
+// are good odd 32-bit mixers, nothing more); build adds a fifth. The salt only
+// has to decorrelate the five streams that share one city seed.
+const RNG_SALT = {
+  growth: 0x9E3779B1, traffic: 0x85EBCA77, fire: 0xC2B2AE3D,
+  hazard: 0x27D4EB2F, build: 0x165667B1,
+};
+const RNG_KEYS = ["growth", "traffic", "fire", "hazard", "build"];
+
+// Save-format version. GP1 owns v12 (adds the five rng cursors). Every later
+// state-adding milestone takes the next integer and extends migrateSave below.
+const SAVE_V = 12;
+
+/* GP1: the probability floor under which an upgrade/seed roll is reported to
+   the player as "the odds are effectively zero" rather than "growing normally".
+   0.005 per sampled visit; a zone tile is sampled ~340/(MAP*MAP) times a tick,
+   so at MAP=80 that is roughly one visit every 19 ticks => under 1% a year. */
+const P_MIN = 0.005;
+
 /* ========================= M27: NEIGHBORING CITIES ========================= */
 // Four WORLD-fixed map edges: 0=N (y==0), 1=E (x==MAP-1), 2=S (y==MAP-1), 3=W
 // (x==0). This order is world-fixed and NEVER reads cam.r, so rotation can only
@@ -518,6 +589,377 @@ function computeNeighbors(seed) {
   }
   return out;
 }
+
+/* ===================== GP1: THE GROWTH TRUTH TABLE =====================
+   growthPass (below) is the ONLY authority on whether a zoned tile rises,
+   stalls or falls — and until GP1 it kept that verdict entirely to itself.
+   GROWTH_GATES is that if/else chain turned inside out: one ordered row per
+   REACHABLE terminal state, each carrying the predicate the code tests, the
+   sentence the player reads, the proving numbers behind it, and (for the rows
+   that actually roll a die) the mutation the code performs.
+
+   growthPass CONSUMES this table — it is not a parallel description that can
+   drift. Every row therefore has to reproduce the original chain's draw order,
+   draw count and short-circuits exactly:
+     • rows with `apply: null` are the branches that mutate nothing and roll
+       nothing (the hard caps) — identical to the original's empty `{}` bodies;
+     • LOW_ODDS and GROWING SHARE one apply, as do Z0_LOW_ODDS and Z0_SEEDING,
+       because a row names the GATE the tile is sitting at, not the outcome of
+       the die — the original spends exactly ONE draw across both;
+     • DECLINE draws whenever it is reached (the roll lives inside the original
+       `else if` condition), so its apply always draws;
+     • GRIDLOCK is a PHASE, not a chain row: the original evaluates it
+       unconditionally AFTER the chain, so it can co-occur with an upgrade. It
+       is surfaced as an extra line, never as the tile's single verdict.
+
+   `sel` buckets the rows so the walk is <= 6 predicate tests instead of 17,
+   and rows inside a bucket are ordered exactly as the source chain orders its
+   branches (semantics first — a mis-ordered row would report the wrong gate).
+
+   Row shape: {code, phase, sev, sel, test, text, evid, apply}
+     test (c,i,k)      -> bool         predicate, PURE
+     text (c,i,k)      -> string       the player-facing sentence
+     evid (c,i,k)      -> object       the proving numbers
+     apply(c,i,k,rng)  -> void         the mutation + its draws (or null) */
+
+// Lazy ctx fills. cong costs a 25-cell scan and fit costs the whole land-value
+// / crime / service / pressure product — a BURNING or UNPOWERED tile (75% of
+// classifications on a real city) must never pay for either.
+function ensureCong(c, k) {
+  if (k.cong < 0) k.cong = c.trafficNear(k.i) / 255;
+  return k.cong;
+}
+function ensureFit(c, k) {
+  if (k.fit !== null) return k.fit;
+  ensureCong(c, k);
+  // Verbatim the arithmetic at the head of growthPass's upgrade branch —
+  // no re-association, no reordering. Pure reads: no writes, no draws.
+  let fit = c.landv[k.i] / 255;
+  if (k.ov === OV.ZI) fit = 0.75;          // industry doesn't care about views
+  if (k.ov === OV.ZR) fit -= c.crime[k.i] / 400;
+  fit *= 1 - k.cong * 0.75;                // nobody moves up on a gridlocked block
+  k.svc = (c.eduCov[k.i] + c.medCov[k.i]) / 510;
+  fit *= 0.7 + k.svc * 1.1;
+  fit *= 0.55 + 0.45 * c.waterPressure;
+  k.fit = fit;
+  return fit;
+}
+// The four buildings whose effect is genuinely gated on power: stampCoverage
+// skips an unpowered anchor, so an unpowered station stamps a literal zero.
+const isServiceBldg = (t) => t === OV.POLICE || t === OV.FIRESTA ||
+  t === OV.SCHOOL || t === OV.HOSPITAL;
+const pct = (p) => (p <= 0 ? "0%" : p < 0.001 ? "<0.1%" : (p * 100).toFixed(p < 0.1 ? 2 : 1) + "%");
+const z0p = (c, k) => k.dem * 0.85 * (1 - ensureCong(c, k) * 0.7);
+const upp = (c, k) => k.dem * ensureFit(c, k) * 0.42;
+/* The gridlock phase's per-check chance of REMOVING a level. Single-sourced so
+   the die roll, the sentence and the "is this tile actually net-declining?"
+   comparison in diagnoseTile can never drift apart. Value unchanged (0.07). */
+const GRIDLOCK_P = 0.07;
+/* Is the GRIDLOCK phase going to take levels off this tile faster than the
+   chain row can add them? The chain and the gridlock phase both run on every
+   sampled visit, so the honest per-visit expectation is (pUp - GRIDLOCK_P);
+   when that is negative the tile is shrinking no matter how cheerful the chain
+   row's own sentence sounds. `pUp` is the row's own upgrade probability (0 for
+   the rows that cannot raise a level at all — a MAXED or stalled tile under
+   gridlock is purely losing). Kept as a free function so both the GROWING
+   row's text and diagnoseTile's severity escalation ask the same question. */
+function isNetDeclining(c, i, k, pUp) {
+  return c.lvl[i] > 1 && ensureCong(c, k) > 0.8 && pUp < GRIDLOCK_P;
+}
+
+const GROWTH_GATES = Object.freeze([
+  /* ---- phase: pre (runs before anything else, always short-circuits) ---- */
+  {
+    code: "BURNING", phase: "pre", sev: "crit", sel: "pre",
+    test: (c, i) => c.fire[i] > 0,
+    text: () => "🔥 On fire. Nothing grows here until the blaze is out.",
+    evid: (c, i) => ({ fire: c.fire[i], fireCov: c.fireCov[i] }),
+    apply: null,
+  },
+  {
+    code: "UNPOWERED", phase: "pre", sev: "crit", sel: "pre",
+    test: (c, i, k) => !k.powered,
+    /* The decay clause is guarded by `c.lvl[i] > 0` in apply below, so an
+       EMPTY unpowered zone can never "already be losing a level" no matter how
+       long it has sat dark — it has no level to lose. Saying otherwise was a
+       false sentence on a fully reachable state (any unpowered empty zone left
+       alone for 7 growth samples), so the lvl===0 case gets its own wording. */
+    text: (c, i) => (c.lvl[i] === 0
+      ? `⚡ No power reaches this lot. Nothing will ever break ground here until it is wired.`
+      : c.unpow[i] > 6
+        ? `⚡ No power for ${c.unpow[i]} checks — this block is ALREADY losing a level.`
+        : `⚡ No power reaches this lot (${c.unpow[i]}/7 checks dark; past 7 it starts losing levels).`),
+    evid: (c, i) => ({ unpow: c.unpow[i], supply: c.powerSupply, demand: c.powerDemand }),
+    apply: (c, i, k, rng) => {
+      c.unpow[i] = Math.min(250, c.unpow[i] + 1);
+      if (c.lvl[i] > 0 && c.unpow[i] > 6 && rng() < 0.35) c.lvl[i]--;
+    },
+  },
+
+  /* ---- phase: chain, bucket z0 (an empty zone trying to get its first lot) ---- */
+  {
+    code: "Z0_NO_ROAD", phase: "chain", sev: "crit", sel: "z0",
+    test: (c, i, k) => !k.road,
+    text: () => "🛣️ No road access. Nobody will build on a lot they cannot drive to.",
+    evid: (c, i) => ({ access: c.access[i] }),
+    apply: null,
+  },
+  {
+    code: "Z0_NO_DEMAND", phase: "chain", sev: "warn", sel: "z0",
+    test: (c, i, k) => !(k.dem > 0),
+    text: (c, i, k) => `📉 No demand for this zone (${k.dem.toFixed(2)}). Nobody is looking to move in.`,
+    evid: (c, i, k) => ({ dem: k.dem, need: 0 }),
+    apply: null,
+  },
+  {
+    code: "Z0_LOW_ODDS", phase: "chain", sev: "warn", sel: "z0",
+    test: (c, i, k) => z0p(c, k) < P_MIN,
+    text: (c, i, k) => `🐌 Odds of anyone breaking ground: ${pct(z0p(c, k))} per check — ` +
+      `demand ${k.dem.toFixed(2)}, congestion ${Math.round(k.cong * 100)}%.`,
+    evid: (c, i, k) => ({ dem: k.dem, cong: ensureCong(c, k), p: z0p(c, k), pMin: P_MIN }),
+    pUp: z0p,
+    apply: (c, i, k, rng) => {
+      if (rng() < z0p(c, k)) { c.lvl[i] = 1; c.varnt[i] = (rng() * 5) | 0; }
+    },
+  },
+  {
+    code: "Z0_SEEDING", phase: "chain", sev: "ok", sel: "z0",
+    test: () => true,
+    text: (c, i, k) => `🌱 Waiting on a developer — ${pct(z0p(c, k))} chance per check. This lot will build.`,
+    evid: (c, i, k) => ({ dem: k.dem, cong: ensureCong(c, k), p: z0p(c, k) }),
+    pUp: z0p,
+    apply: (c, i, k, rng) => {
+      if (rng() < z0p(c, k)) { c.lvl[i] = 1; c.varnt[i] = (rng() * 5) | 0; }
+    },
+  },
+
+  /* ---- phase: chain, bucket up (dem > 0.15 && lvl < 3 — trying to densify) ----
+     WATER_CAP IS FIRST ON PURPOSE. In the shipped source the water gate reads
+     `lvl >= 1 && !watered`, and inside this branch lvl is provably 1 or 2, so
+     the first conjunct is VACUOUSLY TRUE: the gate reduces to `!watered` and
+     PRE-EMPTS both level-2 caps below it. Reordering these rows would report a
+     gate the code never reaches. */
+  {
+    code: "WATER_CAP", phase: "chain", sev: "crit", sel: "up",
+    test: (c, i) => !c.watered[i],
+    /* lvl is provably 1 or 2 in this bucket. At lvl 1 the cap is "level 1"; at
+       lvl 2 the tile is ALREADY above that — it kept the skyline it grew (or
+       loaded) before the mains were cut, because the water gate is
+       UPGRADE-ONLY and never decrements. Printing "hard-capped at level 1" on
+       a standing level-2 block was simply false, and it is exactly the state a
+       pre-M24 save loads in (see recomputeWater). Fork on the live level. */
+    text: (c, i, k) => (k.lvl >= 2
+      ? "💧 No water mains. This block keeps the level it already has, but it can rise no further without pipe."
+      : "💧 No water mains. A shack has a well — density needs pipe. Hard-capped at level 1."),
+    evid: (c, i, k) => ({ watered: c.watered[i], lvl: k.lvl, pressure: c.waterPressure }),
+    apply: null,
+  },
+  {
+    code: "SVC_CAP", phase: "chain", sev: "warn", sel: "up",
+    test: (c, i, k) => k.lvl === 2 && c.eduCov[i] < 8 && c.medCov[i] < 8,
+    text: (c, i) => `🏫 Capped at level 2: no school or hospital in reach ` +
+      `(education ${c.eduCov[i]}, health ${c.medCov[i]} — one must reach 8).`,
+    evid: (c, i) => ({ eduCov: c.eduCov[i], medCov: c.medCov[i], need: 8 }),
+    apply: null,
+  },
+  {
+    code: "PRESSURE_CAP", phase: "chain", sev: "warn", sel: "up",
+    test: (c, i, k) => k.lvl === 2 && c.waterPressure < 0.9,
+    text: (c) => `🚰 Water pressure ${Math.round(c.waterPressure * 100)}% (needs 90%). ` +
+      `No towers rise on strained mains.`,
+    evid: (c) => ({ pressure: c.waterPressure, need: 0.9,
+      waterSupply: c.waterSupply, waterDemand: c.waterDemand }),
+    apply: null,
+  },
+  {
+    code: "U_NO_ROAD", phase: "chain", sev: "crit", sel: "up",
+    test: (c, i, k) => !k.road,
+    text: () => "🛣️ No road access. This block cannot densify without a street.",
+    evid: (c, i) => ({ access: c.access[i] }),
+    apply: null,
+  },
+  {
+    code: "LOW_ODDS", phase: "chain", sev: "warn", sel: "up",
+    test: (c, i, k) => upp(c, k) < P_MIN,
+    text: (c, i, k) => `🐌 Upgrade odds ${pct(upp(c, k))} per check — land value ${c.landv[i]}, ` +
+      `congestion ${Math.round(k.cong * 100)}%. Every hard gate is clear; the numbers are not.`,
+    evid: (c, i, k) => ({
+      dem: k.dem, fit: ensureFit(c, k), landv: c.landv[i], crime: c.crime[i],
+      cong: ensureCong(c, k), svc: (c.eduCov[i] + c.medCov[i]) / 510,
+      pressure: c.waterPressure, p: upp(c, k), pMin: P_MIN,
+    }),
+    pUp: upp,
+    apply: (c, i, k, rng) => {
+      if (rng() < upp(c, k)) { c.lvl[i]++; c.varnt[i] = (rng() * 5) | 0; }
+    },
+  },
+  {
+    code: "GROWING", phase: "chain", sev: "ok", sel: "up",
+    test: () => true,
+    /* "Growing normally" is only true if the tile is actually net-growing. The
+       GRIDLOCK phase runs unconditionally AFTER this row and takes a level
+       with probability GRIDLOCK_P, so a tile whose own upgrade odds are below
+       that is more likely to shrink than to grow — measured at 176 of 573
+       "ok" zone tiles on a congested 10k-pop city. Say so, and let
+       diagnoseTile drop the green box (see the severity escalation there). */
+    text: (c, i, k) => {
+      const p = upp(c, k);
+      return isNetDeclining(c, i, k, p)
+        ? `📉 Losing ground to traffic — only ${pct(p)} chance to add a level per check, ` +
+          `against a ${pct(GRIDLOCK_P)} chance of losing one to gridlock. On these numbers this block SHRINKS.`
+        : `📈 Growing normally — ${pct(p)} chance to add a level per check.`;
+    },
+    evid: (c, i, k) => ({
+      dem: k.dem, fit: ensureFit(c, k), landv: c.landv[i],
+      cong: ensureCong(c, k), p: upp(c, k),
+    }),
+    pUp: upp,
+    apply: (c, i, k, rng) => {
+      if (rng() < upp(c, k)) { c.lvl[i]++; c.varnt[i] = (rng() * 5) | 0; }
+    },
+  },
+
+  /* ---- phase: chain, bucket fall (the built tile that did NOT qualify to grow) ---- */
+  {
+    code: "DECLINE", phase: "chain", sev: "crit", sel: "fall",
+    test: (c, i, k) => k.dem < -0.25,
+    text: (c, i, k) => `📉 Demand ${k.dem.toFixed(2)} — tenants are LEAVING ` +
+      `(${pct(-k.dem * 0.3)} chance to lose a level per check).`,
+    evid: (c, i, k) => ({ dem: k.dem, threshold: -0.25, p: -k.dem * 0.3 }),
+    apply: (c, i, k, rng) => { if (rng() < -k.dem * 0.3) c.lvl[i]--; },
+  },
+  {
+    code: "MAXED", phase: "chain", sev: "ok", sel: "fall",
+    test: (c, i, k) => k.lvl === 3,
+    text: () => "🏙️ Fully developed. Level 3 is the top of this zone — nothing more to build here.",
+    evid: (c, i, k) => ({ lvl: k.lvl, dem: k.dem }),
+    apply: null,
+  },
+  {
+    code: "DEM_THRESH", phase: "chain", sev: "warn", sel: "fall",
+    test: (c, i, k) => k.dem > 0,
+    text: (c, i, k) => `⏸️ Stalled: demand ${k.dem.toFixed(2)}, needs 0.15 to upgrade. ` +
+      `It is positive but not enough — this tile will sit here forever until demand rises.`,
+    evid: (c, i, k) => ({ dem: k.dem, need: 0.15, shortfall: 0.15 - k.dem }),
+    apply: null,
+  },
+  {
+    code: "DEM_SLACK", phase: "chain", sev: "warn", sel: "fall",
+    test: () => true,
+    text: (c, i, k) => `⏸️ Stalled: demand ${k.dem.toFixed(2)} — flat. ` +
+      `Not low enough to lose tenants, not high enough (0.15) to build.`,
+    evid: (c, i, k) => ({ dem: k.dem, need: 0.15, declineAt: -0.25 }),
+    apply: null,
+  },
+
+  /* ---- phase: post (evaluated AFTER the chain, never instead of it) ---- */
+  {
+    code: "GRIDLOCK", phase: "post", sev: "warn", sel: "post",
+    // reads LIVE lvl (an upgrade this very tick can push the tile into range),
+    // exactly as the shipped `if (this.lvl[i] > 1 && cong > 0.8 …)` does.
+    test: (c, i, k) => c.lvl[i] > 1 && ensureCong(c, k) > 0.8,
+    text: (c, i, k) => `🚗 Gridlock ${Math.round(ensureCong(c, k) * 100)}% — ${pct(GRIDLOCK_P)} chance per check ` +
+      `that tenants give up on the commute and this block loses a level.`,
+    evid: (c, i, k) => ({ cong: ensureCong(c, k), threshold: 0.8, p: GRIDLOCK_P }),
+    apply: (c, i, k, rng) => { if (rng() < GRIDLOCK_P) c.lvl[i]--; },
+  },
+
+  /* ---- bucket nonzone: DIAGNOSE-ONLY. growthPass `continue`s on every tile
+     here (it only ever samples ZR/ZC/ZI), so none of these rows can ever be
+     reached by the sim loop and all of them carry `apply: null`. They exist so
+     the Inspect tool has a verdict for the OTHER half of the map. ---- */
+  {
+    code: "PUMP_UNPOWERED", phase: "nonzone", sev: "crit", sel: "nonzone",
+    test: (c, i, k) => k.ov === OV.PUMP && c.anc[i] === i && !k.powered,
+    text: () => "⚡ This pump has no power — it is supplying 0 tiles. A tower needs none; a pump does.",
+    evid: (c) => ({ waterSupply: c.waterSupply, waterDemand: c.waterDemand }),
+    apply: null,
+  },
+  {
+    code: "LINE_ORPHAN", phase: "nonzone", sev: "warn", sel: "nonzone",
+    test: (c, i) => c.rail[i] === RL.STATION && !c.stationLive[i],
+    text: (c, i) => {
+      let n = 0; const net = c.railNet[i];
+      for (let j = 0; j < c.rail.length; j++)
+        if (c.rail[j] === RL.STATION && c.railNet[j] === net) n++;
+      return n < 2
+        ? `🚉 Dead station: only ${n} station on this line. A line needs TWO to carry anyone.`
+        : "🚉 Dead station: the line has stations but no power. Wire it up.";
+    },
+    evid: (c, i) => ({ net: c.railNet[i], powered: c.powered[i], live: c.stationLive[i] }),
+    apply: null,
+  },
+  {
+    code: "PLANT_AGED", phase: "nonzone", sev: "warn", sel: "nonzone",
+    test: (c, i, k) => isPlant(k.ov) && c.anc[i] === i &&
+      c.year - (c.plantYear[i] || c.year) >= PLANT_WARN_AGE,
+    text: (c, i) => {
+      const age = Math.max(0, c.year - (c.plantYear[i] || c.year));
+      return `🏭 ${age} years old — output has decayed to ${c.plantEffectiveCap(i)} of ` +
+        `${POWER_CAP[c.over[i]]} MW. Rebuild it before it drags the grid down.`;
+    },
+    evid: (c, i) => ({ age: Math.max(0, c.year - (c.plantYear[i] || c.year)),
+      eff: c.plantEffectiveCap(i), nameplate: POWER_CAP[c.over[i]], warnAge: PLANT_WARN_AGE }),
+    apply: null,
+  },
+  /* The two "special building" rows apply ONLY to the four coverage stations,
+     and deliberately so. stampCoverage skips an unpowered station (sim.js
+     `if (!this.powered[i]) continue`), so "no power" is a TRUE claim there —
+     but a park, mayor's house, stadium, airport or seaport has no
+     power-gated effect at all, and a WIREROAD is a street, not a building.
+     Telling the player any of those is "doing nothing for the city" would be
+     exactly the kind of lie this milestone exists to remove. */
+  {
+    code: "SPECIAL_UNPOWERED", phase: "nonzone", sev: "crit", sel: "nonzone",
+    test: (c, i, k) => isServiceBldg(k.ov) && c.anc[i] === i && !k.powered,
+    text: () => "⚡ No power — this station is stamping ZERO coverage. It might as well not be here.",
+    evid: (c, i) => ({ powered: c.powered[i], supply: c.powerSupply, demand: c.powerDemand }),
+    apply: null,
+  },
+  {
+    code: "SPECIAL_NO_ROAD", phase: "nonzone", sev: "warn", sel: "nonzone",
+    test: (c, i, k) => isServiceBldg(k.ov) && c.anc[i] === i && !k.road,
+    // Honest wording: access[] gates ZONE growth and nothing else, so this
+    // building still works — the problem is the neighbourhood around it.
+    text: () => "🛣️ No street within reach. This station still works, but the lots " +
+      "around it cannot develop — road access is what gates zone growth.",
+    evid: (c, i) => ({ access: c.access[i] }),
+    apply: null,
+  },
+  {
+    code: "NO_VERDICT", phase: "nonzone", sev: "info", sel: "nonzone",
+    test: () => true,
+    /* The total row, and by far the most-clicked one — most of the map is bare
+       ground. "Nothing is holding this tile back" is a growth claim, and bare
+       grass, open water and a plain road have NO growth semantics at all, so
+       on those tiles the sentence was meaningless at best. Fork it: unzoned,
+       unbuilt land gets told what it IS and what would make this panel say
+       something; anything actually built gets the original all-clear. */
+    text: (c, i, k) => {
+      if (k.ov !== OV.NONE) return "Nothing is holding this tile back.";
+      return c.terr[i] === TERR.WATER
+        ? "🌊 Open water. Nothing grows here — fill it or build a bridge across it."
+        : c.terr[i] === TERR.FOREST
+          ? "🌲 Woodland. No zone here yet — zone it and this panel will name whatever holds it back."
+          : "🌱 Bare land, unzoned. No zone here yet — zone it and this panel will name whatever holds it back.";
+    },
+    evid: (c, i, k) => ({ ov: k.ov, terr: c.terr[i] }),
+    apply: null,
+  },
+]);
+
+// Bucketed views, built once. The walk is O(bucket), never O(GROWTH_GATES).
+const GATE_BUCKETS = (() => {
+  const b = { pre: [], z0: [], up: [], fall: [], post: [], nonzone: [] };
+  for (const r of GROWTH_GATES) b[r.sel].push(r);
+  return Object.freeze(b);
+})();
+const GATE_GRIDLOCK = GATE_BUCKETS.post[0];
+const GATE_BY_CODE = (() => {
+  const m = Object.create(null);
+  for (const r of GROWTH_GATES) m[r.code] = r;
+  return m;
+})();
 
 class City {
   constructor(seed, size = 80) {
@@ -632,6 +1074,9 @@ class City {
     this.recCur = { year: this.year, taxes: 0, net: 0, disasters: 0 };
     this.sinceComplaint = 0;        // rollovers since the last citizen complaint
 
+    // GP1: the ONE legitimate global-entropy draw left in sim.js — picking a
+    // seed when the caller gave none. Everything downstream of this line is a
+    // pure function of (seed, tickCount, cursors); see initRng below.
     this.generateTerrain(seed ?? ((Math.random() * 1e9) | 0));
 
     // M27: neighboring cities & regional connections. neighbors is a PURE
@@ -647,6 +1092,122 @@ class City {
     for (let e = 0; e < 4; e++) this.disp[e] = this.neighbors[e].disposition0;
     this.conn = [0, 0, 0, 0].map(() => ({ road: false, wire: false, rail: false }));
     this.commuterBias = new Float32Array(n);
+
+    // GP1: the five seeded sim streams. MUST come after generateTerrain (which
+    // assigns this.seed) and before anything that can draw — place() writes
+    // varnt from rng.build, and scenarios.js starts placing the instant the
+    // constructor returns.
+    this.initRng();
+
+    // GP1: preallocated RCI decomposition. recomputeDemand overwrites these
+    // fields IN PLACE every tick (4x/second) — building fresh objects there
+    // would add GC churn to the hottest budget-adjacent path for no gain.
+    this.demandParts = {
+      r: { jobsAvail: 0, taxMod: 0, stadMod: 0, svcMod: 0, event: 0, ordinance: 0, raw: 0, clamped: 0 },
+      c: { gap: 0, taxMod: 0, svcMod: 0, event: 0, ordinance: 0, raw: 0, clamped: 0 },
+      i: { gap: 0, base: 0.28, taxMod: 0, svcMod: 0, event: 0, ordinance: 0, raw: 0, clamped: 0 },
+    };
+    // GP1: scratch ctx for growthPass's gate walk — reused across all 340
+    // samples per tick so the hot loop allocates nothing. diagnoseTile always
+    // builds a FRESH object, so a UI query can never stomp the sim's scratch.
+    this._gk = null;
+  }
+
+  /* ---- GP1: seeded sim streams ----
+     Builds (or re-pins) this.rng = {growth, traffic, fire, hazard, build}.
+     `cursors` — the five int32s off a v12 save — restores an exact resume
+     point. With no cursors (fresh city, or a v11 save migrated forward) each
+     stream falls back to a PURE derivation from (seed, tickCount): no
+     Date.now, no Math.random, so the same save loads identically on every
+     machine and a v11 city keeps playing deterministically from wherever its
+     clock stopped. */
+  initRng(cursors) {
+    const r = this.rng || (this.rng = {});
+    for (const key of RNG_KEYS) {
+      const given = cursors && Number.isFinite(cursors[key]);
+      const s = given ? (cursors[key] | 0)
+        : (((this.seed | 0) ^ RNG_SALT[key] ^ Math.imul(this.tickCount | 0, 0x9E3779B1)) | 0);
+      if (r[key]) r[key].setState(s); else r[key] = makeStream(s);
+    }
+    return r;
+  }
+
+  /* ---- GP1: the gate context ----
+     One object holding everything the truth table's predicates read. `cong`
+     and `fit` are LAZY (sentinels -1 / null) so the two commonest verdicts —
+     BURNING and UNPOWERED, 75% of classifications on a real city — never pay
+     for a 25-cell traffic scan or the land-value product.
+     ZERO writes. ZERO rng draws. Pass `out` to reuse a scratch object. */
+  _gctx(i, out) {
+    const k = out || {};
+    const ov = this.over[i];
+    k.i = i; k.ov = ov;
+    k.zone = (ov === OV.ZR || ov === OV.ZC || ov === OV.ZI);
+    // M27: commuterBias is exactly 0.0 where no commute link is open, so this
+    // is a bit-identical `+0.0` no-op vs pre-M27; an open link raises effective
+    // demand within K tiles of the connected edge → higher near-border growth.
+    k.dem = k.zone
+      ? (ov === OV.ZR ? this.demand.r : ov === OV.ZC ? this.demand.c : this.demand.i) + this.commuterBias[i]
+      : 0;
+    k.lvl = this.lvl[i];
+    k.road = this.access[i] > 0;
+    k.powered = this.powered[i];
+    k.fire = this.fire[i];
+    k.cong = -1; k.fit = null; k.svc = -1;
+    return k;
+  }
+
+  /* ---- GP1: the gate walk ----
+     Picks the ONE bucket the tile's state routes it to, then returns the first
+     row whose predicate holds. Every bucket ends in a total row (`test: () =>
+     true`), so this always returns a row. PURE. */
+  _matchGate(i, k) {
+    const sel = !k.zone ? "nonzone"
+      : (k.fire || !k.powered) ? "pre"
+      : k.lvl === 0 ? "z0"
+      : (k.dem > 0.15 && k.lvl < 3) ? "up"
+      : "fall";
+    const rows = GATE_BUCKETS[sel];
+    for (let r = 0; r < rows.length; r++) if (rows[r].test(this, i, k)) return rows[r];
+    return rows[rows.length - 1];
+  }
+
+  /* ---- GP1: the player-facing verdict ----
+     _gctx + _matchGate + the row's own copy. NEVER calls apply, so it performs
+     no sim write and draws no rng — the precondition that lets a verification
+     harness diagnose a tile INSIDE growthPass's own loop without perturbing
+     the very stream it is measuring. */
+  diagnoseTile(i) {
+    const k = this._gctx(i);
+    const row = this._matchGate(i, k);
+    // GRIDLOCK is a phase, not a chain row: it runs after the chain for every
+    // non-burning powered zone tile and can co-occur with an upgrade.
+    const gridlock = !!(k.zone && !k.fire && k.powered && GATE_GRIDLOCK.test(this, i, k));
+    /* SEVERITY IS A CLAIM TOO. The chain row names the binding gate, but the
+       GRIDLOCK phase runs after it on the SAME visit, so a row whose own
+       severity is "ok" can still describe a tile that is net-shrinking. Left
+       alone, that painted a green all-clear box on a block 12x more likely to
+       lose a level than gain one. Compare the two probabilities and demote the
+       verdict to "warn" whenever gridlock wins — a green box now means the
+       tile really is, on its own numbers, not going backwards. Rows that
+       cannot raise a level (MAXED, the hard caps, the stalls) report pUp 0 and
+       are demoted by the same rule. */
+    const pUp = row.pUp ? row.pUp(this, i, k) : 0;
+    const netDecline = gridlock && isNetDeclining(this, i, k, pUp);
+    return {
+      code: row.code,
+      severity: netDecline && row.sev === "ok" ? "warn" : row.sev,
+      phase: row.phase,
+      text: row.text(this, i, k),
+      evidence: row.evid ? row.evid(this, i, k) : {},
+      gridlock, netDecline, pUp,
+      gridlockText: gridlock
+        ? GATE_GRIDLOCK.text(this, i, k) +
+          (netDecline
+            ? ` That beats this block's own ${pct(pUp)} upgrade odds — expect it to LOSE levels, not gain them.`
+            : "")
+        : "",
+    };
   }
 
   idx(x, y) { return y * MAP + x; }
@@ -777,7 +1338,7 @@ class City {
     const type = toolOverlay(tool);
     if (tool === "tree") {
       const i = this.idx(x, y);
-      this.terr[i] = TERR.FOREST; this.varnt[i] = (Math.random() * 3) | 0;
+      this.terr[i] = TERR.FOREST; this.varnt[i] = (this.rng.build() * 3) | 0;
       this.funds -= cost;
       this.terrRev++;
       return { ok: true, cost };
@@ -803,7 +1364,7 @@ class City {
       if (tool === "wire" && this.over[i] === OV.ROAD) put = OV.WIREROAD;
       else if (tool === "road" && this.over[i] === OV.WIRE) put = OV.WIREROAD;
       this.over[i] = put; this.lvl[i] = 0; this.anc[i] = a;
-      this.varnt[i] = (Math.random() * 5) | 0;
+      this.varnt[i] = (this.rng.build() * 5) | 0;
       this.plantYear[i] = 0;
       if (this.terr[i] === TERR.FOREST) { this.terr[i] = TERR.GRASS; this.terrRev++; }
     }
@@ -922,7 +1483,7 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t) &&
-            !isWaterOv(t) && !isMega(t) && Math.random() < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out
+            !isWaterOv(t) && !isMega(t) && this.rng.hazard() < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -937,7 +1498,7 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
-            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && Math.random() < 0.3)
+            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && this.rng.hazard() < 0.3)
           this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer; M28: a power island doesn't flicker
       }
     }
@@ -1264,7 +1825,7 @@ class City {
           const j = Y * MAP + X;
           if ((this.over[j] !== OV.ROAD && this.over[j] !== OV.WIREROAD) || j === prev) continue; // M26: trips walk through crossings
           cnt++;
-          if (Math.random() * cnt < 1) nxt = j;  // reservoir pick
+          if (this.rng.traffic() * cnt < 1) nxt = j;  // reservoir pick
         }
         if (nxt < 0) break;
         prev = cur; cur = nxt;
@@ -1315,7 +1876,7 @@ class City {
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] !== OV.ROAD && this.over[i] !== OV.WIREROAD) { this.roadWear[i] = 0; continue; } // M26: a crossing wears like a road (may crumble to rubble, removing both)
       this.roadWear[i] = Math.max(0, Math.min(255, this.roadWear[i] + delta));
-      if (F === 0 && this.roadWear[i] >= 255 && Math.random() < 0.35) {
+      if (F === 0 && this.roadWear[i] >= 255 && this.rng.traffic() < 0.35) {
         this.over[i] = OV.RUBBLE; this.lvl[i] = 0; this.anc[i] = -1;
         this.roadWear[i] = 0;
         crumbled++;
@@ -1519,6 +2080,25 @@ class City {
     this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR);
     this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC);
     this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI);
+    /* GP1: the RCI bars decompose into their named signed contributors. The
+       three expressions above are NOT re-associated — they stand verbatim, and
+       the parts below are recomputed ALONGSIDE them from the same locals, so
+       the sum of the parts is the pre-clamp value by construction. Fields are
+       overwritten IN PLACE on the preallocated demandParts object: this runs
+       every tick, and a fresh object here would be pure GC churn. */
+    const dp = this.demandParts, pr = dp.r, pc = dp.c, pi = dp.i;
+    pr.jobsAvail = jobsAvail / 220; pr.taxMod = taxMod; pr.stadMod = stadMod;
+    pr.svcMod = svcMod; pr.event = evR; pr.ordinance = om.demR;
+    pr.raw = pr.jobsAvail + pr.taxMod + pr.stadMod + pr.svcMod + pr.event + pr.ordinance;
+    pr.clamped = this.demand.r;
+    pc.gap = (pop * 0.28 - cJobs) / 160; pc.taxMod = taxMod * 0.6;
+    pc.svcMod = svcMod * 0.5; pc.event = evC; pc.ordinance = om.demC;
+    pc.raw = pc.gap + pc.taxMod + pc.svcMod + pc.event + pc.ordinance;
+    pc.clamped = this.demand.c;
+    pi.gap = (pop * 0.42 - iJobs) / 180; pi.base = 0.28; pi.taxMod = taxMod * 0.4;
+    pi.svcMod = svcMod * 0.5; pi.event = evI; pi.ordinance = om.demI;
+    pi.raw = pi.gap + pi.base + pi.taxMod + pi.svcMod + pi.event + pi.ordinance;
+    pi.clamped = this.demand.i;
     function clampD(v) { return Math.max(-1, Math.min(1, v)); }
   }
 
@@ -1671,66 +2251,47 @@ class City {
   }
 
   // ---------- growth ----------
+  /* GP1: growthPass CONSUMES the truth table (GROWTH_GATES) rather than
+     re-implementing it, so the verdict the player reads in the Inspect dialog
+     and the branch the sim actually takes are the SAME object.
+
+     This is a pure refactor of the shipped if/else chain: same draws, same
+     order, same count, same writes. The three things that make that true:
+       1. the zone filter and the fire filter still short-circuit BEFORE any
+          context is built (a burning tile writes nothing, not even unpow);
+       2. `pre` rows still `continue` — nothing after them runs;
+       3. GRIDLOCK is tested AFTER the chain's apply, reading LIVE lvl, so an
+          upgrade this very tick can be immediately undone by congestion —
+          exactly as before.
+     Everything else that changed is a pure READ moved later: `cong` and `fit`
+     are now computed lazily (via _gctx) instead of eagerly, which touches no
+     rng and no state and takes the 25-cell traffic scan off the UNPOWERED
+     path — the single commonest verdict in a real city. */
   growthPass() {
     const n = MAP * MAP;
     const tries = 340;
+    const rng = this.rng.growth;
+    const gk = this._gk || (this._gk = {});
     for (let t = 0; t < tries; t++) {
-      const i = (Math.random() * n) | 0;
+      const i = (rng() * n) | 0;
       const ov = this.over[i];
       if (ov !== OV.ZR && ov !== OV.ZC && ov !== OV.ZI) continue;
       if (this.fire[i]) continue;
-      // M27: commuterBias is exactly 0.0 where no commute link is open, so this
-      // is a bit-identical `+0.0` no-op vs pre-M27; an open link raises effective
-      // demand within K tiles of the connected edge → higher near-border growth.
-      let dem = (ov === OV.ZR ? this.demand.r : ov === OV.ZC ? this.demand.c : this.demand.i) + this.commuterBias[i];
-      const powered = this.powered[i], road = this.access[i] > 0;
 
-      if (!powered) {
-        this.unpow[i] = Math.min(250, this.unpow[i] + 1);
-        if (this.lvl[i] > 0 && this.unpow[i] > 6 && Math.random() < 0.35) this.lvl[i]--;
-        continue;
-      }
+      const k = this._gctx(i, gk);
+      const row = this._matchGate(i, k);
+      // instrumentation hook: absent in play, installed by verification
+      // harnesses that need the branch the sim actually took. One property
+      // read per sampled tile.
+      if (this._gpProbe) this._gpProbe(i, row.code, k);
+
+      if (row.phase === "pre") { if (row.apply) row.apply(this, i, k, rng); continue; }
       this.unpow[i] = 0;
+      if (row.apply) row.apply(this, i, k, rng);
 
-      // congestion on the serving roads (city.traffic) dampens growth
-      const cong = this.trafficNear(i) / 255;
-
-      if (this.lvl[i] === 0) {
-        if (road && dem > 0 && Math.random() < dem * 0.85 * (1 - cong * 0.7)) {
-          this.lvl[i] = 1; this.varnt[i] = (Math.random() * 5) | 0;
-        }
-      } else if (dem > 0.15 && this.lvl[i] < 3) {
-        // upgrading needs decent conditions
-        let fit = this.landv[i] / 255;
-        if (ov === OV.ZI) fit = 0.75; // industry doesn't care about views
-        if (ov === OV.ZR) fit -= this.crime[i] / 400;
-        fit *= 1 - cong * 0.75;       // nobody moves up on a gridlocked block
-        // schools & hospitals raise the growth cap: coverage speeds upgrades…
-        const svc = (this.eduCov[i] + this.medCov[i]) / 510; // 0..1
-        fit *= 0.7 + svc * 1.1;
-        // M24: water gates DENSITY. A strained system (low pressure) damps EVERY
-        // upgrade citywide without ever forcing anyone down; full pressure is a
-        // no-op (0.55 + 0.45*1 = 1). The gate below is UPGRADE-ONLY — it never
-        // decrements lvl, so a pre-M24 save (waterPressure defaults to 1, all
-        // watered[]===0) keeps every loaded skyline and only pauses lots trying
-        // to rise above level 1 until the player lays pipe from a tower/pump.
-        fit *= 0.55 + 0.45 * this.waterPressure;
-        // …and top-tier development flat-out requires a school OR hospital in reach
-        if (this.lvl[i] >= 1 && !this.watered[i]) {
-          // M24: no water → hard-capped at level 1 (a shack has a well; density needs mains)
-        } else if (this.lvl[i] === 2 && this.eduCov[i] < 8 && this.medCov[i] < 8) {
-          // capped at level 2 — nobody builds towers without services
-        } else if (this.lvl[i] === 2 && this.waterPressure < 0.9) {
-          // M24: strained mains → no level-3 towers until pressure recovers
-        } else if (road && Math.random() < dem * fit * 0.42) {
-          this.lvl[i]++; this.varnt[i] = (Math.random() * 5) | 0;
-        }
-      } else if (dem < -0.25 && this.lvl[i] > 0 && Math.random() < -dem * 0.3) {
-        this.lvl[i]--;
-      }
-
-      // gridlock actively drives tenants away
-      if (this.lvl[i] > 1 && cong > 0.8 && Math.random() < 0.07) this.lvl[i]--;
+      // gridlock actively drives tenants away — an ADDITIONAL effect, not a
+      // branch of the chain above.
+      if (GATE_GRIDLOCK.test(this, i, k)) GATE_GRIDLOCK.apply(this, i, k, rng);
     }
   }
 
@@ -1771,7 +2332,7 @@ class City {
                            this.over[j] !== OV.RUBBLE) || this.terr[j] === TERR.FOREST;
         if (!flammable) continue;
         const chance = 0.09 * (1 - this.fireCov[j] / 300);
-        if (Math.random() < chance) this.fire[j] = 8 + ((Math.random() * 6) | 0);
+        if (this.rng.fire() < chance) this.fire[j] = 8 + ((this.rng.fire() * 6) | 0);
       }
     }
   }
@@ -1783,7 +2344,7 @@ class City {
                        this.over[i] !== OV.WIREROAD && // M26: crossing is a road, non-flammable
                        this.over[i] !== OV.PIPE &&      // M24: a buried pipe doesn't burn (towers/pumps do)
                        this.over[i] !== OV.RUBBLE) || this.terr[i] === TERR.FOREST;
-    if (flammable) { this.fire[i] = 10 + ((Math.random() * 8) | 0); this.devRev++; }
+    if (flammable) { this.fire[i] = 10 + ((this.rng.fire() * 8) | 0); this.devRev++; }
   }
 
   startDisaster(kind) {
@@ -1803,8 +2364,8 @@ class City {
         if (this.over[i] >= OV.ZR && this.over[i] !== OV.RUBBLE &&
             this.over[i] !== OV.WIREROAD && // M26: crossing is a road, not flammable
             this.over[i] !== OV.PIPE) cand.push(i); // M24: a buried pipe isn't a fire candidate (towers/pumps, like plants, are)
-      const i = cand.length ? cand[(Math.random() * cand.length) | 0]
-                            : (Math.random() * this.over.length) | 0;
+      const i = cand.length ? cand[(this.rng.hazard() * cand.length) | 0]
+                            : (this.rng.hazard() * this.over.length) | 0;
       this.ignite(i % MAP, (i / MAP) | 0);
       this.pushMsg("🔥 FIRE breaks out downtown! Firefighters scramble.");
       return;
@@ -1813,9 +2374,9 @@ class City {
       this.recCur.disasters++;
       this.disaster = {
         kind,
-        x: 5 + Math.random() * (MAP - 10),
-        y: 5 + Math.random() * (MAP - 10),
-        vx: Math.random() - 0.5, vy: Math.random() - 0.5,
+        x: 5 + this.rng.hazard() * (MAP - 10),
+        y: 5 + this.rng.hazard() * (MAP - 10),
+        vx: this.rng.hazard() - 0.5, vy: this.rng.hazard() - 0.5,
         ticks: kind === "ufo" ? 70 : 90,
       };
       this.pushMsg(kind === "ufo"
@@ -1829,8 +2390,8 @@ class City {
       this.recCur.disasters++;
       this.disaster = {
         kind: "quake",
-        x: (1 + Math.random() * (MAP - 2)) | 0,
-        y: (1 + Math.random() * (MAP - 2)) | 0,
+        x: (1 + this.rng.hazard() * (MAP - 2)) | 0,
+        y: (1 + this.rng.hazard() * (MAP - 2)) | 0,
         ticks: 24, r: 0,
       };
       this.pushMsg("🌎 EARTHQUAKE! The ground buckles and towers crack across the city!");
@@ -1850,7 +2411,7 @@ class City {
         }
       }
       if (!front.length) return; // landlocked interior: nothing to flood
-      const seed = front[(Math.random() * front.length) | 0];
+      const seed = front[(this.rng.hazard() * front.length) | 0];
       this.recCur.disasters++;
       this.disaster = {
         kind: "flood",
@@ -1880,9 +2441,9 @@ class City {
       this.recCur.disasters++;
       this.disaster = {
         kind: "monster",
-        x: 5 + Math.random() * (MAP - 10),
-        y: 5 + Math.random() * (MAP - 10),
-        vx: Math.random() - 0.5, vy: Math.random() - 0.5,
+        x: 5 + this.rng.hazard() * (MAP - 10),
+        y: 5 + this.rng.hazard() * (MAP - 10),
+        vx: this.rng.hazard() - 0.5, vy: this.rng.hazard() - 0.5,
         ticks: 110,
       };
       this.pushMsg("🦖 A colossal MONSTER rises from the depths and rampages!");
@@ -1899,7 +2460,7 @@ class City {
     const moving = d.kind === "tornado" || d.kind === "ufo" || d.kind === "monster";
     let cx, cy;
     if (moving) {
-      d.vx += (Math.random() - 0.5) * 0.4; d.vy += (Math.random() - 0.5) * 0.4;
+      d.vx += (this.rng.hazard() - 0.5) * 0.4; d.vy += (this.rng.hazard() - 0.5) * 0.4;
       const sp = Math.hypot(d.vx, d.vy) || 1;
       d.vx = d.vx / sp * 0.8; d.vy = d.vy / sp * 0.8;
       d.x = Math.max(1, Math.min(MAP - 2, d.x + d.vx));
@@ -1912,7 +2473,7 @@ class City {
         const X = cx + dx, Y = cy + dy;
         if (!this.inMap(X, Y)) continue;
         const i = this.idx(X, Y);
-        if (this.over[i] !== OV.NONE && Math.random() < 0.5) {
+        if (this.over[i] !== OV.NONE && this.rng.hazard() < 0.5) {
           const a = this.anc[i] >= 0 ? this.anc[i] : i;
           const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
@@ -1920,13 +2481,13 @@ class City {
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
           }
           this.powerDirty = true;
-        } else if (this.terr[i] === TERR.FOREST && Math.random() < 0.4) {
+        } else if (this.terr[i] === TERR.FOREST && this.rng.hazard() < 0.4) {
           this.terr[i] = TERR.GRASS; this.terrRev++;
         }
       }
     } else if (d.kind === "ufo") {
       // the saucer zaps things with fire
-      if (Math.random() < 0.35) this.ignite(cx, cy);
+      if (this.rng.hazard() < 0.35) this.ignite(cx, cy);
     } else if (d.kind === "quake") {
       // expand the shock ring; convert buildings on the current Chebyshev ring
       // to rubble (same anchor→footprint idiom as the tornado) + scatter fire.
@@ -1938,7 +2499,7 @@ class City {
         const X = ex + dx, Y = ey + dy;
         if (!this.inMap(X, Y)) continue;
         const i = this.idx(X, Y);
-        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && Math.random() < 0.55) {
+        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && this.rng.hazard() < 0.55) {
           const a = this.anc[i] >= 0 ? this.anc[i] : i;
           const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
@@ -1947,7 +2508,7 @@ class City {
           }
           this.powerDirty = true;
         }
-        if (Math.random() < 0.08) this.ignite(X, Y);
+        if (this.rng.hazard() < 0.08) this.ignite(X, Y);
       }
       if (d.r > QUAKE_MAX || d.ticks <= 0) {
         this.disaster = null;
@@ -1999,8 +2560,8 @@ class City {
         const X = ex + dx, Y = ey + dy;
         if (!this.inMap(X, Y)) continue;
         const i = this.idx(X, Y);
-        if (Math.random() < 0.15) this.ignite(X, Y);
-        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && Math.random() < 0.05) {
+        if (this.rng.hazard() < 0.15) this.ignite(X, Y);
+        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && this.rng.hazard() < 0.05) {
           const a = this.anc[i] >= 0 ? this.anc[i] : i;
           const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
@@ -2023,7 +2584,7 @@ class City {
         const X = cx + ddx, Y = cy + ddy;
         if (!this.inMap(X, Y)) continue;
         const i = this.idx(X, Y);
-        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && Math.random() < 0.7) {
+        if (this.over[i] !== OV.NONE && this.over[i] !== OV.RUBBLE && this.rng.hazard() < 0.7) {
           const a = this.anc[i] >= 0 ? this.anc[i] : i;
           const ax = a % MAP, ay = (a / MAP) | 0, s = sizeOf(this.over[a]);
           for (let ddy2 = 0; ddy2 < s; ddy2++) for (let ddx2 = 0; ddx2 < s; ddx2++) {
@@ -2033,7 +2594,7 @@ class City {
           this.powerDirty = true;
         }
       }
-      if (Math.random() < 0.3) this.ignite(cx, cy);
+      if (this.rng.hazard() < 0.3) this.ignite(cx, cy);
       if (d.ticks <= 0) {
         this.disaster = null;
         this.pushMsg("🦖 The monster retreats to the sea, leaving ruin in its wake.");
@@ -2267,8 +2828,8 @@ class City {
     }
     if (best < 0) return;
     this.sinceComplaint = 0;
-    const name = CITIZEN_FIRST[(Math.random() * CITIZEN_FIRST.length) | 0] + " " +
-                 CITIZEN_LAST[(Math.random() * CITIZEN_LAST.length) | 0];
+    const name = CITIZEN_FIRST[(this.rng.hazard() * CITIZEN_FIRST.length) | 0] + " " +
+                 CITIZEN_LAST[(this.rng.hazard() * CITIZEN_LAST.length) | 0];
     this.pushMsg({
       complaint: true, kind: bestKind, name,
       x: best % MAP, y: (best / MAP) | 0,
@@ -2342,7 +2903,7 @@ class City {
     if (this.y2kActive()) {
       if (this.tickCount % 3 === 0) this.powerDirty = true; // flicker pulse
       if (this.tickCount % 8 === 0)
-        this.pushMsg(Y2K_LINES[(Math.random() * Y2K_LINES.length) | 0]);
+        this.pushMsg(Y2K_LINES[(this.rng.hazard() * Y2K_LINES.length) | 0]);
     }
     // M25: capture the refresh decision BEFORE recomputePower() clears powerDirty.
     // Stations read powered[], so recomputeRail runs AFTER power and BEFORE
@@ -2382,10 +2943,10 @@ class City {
     this.disasterTick();
 
     // random misfortune
-    if (this.disastersEnabled && Math.random() < 0.0009 && this.pop > 200) {
+    if (this.disastersEnabled && this.rng.hazard() < 0.0009 && this.pop > 200) {
       // M29: the expanded roster rides INSIDE the same disablement guard, so
       // disastersEnabled=false suppresses every kind (old and new) alike.
-      const roll = Math.random();
+      const roll = this.rng.hazard();
       const kind = roll < 0.55 ? "fire"
                  : roll < 0.68 ? "tornado"
                  : roll < 0.78 ? "ufo"
@@ -2520,8 +3081,57 @@ class City {
   // ---------- save / load ----------
   serialize() {
     return JSON.stringify({
-      v: 11, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: SAVE_V, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
+      // GP1 (save v12): the five sim-stream cursors. Five int32s — JSON-safe by
+      // construction (makeStream's state is `a | 0`, so never NaN/Infinity) —
+      // and the ONLY thing standing between "same seed, same script" and a
+      // byte-identical resume. A save without them (v11) derives them purely
+      // from (seed, tickCount); see migrateSave + initRng.
+      rng: { growth: this.rng.growth.state(), traffic: this.rng.traffic.state(),
+        fire: this.rng.fire.state(), hazard: this.rng.hazard.state(),
+        build: this.rng.build.state() },
+      /* GP1 (save v12): the ACCUMULATED planes. Cursors alone are not enough
+         to resume a city byte-exactly, because none of these is a pure
+         function of the authored tiles:
+           unpow    genuinely AUTHORED by growthPass and nothing recomputes it
+                    — before v12 it was silently reset to 0 on every load;
+           traffic  a blend (traffic*0.5 + load*0.5), i.e. an accumulator;
+           landv / crime / poll  rebuilt only every 14th tick, so a save taken
+                    off-phase carries maps the load cascade would rebuild from
+                    a LATER world than the one they were measured on.
+           powered  LOOKS derived — and its flood-fill IS — but recomputePower
+                    finishes by CUTTING a rng.hazard-chosen subset of consumers
+                    during a brownout (sim.js "brownout: cut power to a
+                    fraction of consumers") and again during a Y2K flicker.
+                    That cut pattern is a STOCHASTIC stamp, not a function of
+                    the world: re-running the cascade at load draws a DIFFERENT
+                    subset off the restored cursor, and because power is only
+                    refreshed on `powerDirty || tickCount % 10 === 0`, the
+                    wrong pattern survives for up to nine ticks and feeds
+                    growthPass's UNPOWERED gate, jobs, demand and the ticker.
+                    Measured before this line existed: 455/6400 entries differ
+                    across a round trip, and save-at-300/resume-to-600 was
+                    byte-identical on only 6 of 20 seeds. A city that is NOT
+                    browning out re-derives the identical plane, which is why
+                    the defect hid — see the brownout A/B in MILESTONES.md.
+         Restored in deserialize alongside the cascade (powered immediately
+         after recomputePower, so everything downstream of it — access, water,
+         rail, jobs, demand — is computed from the SAME grid the save was taken
+         on; the rest last, after the cascade that would overwrite them). A v11
+         save simply lacks them and loads exactly as it did before. */
+      unpow: Array.from(this.unpow),
+      traffic: Array.from(this.traffic),
+      landv: Array.from(this.landv),
+      crime: Array.from(this.crime),
+      poll: Array.from(this.poll),
+      powered: Array.from(this.powered),
+      /* GP1 (save v12): the last unserialized ACCUMULATOR SCALAR. sinceComplaint
+         counts month rollovers since the last citizen complaint and gates two
+         rng.hazard() draws in scanComplaints; dropping it reset the counter to
+         0 on load, so the complaint fired on a different rollover and the
+         hazard cursor drifted by exactly 2 draws from that month onward. */
+      sinceComplaint: this.sinceComplaint,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
       roadWear: Array.from(this.roadWear),
@@ -2574,7 +3184,7 @@ class City {
   }
 
   static deserialize(json) {
-    const d = JSON.parse(json);
+    const d = migrateSave(JSON.parse(json));
     // v<=3 saves predate the size field: they are always 80x80, but infer from
     // the raw array length anyway so any well-formed save loads consistently.
     const size = d.size ||
@@ -2582,6 +3192,12 @@ class City {
     const c = new City(d.seed, size);
     c.cityName = d.cityName; c.funds = d.funds; c.taxRate = d.taxRate;
     c.month = d.month; c.year = d.year; c.tickCount = d.tickCount;
+    // GP1: pin the streams as soon as (seed, tickCount) are known, so anything
+    // the restore cascade below draws (recomputePower's brownout / Y2K cuts)
+    // comes off the right cursor rather than the ctor's tickCount-0 guess.
+    // The cascade ADVANCES those cursors; they are re-pinned at the very end
+    // of this method so deserialize stays a PURE restore (see there).
+    c.initRng(d.rng);
     c.disastersEnabled = d.disastersEnabled;
     c.terr.set(d.terr); c.over.set(d.over); c.lvl.set(d.lvl);
     c.varnt.set(d.varnt); c.anc.set(d.anc);
@@ -2671,7 +3287,19 @@ class City {
     // real rank from the now-computed population.
     if (typeof d.tier === "number") c.tier = d.tier;
     c.recomputeOrdinances();
-    c.recomputePower(); c.recomputeAccess();
+    c.recomputePower();
+    /* GP1 (save v12): overlay the SAVED power grid on top of the one the
+       cascade just flooded. This has to happen HERE — between recomputePower
+       and everything that reads powered[] — rather than at the end with the
+       other accumulated planes, because recomputeWater (pump motors),
+       recomputeRail (station power), recomputeMaps and recomputeDemand (jobs)
+       all consume it, and a resumed city whose jobs/demand were rebuilt off a
+       re-rolled brownout pattern diverges on the very next tick. The flood
+       itself is deterministic; only the brownout / Y2K cut subset is not, so
+       for a city that is not browning out this line is a no-op. A v11 save has
+       no `powered` field → the cascade's own result stands, exactly as before. */
+    if (Array.isArray(d.powered)) c.powered.set(d.powered);
+    c.recomputeAccess();
     // M24: rebuild the DERIVED water state from the loaded over[] (PIPE/WATERTOWER/
     // PUMP ride in over[]/anc[] — no new serialized array). Runs after
     // recomputePower so a loaded pump reads fresh powered[]. A pre-M24 save has
@@ -2719,6 +3347,35 @@ class City {
     // M29: restore an in-progress disaster, or null (legacy v10 saves and every
     // no-disaster save simply lack the field → loads identical to pre-M29).
     c.disaster = d.disaster || null;
+    /* GP1: RE-PIN the five cursors, last thing before the city is handed back.
+       The restore cascade above (recomputePower in particular) legitimately
+       draws from rng.hazard when the loaded city is browning out or living
+       through Y2K, which would otherwise leave the loaded cursors AHEAD of the
+       saved ones — making serialize(deserialize(S)) !== S and breaking the
+       resume replay. Re-pinning here makes deserialize a pure restore: the
+       cursor a city loads with is exactly the cursor it saved with (or, for a
+       v11 save, exactly the (seed, tickCount) derivation, identically on every
+       machine). The cascade's brownout/Y2K CUT PATTERN is separately discarded
+       by the `c.powered.set(d.powered)` overlay above — an earlier revision of
+       this comment claimed powered[] was fully derived and would be harmlessly
+       rebuilt by the first post-load tick; that was WRONG on both counts (the
+       cut subset is stochastic, and recomputePower clears powerDirty inside
+       the cascade, so the next refresh is up to nine ticks away). */
+    c.initRng(d.rng);
+    /* GP1 (save v12): and the five accumulated planes, for the same reason and
+       in the same place — AFTER the cascade, which would otherwise overwrite
+       them with values rebuilt from a different world-phase. Defensive
+       Array.isArray guards (no hard v === 12 test, matching every prior
+       milestone): a v11-or-earlier save has none of these fields, so the
+       cascade's values stand and it loads exactly as it always did. */
+    if (Array.isArray(d.unpow)) c.unpow.set(d.unpow);
+    if (Array.isArray(d.traffic)) c.traffic.set(d.traffic);
+    if (Array.isArray(d.landv)) c.landv.set(d.landv);
+    if (Array.isArray(d.crime)) c.crime.set(d.crime);
+    if (Array.isArray(d.poll)) c.poll.set(d.poll);
+    // GP1 (save v12): and the complaint-cadence accumulator. A v11 save has no
+    // field → 0, exactly the pre-GP1 behaviour.
+    if (Number.isFinite(d.sinceComplaint)) c.sinceComplaint = d.sinceComplaint | 0;
     return c;
   }
 }

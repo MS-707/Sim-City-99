@@ -23,7 +23,20 @@ const UI = {
     landv: { on: true, color: "#00aaaa", key: "landv", label: "Land value", idx: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
+  // GP1 status-bar state. `status` is a TRANSIENT message with a wall-clock
+  // expiry; when it lapses refreshHUD restores `statusDefault` (the selected
+  // tool). `query` is the open Inspect dialog's tile + its last refill stamp.
+  // `drag` is the DISPLAY-ONLY cost meter for the current paint stroke.
+  status: null,
+  statusDefault: "Welcome, Mayor.",
+  query: null,
+  drag: { active: false, tiles: new Set(), preview: 0, spent: 0, refused: 0, until: 0 },
 };
+// GP1: how long a transient status message survives before the default
+// (selected-tool) text comes back, and how long a finished drag's cost meter
+// lingers in the hover cell.
+const STATUS_TTL = 6000;
+const DRAG_TTL = 6000;
 
 /* --------- user preferences (localStorage, separate from the save) --------- */
 const PREFS_KEY = "simcity99.prefs";
@@ -168,6 +181,7 @@ function uiInit() {
   bindDistricts();
   bindMinimap();
   bindTicker();
+  bindRci();     // GP1: clickable RCI bars
   pickerInit();
   setTool("road");
 }
@@ -291,13 +305,24 @@ function setTool(id) {
   document.querySelectorAll(".toolbtn").forEach(b =>
     b.classList.toggle("active", b.dataset.tool === id));
   const cost = COST[id];
-  setStatus(`${t.name} selected${cost ? ` — §${cost} each` : ""}`);
+  // GP1: the tool-selected line is the DEFAULT, not a transient — it must
+  // persist until the tool changes, and it is what a lapsed transient reverts
+  // to. Every other setStatus() caller stays a TTL'd transient.
+  setStatusDefault(`${t.name} selected${cost ? ` — §${cost} each` : ""}`);
   // M21: first pick of the district tool opens the manager (discoverability),
   // since a costless metadata tool has no obvious feedback until it has a brush.
   if (id === "district" && city && city.districts.length === 0) openDistricts();
 }
 
-function setStatus(msg) { document.getElementById("sb-tool").textContent = msg; }
+/* GP1: #sb-tool carries a DEFAULT (the selected tool) plus TRANSIENT messages
+   that expire. Neither is written here — refreshHUD does the single DOM write
+   per frame, so a hundred refusals in one drag cost one text update, and the
+   hover readout (its own cell, #sb-hover) can never clobber a message the
+   player has not had time to read. */
+function setStatus(msg, ttl = STATUS_TTL) {
+  UI.status = { msg, until: performance.now() + ttl };
+}
+function setStatusDefault(msg) { UI.statusDefault = msg; UI.status = null; }
 
 /* ================= menus ================= */
 const MENUS = {
@@ -415,6 +440,7 @@ function bindCanvas() {
         return;
       }
       UI.painting = true;
+      dragBegin();
       applyToolAt(e);
     }
   });
@@ -437,6 +463,7 @@ function bindCanvas() {
 
   window.addEventListener("mouseup", () => {
     UI.painting = false; UI.panning = false; UI.lastMouse = null;
+    dragEnd();
   });
 
   // GQ11: eased zoom-to-cursor. The wheel no longer writes cam.z directly —
@@ -582,6 +609,43 @@ function rotateView(dir) {
   UI.prefs.viewRot = cam.r; savePrefs();
 }
 
+/* ---- GP1: the drag cost meter ----
+   STRICTLY DISPLAY-ONLY. It never calls city.place, never gates applyToolAt
+   and never raises a refusal of its own: the existing place() ->
+   {ok:false, reason:'funds'} + Snd.denied() path stays the sole authority, so
+   a legitimately negative balance (collectBudget can drive funds below zero)
+   still lets builds proceed exactly as it does today. All this does is COUNT
+   what the stroke already did and preview what it is about to cost. */
+function dragMeterEligible() { return UI.tool !== "query" && UI.tool !== "district"; }
+function dragBegin() {
+  if (!dragMeterEligible()) { UI.drag.active = false; UI.drag.until = 0; return; }
+  const d = UI.drag;
+  d.active = true; d.tiles.clear(); d.preview = 0; d.spent = 0; d.refused = 0; d.until = 0;
+}
+function dragEnd() {
+  if (!UI.drag.active) return;
+  UI.drag.active = false;
+  UI.drag.until = performance.now() + DRAG_TTL;
+}
+// One entry per tile the stroke touches. Called from applyToolAt AROUND the
+// existing place() call — the `before` half prices the tile, the `after` half
+// records what actually happened.
+function dragCount(i, x, y) {
+  const d = UI.drag;
+  if (!d.active || d.tiles.has(i)) return false;
+  d.tiles.add(i);
+  let c = 0;
+  try { c = city.toolCost(UI.tool, x, y) | 0; } catch (err) { c = 0; }
+  d.preview += c;
+  return true;
+}
+function dragRecord(res) {
+  const d = UI.drag;
+  if (!d.active) return;
+  if (res && res.ok) d.spent += (res.cost | 0);
+  else if (res && res.reason === "funds") d.refused++;
+}
+
 let lastPaint = -1;
 function applyToolAt(e) {
   const c = document.getElementById("game");
@@ -599,7 +663,9 @@ function applyToolAt(e) {
   // dedupe above (drag swaths dedupe for free) and returns before city.place.
   if (UI.tool === "district") { city.paintDistrict(x, y, UI.curDistrict); Snd.zone(); return; }
 
+  dragCount(i, x, y);            // GP1: price the tile BEFORE it is built
   const res = city.place(UI.tool, x, y);
+  dragRecord(res);               // GP1: and record what actually happened
   if (res.ok) {
     switch (UI.tool) {
       case "bulldoze": Snd.bulldoze(); break;
@@ -1517,7 +1583,18 @@ function bindGraphControls() {
   _graphControlsBound = true;
 }
 
+/* GP1: openQuery is split in two. fillQuery() rebuilds the panel from live sim
+   state and is safe to call repeatedly; openQuery() fills, shows and remembers
+   the tile so refreshHUD can re-fill it on a 500ms cadence. The verdict block
+   comes straight from city.diagnoseTile — the SAME truth table growthPass
+   consumes — so what the player reads cannot drift from what the sim does. */
 function openQuery(x, y) {
+  fillQuery(x, y);
+  showDlg("dlg-query");
+  UI.query = { x, y, t: performance.now() };
+}
+
+function fillQuery(x, y) {
   const i = y * MAP + x;
   const terrName = ["Grass", "Water", "Forest"][city.terr[i]];
   const ovName = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
@@ -1593,12 +1670,32 @@ function openQuery(x, y) {
     <tr><td>Water</td><td>${city.watered[i] ? "💧 yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
-    <tr><td>Traffic</td><td>${(city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) ? city.traffic[i] : "—"}</td></tr>
+    <tr><td>Traffic</td><td>${(city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD)
+      ? city.traffic[i]
+      /* GP1: a bare "—" here contradicted the verdict box directly above it,
+         which quotes a precise "Gridlock 96%" for this very tile. Traffic
+         lives on ROADS — a zone tile genuinely has no traffic value of its
+         own — but growth reads the NEIGHBOURHOOD figure (trafficNear/255), so
+         surface that instead of a dash. Same number the verdict cites. */
+      : `— (streets nearby ${city.trafficNear(i)})`}</td></tr>
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
     <tr><td>Crime</td><td>${city.crime[i]}</td></tr>
     <tr><td>Education</td><td>${city.eduCov[i]}</td></tr>
     <tr><td>Health</td><td>${city.medCov[i]}</td></tr>`;
-  showDlg("dlg-query");
+  // GP1: the verdict — one binding gate, named, with its proving number, plus
+  // the gridlock line when congestion is ALSO eating this block (gridlock runs
+  // after the growth chain in growthPass, so it is an extra effect, never a
+  // replacement for the verdict above it).
+  const v = city.diagnoseTile(i);
+  const vd = document.getElementById("query-verdict");
+  vd.className = "verdict sev-" + v.severity;
+  vd.textContent = v.text;
+  if (v.gridlock) {
+    const sub = document.createElement("span");
+    sub.className = "verdict-sub";
+    sub.textContent = v.gridlockText;
+    vd.appendChild(sub);
+  }
 }
 
 /* --------- "Traffic on the 5s" chopper report (M18) --------- */
@@ -1802,8 +1899,103 @@ function refreshHUD() {
   setBar("rci-c", city.demand.c);
   setBar("rci-i", city.demand.i);
 
+  // ---- GP1: the once-per-frame status-bar writes ----
+  const now = performance.now();
+  // #sb-tool: transient message while it lives, then back to the default.
+  const msg = (UI.status && now < UI.status.until) ? UI.status.msg : UI.statusDefault;
+  if (msg !== _sbToolLast) {
+    document.getElementById("sb-tool").textContent = msg;
+    _sbToolLast = msg;
+  }
+  // #sb-hover: the drag cost meter if a stroke is live (or just finished),
+  // otherwise the tile under the cursor and what the current tool costs there.
+  // Mousemove writes UI.hover only — this is the ONLY DOM write on that path.
+  const d = UI.drag;
+  let hov = "—", warn = false;
+  if (d.active || now < d.until) {
+    const n = d.tiles.size;
+    hov = `§${d.preview.toLocaleString()} · ${n} tile${n === 1 ? "" : "s"}` +
+      (d.refused ? ` · ${d.refused} refused` : "");
+    warn = d.preview > city.funds;
+  } else if (UI.hover && city.inMap(UI.hover.x, UI.hover.y)) {
+    let c = 0;
+    try { c = city.toolCost(UI.tool, UI.hover.x, UI.hover.y) | 0; } catch (e) { c = 0; }
+    hov = `${UI.hover.x}, ${UI.hover.y}` + (c ? ` · §${c.toLocaleString()}` : "");
+    warn = c > city.funds;
+  }
+  if (hov !== _sbHoverLast) {
+    document.getElementById("sb-hover").textContent = hov;
+    _sbHoverLast = hov;
+  }
+  if (warn !== _sbHoverWarn) {
+    document.getElementById("sb-hover").classList.toggle("warn", warn);
+    _sbHoverWarn = warn;
+  }
+  // GP1: the Inspect verdict is LIVE. rAF-paced at 500ms, so worst-case
+  // staleness is 500ms + one frame — no stray setInterval, and nothing runs
+  // at all once the dialog is closed.
+  if (UI.query && !document.getElementById("dlg-query").classList.contains("hidden")) {
+    if (now - UI.query.t >= 500) { UI.query.t = now; fillQuery(UI.query.x, UI.query.y); }
+  } else if (UI.query) UI.query = null;
+
   // scenario progress cell (M9) — hidden & empty in free play
   if (typeof scenarioHUD === "function") scenarioHUD();
+}
+let _sbToolLast = null, _sbHoverLast = null, _sbHoverWarn = false;
+
+/* ================= GP1: RCI decomposition ================= */
+// Every named signed contributor behind one demand bar, straight off
+// city.demandParts (recomputed in place by recomputeDemand every tick). The
+// listed terms sum to `raw` by construction; `clamped` is what the sim uses.
+const RCI_META = {
+  r: { name: "Residential", parts: [
+    ["jobsAvail", "Jobs available (jobs + 40 − pop×0.62) ÷ 220"],
+    ["taxMod", "Tax rate ((7 − rate) × 0.05)"],
+    ["stadMod", "Stadiums (up to 2 × 0.06)"],
+    ["svcMod", "Schools & hospitals (up to 3 each × 0.05)"],
+    ["event", "Time-capsule events"],
+    ["ordinance", "Ordinances"]] },
+  c: { name: "Commercial", parts: [
+    ["gap", "Shopper/job gap ((pop×0.28 − com jobs) ÷ 160)"],
+    ["taxMod", "Tax rate (×0.6)"],
+    ["svcMod", "Schools & hospitals (×0.5)"],
+    ["event", "Time-capsule events"],
+    ["ordinance", "Ordinances"]] },
+  i: { name: "Industrial", parts: [
+    ["gap", "Worker/job gap ((pop×0.42 − ind jobs) ÷ 180)"],
+    ["base", "Baseline industrial pull"],
+    ["taxMod", "Tax rate (×0.4)"],
+    ["svcMod", "Schools & hospitals (×0.5)"],
+    ["event", "Time-capsule events"],
+    ["ordinance", "Ordinances"]] },
+};
+
+function fillRci(kind) {
+  const meta = RCI_META[kind], p = city.demandParts[kind];
+  const sgn = (v) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3);
+  const cls = (v) => (v >= 0 ? "rci-part-pos" : "rci-part-neg");
+  document.getElementById("rci-lead").textContent =
+    `${meta.name} demand — every term the sim adds up, in order:`;
+  document.getElementById("rci-table").innerHTML =
+    meta.parts.map(([k, label]) =>
+      `<tr><td>${label}</td><td class="${cls(p[k])}" style="text-align:right">${sgn(p[k])}</td></tr>`).join("") +
+    `<tr><td><b>Total</b></td><td style="text-align:right"><b>${sgn(p.raw)}</b></td></tr>` +
+    `<tr><td>Used by the sim</td><td style="text-align:right"><b>${sgn(p.clamped)}</b></td></tr>`;
+  const clamped = Math.abs(p.raw - p.clamped) > 1e-12;
+  document.getElementById("rci-note").innerHTML =
+    (clamped ? `⚠️ Clamped at ±1 — ${sgn(p.raw)} became ${sgn(p.clamped)}. Extra demand past ±1 does nothing.<br>` : "") +
+    `Per-tile note: a tile near an open regional border also gets its own ` +
+    `<b>commuter bonus</b> on top of this citywide figure (Inspect a tile to see its effective demand).`;
+}
+function openRci(kind) { fillRci(kind); showDlg("dlg-rci"); }
+function bindRci() {
+  for (const kind of ["r", "c", "i"]) {
+    const bar = document.getElementById("rci-" + kind);
+    const wrap = bar && bar.parentElement;
+    if (!wrap) continue;
+    wrap.title = `Click for the ${RCI_META[kind].name} demand breakdown`;
+    wrap.addEventListener("click", () => { Snd.click(); openRci(kind); });
+  }
 }
 
 /* ================= save / load / new ================= */
@@ -1837,7 +2029,17 @@ function newCity() {
   chopperClear(); // presentation state (M18) never crosses into a new city
   const names = ["Llamaville", "Port Modem", "Beanieburg", "Dialup Falls",
     "Pixel Heights", "Cassette Creek", "Winsock City", "Grungetown"];
-  city.cityName = names[(Math.random() * names.length) | 0];
+  /* GP1: the city NAME is serialized, so it is part of the save's byte
+     identity — drawing it from global Math.random made two runs of the same
+     seed produce saves that differed in exactly one key and broke the
+     "same seed + same script => byte-identical save" gate at the real
+     new-city entry point. It is now a PURE function of the seed the player
+     is actually previewing (the same seed the terrain came from), which is
+     also nicer: the splash preview and the founded city agree. The seed
+     itself is still rolled from real entropy below — that is the ONE
+     legitimate entropy source in a new game. */
+  const nameHash = Math.imul(city.seed | 0, 0x9E3779B1) >>> 0; // exact 32-bit, no float slop
+  city.cityName = names[(nameHash >>> 16) % names.length];     // high bits: better mixed than low
   zoomAnim.active = false; // GQ11: fresh city, fresh camera — no stale ease
   cam.x = 0; cam.y = MAP * HH; cam.z = 1; cam.r = 0; // M32a: reset view rotation
   UI.prefs.viewRot = 0; savePrefs();

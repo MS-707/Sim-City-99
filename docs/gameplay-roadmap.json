@@ -43,7 +43,7 @@
       "pass_bar": "Every rule the sim enforces is discoverable in-game, from ONE source of truth — the growth gate table the sim itself consumes, so a new gate cannot ship without its verdict. Any tile is inspectable without a tool switch and reports the ONE binding constraint in plain language with the proving number, including the soft stalls (demand below the upgrade threshold, negligible fit odds), not just the hard gates. The headline quality-of-life number is derived from real state and backed by a ranked problem list whose rows jump the camera to the worst cluster. RCI and budget gauges decompose into named, signed contributors. Transient warnings are not stomped by hover chrome. Advisory output is severity-ranked."
     }
   ],
-  "save_version_ladder": "GP1 owns save v12 and establishes the ladder: every later state-adding milestone takes the next integer, the loader maintains backward compatibility for all earlier versions, and normaliseHistory must be extended for any new history key (it builds from a hardcoded key list and DROPS unknown keys).",
+  "save_version_ladder": "GP1 owns save v12 and establishes the ladder: every later state-adding milestone takes the next integer, the loader maintains backward compatibility for all earlier versions, and normaliseHistory must be extended for any new history key (it builds from a hardcoded key list and DROPS unknown keys). SHIPPED: migrateSave(d) in js/sim.js IS that ladder — v<11 -> 11 (every earlier field is already absent-tolerant at its restore site), v11 -> 12 (rng cursors absent -> null -> the pure (seed, tickCount) derivation). normaliseHistory is UNCHANGED at v12 (GP1 adds no history key) and its drop-unknown-keys behavior is re-asserted in a comment at the function.",
   "loop_protocol": {
     "driver": "/goal + /loop — each iteration runs the next todo milestone to completion via scratchpad/wf-milestone.mjs, ships it, and advances.",
     "per_milestone_workflow": [
@@ -86,7 +86,14 @@
       "effort_1_5": 3,
       "priority_rank": 1,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "implemented (under verification)",
+      "pinned_baseline": "docs/gp1-baseline.json — the 20 corpus seeds, the 5 array hashes per seed and the 9 distribution means. GP1 moved every sim-affecting draw off global Math.random, so EVERY pre-GP1 byte-identity artifact (M24-M32, GQ1-GQ11) is incomparable; this file is the reference GP2..GP10 measure against.",
+      "balance_gate_substitution": "The literal +/-5% balance bar is INSIDE the measured noise floor (a pure RNG reseed of unchanged HEAD code already moves the 20-seed mean by more than the change itself does). It is replaced by a measured null band (mean_HEAD +/- 2*sd over 8 HEAD repetitions) plus a hard non-vacuous ceiling of 15% for pop/jobs and 5% for funds. Declared here, not quietly applied.",
+      "shipped_deltas_vs_design": [
+        "A fifth RNG stream `build` was required (place() writes varnt at sim.js:780/806 and varnt is named in the byte-identity gate); the four-stream list in the scope could not satisfy its own gate.",
+        "chopperMonthTick (js/render.js) is called from inside City.tick() but is pure presentation and STAYS on global Math.random — the one documented carve-out to 'no global draws inside tick'.",
+        "Save v12 also carries five ACCUMULATED planes (unpow, traffic, landv, crime, poll). Cursors alone do not make a resume exact: unpow is authored by growthPass and nothing recomputes it (it was silently zeroed on every load before v12), traffic is a blend accumulator, and landv/crime/poll are rebuilt only every 14th tick so an off-phase save reloads maps measured on a different world. With the five planes restored after the load cascade, post-load state matches pre-save state on all 26 planes exactly (measured, 10 seeds)."
+      ]
     },
     {
       "id": "GP2",

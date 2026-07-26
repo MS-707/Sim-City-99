@@ -119,6 +119,10 @@
       <span id="sb-date" class="sb-cell">Jan 1997</span>
       <span id="sb-pop" class="sb-cell">Pop: 0</span>
       <span id="sb-scenario" class="sb-cell hidden"></span>
+      <!-- GP1: hover / drag-cost readout. Its OWN cell, written once per frame
+           from refreshHUD — never per mousemove — so a fast drag can neither
+           thrash layout nor overwrite a transient message in #sb-tool. -->
+      <span id="sb-hover" class="sb-cell">&mdash;</span>
       <span id="sb-tool" class="sb-cell wide">Welcome, Mayor.</span>
       <span id="sb-speed" class="sb-cell">▶ Normal</span>
     </div>
@@ -364,7 +368,23 @@
 
   <div id="dlg-query" class="win95 dlg hidden">
     <div class="titlebar"><span>🔍 Tile Info</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
-    <div class="dlg-body"><table id="query-table"></table>
+    <div class="dlg-body">
+      <!-- GP1: the growth verdict — the single binding gate from growthPass's
+           own truth table, refreshed on a 500ms cadence while the dialog is
+           open (refreshHUD drives it; there is no separate timer). -->
+      <div id="query-verdict" class="verdict"></div>
+      <table id="query-table"></table>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
+  <!-- GP1: RCI decomposition — every named signed contributor behind one bar -->
+  <div id="dlg-rci" class="win95 dlg hidden">
+    <div class="titlebar"><span>📊 Demand Breakdown</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <div id="rci-lead" class="traffic-lead"></div>
+      <table id="rci-table" class="budget-table"></table>
+      <div id="rci-note" class="traffic-note"></div>
       <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
     </div>
   </div>

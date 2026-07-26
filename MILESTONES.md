@@ -7,9 +7,130 @@ Queue policy: keep at least 5 open improvements at all times.
 ## In progress
 
 - [ ] **GP1 — The Growth Truth Table** *(gameplay roadmap 1/10)* — running via
-  the milestone workflow. Gates in `docs/gameplay-roadmap.json`.
+  the milestone workflow. Gates in `docs/gameplay-roadmap.json`; the pinned
+  post-GP1 balance/identity reference is `docs/gp1-baseline.json`.
 
   Implementation status (under verification):
+  - **The gate table**: `GROWTH_GATES` (js/sim.js, module scope above
+    `class City`) is growthPass's if/else chain turned inside out — 23 ordered
+    rows (17 zone verdicts + 6 non-zone), each carrying the predicate the code
+    tests, the sentence the player reads, its proving numbers and (only for the
+    branches that roll) the mutation. **growthPass CONSUMES it**, so the
+    verdict and the branch cannot drift. Rows are bucketed
+    (`pre`/`z0`/`up`/`fall`/`post`/`nonzone`) so the walk is ≤6 tests, and
+    `_gctx` keeps `cong` (a 25-cell scan) and `fit` LAZY — the two commonest
+    verdicts, BURNING and UNPOWERED, now pay for neither (UNPOWERED alone was
+    92.6% of 984,862 measured classifications). Four terminal states the
+    original scope missed are named: `MAXED`, `DEM_SLACK`, a distinct level-0
+    `Z0_NO_ROAD`, and the level-0 `Z0_LOW_ODDS`. `GRIDLOCK` is modelled as a
+    PHASE, not a chain row — the source evaluates it unconditionally after the
+    chain, so it can co-occur with an upgrade.
+  - **Refactor fidelity**: proven against a frozen oracle (a verbatim copy of
+    the ea4f705 growthPass body). 20 seeds × 600 ticks in lockstep,
+    `lvl`/`varnt`/`unpow`/`over`/`fire`/`traffic` compared **every tick**:
+    12,000/12,000 ticks byte-identical, per-tick draw counts identical, 0
+    divergent ticks. Chain-code fidelity: 984,862 (oracleLabel, diagnoseTile)
+    pairs over 20 cities × 400 ticks — **0 chain mismatches, 0 gridlock
+    mismatches**. All 23 codes reproduced by targeted single-purpose cities.
+  - **Honesty fix in the non-zone rows** (deviation from the design's literal
+    predicate, deliberate): `SPECIAL_UNPOWERED` / `SPECIAL_NO_ROAD` were
+    specified as `over >= OV.ZR && !isPlant && !isWaterOv && !isMega`, which
+    fires on **WIREROAD crossings** (id 18, a street) and on parks, the
+    mayor's house, stadiums, the airport and the seaport — none of which have
+    a power-gated effect. Measured on a scripted city: 35 of 35
+    `SPECIAL_UNPOWERED` verdicts were road crossings. Both rows now key on the
+    four coverage stations (police / fire / school / hospital), which
+    `stampCoverage` genuinely skips when unpowered, and `SPECIAL_NO_ROAD` says
+    what is actually true — `access[]` gates zone growth and nothing else, so
+    the station still works and it is the neighbourhood that is stuck. A
+    verdict that lies is the exact failure this milestone exists to remove.
+  - **diagnoseTile purity**: 32,000 calls across 5 differently-shaped cities
+    (empty / dense / burning / flooded / all-non-zone) under write-trapping
+    proxies on every typed array — **0 writes, 0 Math.random, 0 rng draws, 0
+    cursor drift, scalar projection unchanged**. This is the precondition that
+    lets the fidelity harness diagnose a tile inside the oracle's own loop.
+  - **Five seeded sim streams**: `makeStream` (a separate factory reproducing
+    mulberry32's recurrence with exposed state — `mulberry32` itself is
+    untouched, sprites.js depends on its exact identity) drives
+    `city.rng = {growth, traffic, fire, hazard, build}`. 38 draws routed off
+    global `Math.random`; **exactly one raw call survives in js/sim.js**, the
+    seed picker at the `generateTerrain` fallback. Measured: **0 global draws
+    across 600 ticks** of a busy city with disasters, fires, a Y2K month, a
+    brownout and roads crumbling at 0% funding. The `build` stream was a
+    REQUIRED addition to the design's four — `place()` writes `varnt` and
+    `varnt` is named in the byte-identity gate.
+    **Documented carve-out**: `chopperMonthTick` (js/render.js) is called from
+    inside `City.tick()` but is pure presentation and STAYS on global
+    `Math.random`; giving a render-cadence call a sim cursor would make the sim
+    frame-rate dependent.
+  - **Save v12 + the ladder**: `migrateSave(d)` is the canonical v11..vN chain
+    every later milestone extends. v12 adds the five int32 cursors **and five
+    accumulated planes** (`unpow`, `traffic`, `landv`, `crime`, `poll`) —
+    cursors alone are not enough for an exact resume: `unpow` is authored by
+    growthPass and nothing recomputes it (it was silently zeroed on every load
+    before v12), `traffic` is a blend accumulator, and `landv`/`crime`/`poll`
+    are rebuilt only every 14th tick. Both the cursors and the planes are
+    restored LAST, after the recompute cascade, so `deserialize` stays a pure
+    restore. Measured: determinism 10/10 seeds (run1 ≡ run2 on five array
+    hashes, pop/jobs/funds and the full `serialize()` string, **unstubbed**);
+    save-at-300 / resume-to-600 **10/10 identical**; `S2 === S3` idempotent;
+    a fabricated v11 save loads at v12 with all five cursors equal to the pure
+    `(seed ^ RNG_SALT[k] ^ imul(tickCount, 0x9E3779B1))` derivation, loads
+    identically twice, and survives 2,880 ticks (120 rollovers) with disasters
+    on and no errors. `normaliseHistory` is UNCHANGED and its
+    drop-unknown-keys behavior is re-asserted in a comment (verified: an
+    injected unknown key is dropped, all seven known arrays survive).
+  - **Surfaces**: `#query-verdict` above the Inspect table, severity-coloured,
+    driven live from `refreshHUD` on a 500ms rAF-paced cadence (**measured max
+    latency 517ms over 20 trials**, no stray `setInterval`); `openQuery` split
+    into `fillQuery` + `openQuery`. Clickable RCI bars open a breakdown listing
+    all 6/5/6 named signed contributors from a **preallocated** `demandParts`
+    (fields overwritten in place — zero per-tick allocation), summing to `raw`
+    to within 1e-12, flagging the ±1 clamp and footnoting the per-tile
+    commuter bonus; the shipped `demand.r/c/i` expressions are NOT
+    re-associated. New `#sb-hover` status cell: mousemove still writes only
+    `UI.hover`, and the DOM write happens **once per frame** in `refreshHUD`,
+    so `#sb-tool` can no longer be eaten by a fast drag (measured: a transient
+    message held on 200/200 samples across 200 synthetic mousemoves, then
+    reverted exactly once to the restored tool default). `setStatus(msg, ttl)`
+    TTLs every transient; the tool-selected line became the restored DEFAULT
+    rather than a transient, which is the one caller that depended on
+    persistence. The drag meter is STRICTLY display-only — measured on a
+    20-tile drag against §40 of funds: 19 `place()` calls, all from
+    `applyToolAt`, 0 attributable to the meter, 0 `Snd.denied()` from the
+    meter, 4 successes / 15 refusals decided entirely by `place()`.
+  - **No graphics or perf regression**: sprite hash map 5,222/5,222 identical
+    vs ea4f705; 2,000/2,000 click-picks identical across 4 rotations; 8
+    day/night × season × rotation frames pixel-identical (one run showed a
+    single differing frame, reproduced as a water-animation phase artifact —
+    clean on re-run); tick cost **0.792 ms/tick vs HEAD 0.776 (+2.1%)**, far
+    inside the 20% budget, because the lazy `cong`/`fit` pays back most of the
+    gate-walk cost; 0 console errors and 0 pageerrors across the suite.
+  - **The re-pin is bounded** (`docs/gp1-baseline.json`): 20 pre-screened
+    corpus seeds (HEAD pop@600 ≥ 50, terrain NOT flattened — flattening
+    measures sd exactly 0 and makes the gate vacuous), 9 distribution means at
+    ticks 100/300/600 against a null band built from 8 HEAD repetitions.
+    Measured deltas: pop ≤ 1.94%, jobs ≤ 1.13%, funds ≤ 0.09% — all far inside
+    the 15%/5% ceiling. Three of nine z-scores land marginally outside |z| ≤ 2
+    (−2.11, −2.10, −2.56) purely because 8 repetitions of a 20-seed mean give a
+    very tight sd (0.45 on pop@600, i.e. 0.07%); the absolute movement is a
+    fraction of a percent. Per-seed array hashes reproduced with 0 differences
+    on a second run.
+    **Declared gate substitution** (not quietly applied): the roadmap's literal
+    ±5% balance bar is INSIDE the measured noise floor — a pure RNG reseed of
+    UNCHANGED HEAD code already moves the mean by more than this change does —
+    so it is replaced by the measured null band plus the hard 15%/5% ceiling.
+  - **Declared protocol deviation**: the corpus builds with an unlimited
+    construction budget and pins funds to §200,000 at t=0, rather than the
+    game-default §20,000 with the build script applied greedily. Measured
+    reason: at §20,000 the reference script cannot finish a connected grid on
+    any of the first 8 seeds (pop@600 = 0..72, most zones unpowered), so that
+    corpus would measure construction-budget starvation, not growth balance.
+  - **Scenario winnability**: all four shipped scenarios build, run 1,200
+    ticks and latch identically on the GP1 build and on ea4f705 under the same
+    scripted play (0 pageerrors on both) — the re-pin moves no scenario across
+    its medal condition in the compared runs. The full 10-playthrough-per-
+    scenario check belongs to verification.
   - **DPR-aware backing store**: one global render scale `RS` (render.js) with
     all view math kept in CSS px (`VW`/`VH`); every raster entry point sets a
     `setTransform(RS,0,0,RS,0,0)` base, layer canvases are device-px and blit

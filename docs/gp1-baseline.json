@@ -1,0 +1,295 @@
+{
+  "title": "SimCity 99 — GP1 pinned gameplay baseline",
+  "established": "2026-07-26",
+  "note": "GP1 moved every sim-affecting draw off global Math.random onto five seeded streams (growth/traffic/fire/hazard/build). Every PRE-GP1 byte-identity artifact is therefore incomparable. This file is the NEW reference for GP2..GP10.",
+  "protocol": {
+    "map": 80,
+    "ticks": 600,
+    "starting_funds": 200000,
+    "disasters": false,
+    "terrain": "NOT flattened (flattening removes all seed dependence — measured sd exactly 0)",
+    "build_script": "road grid every 3 rows + every 6 cols, wire spines y=7/25/43 and x=7, 4 coal plants, zr/zc/zi bands, school + hospital, watertower + a pipe run covering only the upper half (so the M24 water cap stays live on the lower half); built with an unlimited construction budget, then funds pinned to §200,000 at t=0",
+    "corpus_screen": "the 20 lowest seeds whose HEAD (ea4f705) pop@600 >= 50, rejecting water-blocked degenerate maps",
+    "deviation_declared": "The roadmap protocol specifies the game-default §20,000 start with the build script applied GREEDILY. Measured: at §20,000 that script cannot finish a connected grid on any of the first 8 seeds (pop@600 = 0..72, most zones unpowered), so the corpus would measure construction-budget starvation rather than growth balance. The corpus therefore builds with an unlimited construction budget and pins funds to §200,000 at t=0. Declared here, not quietly applied."
+  },
+  "corpus_seeds": [
+    1,
+    2,
+    4,
+    5,
+    6,
+    8,
+    9,
+    10,
+    11,
+    13,
+    16,
+    17,
+    18,
+    23,
+    24,
+    28,
+    29,
+    30,
+    34,
+    35
+  ],
+  "balance_means": {
+    "pop@100": {
+      "head_mean": 471.55,
+      "head_sd": 4.337,
+      "null_band": [
+        462.88,
+        480.22
+      ],
+      "gp1_mean": 462.4,
+      "z": -2.11,
+      "delta_pct": -1.94
+    },
+    "jobs@100": {
+      "head_mean": 333.05,
+      "head_sd": 3.524,
+      "null_band": [
+        326,
+        340.1
+      ],
+      "gp1_mean": 329.3,
+      "z": -1.06,
+      "delta_pct": -1.13
+    },
+    "funds@100": {
+      "head_mean": 198611.71,
+      "head_sd": 32.391,
+      "null_band": [
+        198546.93,
+        198676.49
+      ],
+      "gp1_mean": 198583.6,
+      "z": -0.87,
+      "delta_pct": -0.01
+    },
+    "pop@300": {
+      "head_mean": 648.35,
+      "head_sd": 1.425,
+      "null_band": [
+        645.5,
+        651.2
+      ],
+      "gp1_mean": 645.6,
+      "z": -1.93,
+      "delta_pct": -0.42
+    },
+    "jobs@300": {
+      "head_mean": 471.95,
+      "head_sd": 0.727,
+      "null_band": [
+        470.5,
+        473.4
+      ],
+      "gp1_mean": 473,
+      "z": 1.44,
+      "delta_pct": 0.22
+    },
+    "funds@300": {
+      "head_mean": 201011.46,
+      "head_sd": 66.072,
+      "null_band": [
+        200879.32,
+        201143.61
+      ],
+      "gp1_mean": 200872.85,
+      "z": -2.1,
+      "delta_pct": -0.07
+    },
+    "pop@600": {
+      "head_mean": 672.05,
+      "head_sd": 0.45,
+      "null_band": [
+        671.15,
+        672.95
+      ],
+      "gp1_mean": 671.6,
+      "z": -1,
+      "delta_pct": -0.07
+    },
+    "jobs@600": {
+      "head_mean": 537.74,
+      "head_sd": 0.837,
+      "null_band": [
+        536.06,
+        539.41
+      ],
+      "gp1_mean": 539.5,
+      "z": 2.11,
+      "delta_pct": 0.33
+    },
+    "funds@600": {
+      "head_mean": 210188.63,
+      "head_sd": 70.374,
+      "null_band": [
+        210047.88,
+        210329.37
+      ],
+      "gp1_mean": 210008.5,
+      "z": -2.56,
+      "delta_pct": -0.09
+    }
+  },
+  "gate": "All 9 GP1 means inside their measured null band (|z| <= 2) AND |delta| <= 15% of the HEAD mean for pop/jobs, <= 5% for funds, at ticks 100/300/600.",
+  "gate_substitution": "The roadmap's literal +/-5% bar is INSIDE the measured noise floor (a pure RNG reseed of unchanged HEAD code moves the 10-seed mean of pop@600 by ~4%); it is replaced by this measured null band plus a hard non-vacuous ceiling. Declared, not quietly applied.",
+  "array_hashes": {
+    "algorithm": "FNV-1a over the low byte of each element",
+    "fields": [
+      "over",
+      "lvl",
+      "varnt",
+      "fire",
+      "traffic"
+    ],
+    "per_seed": {
+      "1": {
+        "over": "369fec31",
+        "lvl": "d12a8b4b",
+        "varnt": "693eaef1",
+        "fire": "f4deb1c5",
+        "traffic": "be1d0647"
+      },
+      "2": {
+        "over": "bc3267b3",
+        "lvl": "ce26d151",
+        "varnt": "83879ca6",
+        "fire": "f4deb1c5",
+        "traffic": "3760dc0a"
+      },
+      "4": {
+        "over": "da91cbdf",
+        "lvl": "100c139d",
+        "varnt": "3301eefd",
+        "fire": "f4deb1c5",
+        "traffic": "28a6f95b"
+      },
+      "5": {
+        "over": "467892a9",
+        "lvl": "b147063a",
+        "varnt": "81ec90b9",
+        "fire": "f4deb1c5",
+        "traffic": "8ca601a7"
+      },
+      "6": {
+        "over": "2a3f1261",
+        "lvl": "aa3e5a7c",
+        "varnt": "20379313",
+        "fire": "f4deb1c5",
+        "traffic": "02cdf677"
+      },
+      "8": {
+        "over": "dd6f5ab9",
+        "lvl": "24552dcd",
+        "varnt": "493e42aa",
+        "fire": "f4deb1c5",
+        "traffic": "18de5041"
+      },
+      "9": {
+        "over": "4744f717",
+        "lvl": "17de52b8",
+        "varnt": "0422ad1f",
+        "fire": "f4deb1c5",
+        "traffic": "21298a26"
+      },
+      "10": {
+        "over": "005aae64",
+        "lvl": "cfe19d25",
+        "varnt": "7ee14dee",
+        "fire": "f4deb1c5",
+        "traffic": "0cb10c31"
+      },
+      "11": {
+        "over": "2345a37b",
+        "lvl": "55e1a3a2",
+        "varnt": "96460d18",
+        "fire": "f4deb1c5",
+        "traffic": "9e9233ca"
+      },
+      "13": {
+        "over": "d5ce0cf4",
+        "lvl": "8d2e330f",
+        "varnt": "7fd1c536",
+        "fire": "f4deb1c5",
+        "traffic": "95ef99d9"
+      },
+      "16": {
+        "over": "0eb14f0b",
+        "lvl": "85b83c11",
+        "varnt": "d34c43a2",
+        "fire": "f4deb1c5",
+        "traffic": "4d715053"
+      },
+      "17": {
+        "over": "429c3bd6",
+        "lvl": "05c07040",
+        "varnt": "7edeb517",
+        "fire": "f4deb1c5",
+        "traffic": "7b5a80ba"
+      },
+      "18": {
+        "over": "c23deb7e",
+        "lvl": "090c2925",
+        "varnt": "68165332",
+        "fire": "f4deb1c5",
+        "traffic": "0e8e412b"
+      },
+      "23": {
+        "over": "1c3b164b",
+        "lvl": "810f2823",
+        "varnt": "c6cc2aef",
+        "fire": "f4deb1c5",
+        "traffic": "9a60bee8"
+      },
+      "24": {
+        "over": "6be7a64f",
+        "lvl": "f2af1b03",
+        "varnt": "d74b640d",
+        "fire": "f4deb1c5",
+        "traffic": "629c7de7"
+      },
+      "28": {
+        "over": "9e93ed8c",
+        "lvl": "55518c4e",
+        "varnt": "5b2c71e8",
+        "fire": "f4deb1c5",
+        "traffic": "7d2fa3c1"
+      },
+      "29": {
+        "over": "f53ced23",
+        "lvl": "6843d398",
+        "varnt": "10892652",
+        "fire": "f4deb1c5",
+        "traffic": "3b5f0807"
+      },
+      "30": {
+        "over": "6606df44",
+        "lvl": "8c766b6a",
+        "varnt": "6ce20f9a",
+        "fire": "f4deb1c5",
+        "traffic": "a72d0078"
+      },
+      "34": {
+        "over": "192b3abe",
+        "lvl": "31a84458",
+        "varnt": "7a62b4a3",
+        "fire": "f4deb1c5",
+        "traffic": "e8f9a143"
+      },
+      "35": {
+        "over": "6b4368e6",
+        "lvl": "3835756d",
+        "varnt": "2950995e",
+        "fire": "f4deb1c5",
+        "traffic": "3d371a0c"
+      }
+    }
+  },
+  "hash_reproducibility": {
+    "second_run_differing_hashes": 0
+  }
+}

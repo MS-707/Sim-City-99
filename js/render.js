@@ -956,11 +956,15 @@ function renderFrame(city, uiState, clearBG) {
         if (ng) nightAdd(SPR.fireGlow, wx, wy, fireGlowMul);
       }
 
-      // blinking "no power" bolt on developed but unpowered zones / civics
+      // blinking "no power" bolt on developed but unpowered zones / civics.
+      // GP2: AIRPORT/SEAPORT join the list. Before GP2 a terminal's power state
+      // was inert, so the omission was correct; now a dark terminal earns §0,
+      // adds no demand and moves no freight, and the map has to say so as
+      // loudly as it does for a dark schoolhouse.
       if (blink && !city.powered[i] &&
           ((ov >= OV.ZR && ov <= OV.ZI && city.lvl[i] > 0) ||
            ov === OV.POLICE || ov === OV.FIRESTA ||
-           ov === OV.SCHOOL || ov === OV.HOSPITAL)) {
+           ov === OV.SCHOOL || ov === OV.HOSPITAL || isPort(ov))) {
         if (city.anc[i] === -1 || city.anc[i] === i)
           ctx.drawImage(SPR.zap.c, wx - SPR.zap.ox, wy - SPR.zap.oy - 4);
       }
@@ -1340,6 +1344,14 @@ function updateSmoke(city) {
         // targets the tall W tower's lip in the 3x3 sprite.
         const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
         pushPlume(worldX(b.x, b.y) - 38, worldY(b.x, b.y) + HH - 62, Math.random() * 0.3 - 0.05);
+      } else if (t === OV.SEAPORT && city.anc[i] === i && city.portWork[i] && Math.random() < 0.42) {
+        // GP2: a WORKING seaport is the largest single point smog source in the
+        // game (SEAPORT_SMOG x 9 tiles) — cranes, shunting diesels and ships at
+        // idle. It has to look like it. Gated on the same portWork flag the
+        // pollution loop reads, so a dark or cut-off terminal is clean AND
+        // silent. Live-pool Math.random, never a bake (the COAL/NUKE pattern).
+        const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
+        pushPlume(worldX(b.x, b.y) - 16, worldY(b.x, b.y) + HH - 56, Math.random() * 0.4 - 0.1);
       } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && Math.random() < 0.28) {
         const x = i % MAP, y = (i / MAP) | 0; // ZI is 1x1 — its own tile at every r
         pushPlume(worldX(x, y) - 12, worldY(x, y) - 68, Math.random() * 0.3);

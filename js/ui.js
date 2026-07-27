@@ -1059,6 +1059,7 @@ function fillBudgetTable() {
     <tr><td>Transit (${fd.transit}%)</td><td>${f(-dc.transit)}</td></tr>
     <tr><td>City ordinances</td><td>${f(city.ordinanceBudget().net)}</td></tr>
     <tr><td>Regional power trade</td><td>${f(city.lastBudget.trade || 0)}</td></tr>
+    <tr><td>Ports &amp; terminals</td><td>${f(city.portsBudget().net)}</td></tr>
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;
@@ -1673,6 +1674,27 @@ function renderQuery() {
     else
       megaRow = `<tr><td>Landmark</td><td>🗽 pride radius ${LANDMARK_R[t]}</td></tr>`;
   }
+  // GP2: for a port anchor, surface the whole economy in the player's terms —
+  // read ONCE from city.portRecord(i), the same pure record the sim, the budget
+  // and the gate table consume, so the panel can never disagree with them. The
+  // § figures are the LIVE MONTHLY RATE, not a stored "earned last month":
+  // lastBudget is not serialized, and persisting a per-port earned figure is
+  // the one thing that would force a save-format change.
+  let portRow = "";
+  if (isPort(city.over[i]) && city.anc[i] === i) {
+    const r = city.portRecord(i);
+    const conn = r.road && r.rail ? "road + rail" : r.rail ? "rail only" : r.road ? "road" : "NONE";
+    portRow = `<tr><td>Connection</td><td>${conn}</td></tr>`;
+    portRow += r.t === OV.SEAPORT
+      ? `<tr><td>Jobs served</td><td>${r.jobs} industrial (radius ${PORT_R[r.t]})</td></tr>` +
+        `<tr><td>Freight</td><td>${r.working ? "🚢 §" + r.rev + "/mo" : "§0 (idle)"}</td></tr>`
+      : `<tr><td>Passengers</td><td>${r.working ? r.pax + "/mo" : "0 (idle)"}</td></tr>` +
+        `<tr><td>Tourism</td><td>${r.working ? "✈️ §" + r.rev + "/mo" : "§0 (idle)"}</td></tr>` +
+        `<tr><td>Approach</td><td>runs east-west</td></tr>`;
+    portRow += `<tr><td>Upkeep</td><td>${r.working ? "§" + r.cost + "/mo" : "§0 (idle)"}</td></tr>` +
+      `<tr><td>Status</td><td>${r.working ? "working"
+        : !r.powered ? "no power" : "no road or rail"}</td></tr>`;
+  }
   // M25: transit rows. A rail tile names its feature; a station also shows its
   // line number, station count, open/needs-2/no-power status, and diverted trips.
   // A "Transit access" row on ANY tile surfaces railCov so the player learns why
@@ -1702,6 +1724,7 @@ function renderQuery() {
     ${plantRow}
     ${waterProvRow}
     ${megaRow}
+    ${portRow}
     ${transitRow}
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
     ${transitAccessRow}

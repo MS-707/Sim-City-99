@@ -311,6 +311,15 @@ const isArco = (t) => t >= OV.PLYMOUTH && t <= OV.LAUNCH;
 const isLandmark = (t) => t >= OV.STATUE && t <= OV.PYRAMID;
 const isMega = (t) => t >= OV.PLYMOUTH && t <= OV.PYRAMID;
 
+/* GP2: the two TERMINALS. A NEW predicate only — AIRPORT/SEAPORT keep EVERY
+   existing membership they had at GQ10 (they still conduct in recomputePower's
+   conducts(), still count as powered consumers, stay flammable / brownout- /
+   Y2K-eligible, and stay OUTSIDE isPlant/isWaterOv/isMega). isPort adds the
+   economy layer on top and nothing else, so a city that places no port is
+   byte-identical to pre-GP2. */
+const isPort = (t) => t === OV.AIRPORT || t === OV.SEAPORT;
+const PORT_LABEL = { [OV.AIRPORT]: "Airport", [OV.SEAPORT]: "Seaport" };
+
 // population / jobs per developed zone level (index 0 unused)
 const RES_POP = [0, 8, 24, 56];
 const COM_JOB = [0, 6, 18, 40];
@@ -388,6 +397,69 @@ const WATER_REACH = 3;
                    empties (the cap the compose constraint pins at <= 0.60). */
 const RAIL_STATION_R = 7;
 const RAIL_MAX_SHARE = 0.60;
+
+/* ---- ports & terminals (GP2) ----
+   One tunables block, in the POWER_CAP / WATER_CAP idiom: named constants, no
+   save-format contact, every port quantity DERIVED from them each pass.
+
+   PORT_R          manhattan catchment radius, measured from the ANCHOR (min-
+                   corner) tile of the footprint — the same anchor convention
+                   stampCoverage/SVC_DARK already key on. The seaport reads
+                   industrial jobs in reach; the airport reads land value/pride.
+   SEA_DEM_I       industrial demand a WORKING seaport adds at full catchment:
+                   SEA_DEM_I * min(1, jobs / SEA_JOBS_FULL) — 0.167 at 200 jobs,
+                   comfortably past the milestone's 0.10 bar, saturating at 300.
+   AIR_DEM_C       commercial demand a WORKING airport adds, scaled by the land
+                   value it can reach: AIR_DEM_C * (0.6 + 0.4*min(1, meanLv/120))
+                   — a 0.108 floor rising to 0.18 over a premium catchment.
+   FREIGHT_PER_JOB §/mo of freight per industrial job served; a rail spur
+                   touching the footprint multiplies it by FREIGHT_RAIL_MUL.
+   AIR_TOUR_BASE   tourism scale: round(AIR_TOUR_BASE * (meanLv/128) *
+                   (1 + meanPride/255)) — STRICTLY increasing in mean land value
+                   by construction, which is the monotonicity the gate measures.
+   *_OP            monthly operating cost, charged ONLY while the port works, so
+                   a dark or cut-off terminal costs and earns exactly §0.
+   SEAPORT_SMOG    combustion smog at each working seaport tile. NOT scaled by
+                   ordMods.pollMul — it follows the COAL/GAS precedent (recycling
+                   is waste, not fuel), unlike the curbside industry/road terms.
+   NOISE_*         the airport approach cone: a WORLD-FIXED corridor along the
+                   world X axis in BOTH directions, half-width NOISE_HALF0 +
+                   NOISE_HALF_K*d, axial potency (NOISE_LEN - d) * NOISE_K,
+                   times a LATERAL falloff that reaches 0 at NOISE_FEATHER tiles
+                   past the half-width, max-combined into the derived noiseCov
+                   and weighted NOISE_LV into land value on RESIDENTIAL tiles
+                   only. NOISE_NEAR/NOISE_NEAR_K are the short isotropic
+                   ground-noise ring around the apron itself (taxiing, engine
+                   run-ups), so a house that TOUCHES the fence is not quieter
+                   than one 16 tiles off the runway end. It never reads cam.r.
+   PORT_TRIP_PER_JOB / AIR_TRIPS
+                   trips/mo a working port pushes onto the street grid
+                   at each of its gate tiles; PORT_SPREAD / PORT_DECAY are the
+                   bounded BFS depth and per-step falloff of that deposit.
+                   PORT_SPREAD is 4 so that every deposited unit lands INSIDE
+                   manhattan 5 of the footprint (a gate tile is manhattan 1 and
+                   each BFS step adds at most 1): the traffic a port creates is
+                   fully accounted for inside the radius the milestone audits. */
+const PORT_R = { [OV.SEAPORT]: 10, [OV.AIRPORT]: 12 };
+const SEA_DEM_I = 0.25;
+const SEA_JOBS_FULL = 300;
+const AIR_DEM_C = 0.18;
+const FREIGHT_PER_JOB = 2.0;
+const FREIGHT_RAIL_MUL = 1.25;
+const AIR_TOUR_BASE = 400;
+const SEAPORT_OP = 120;
+const AIRPORT_OP = 200;
+const SEAPORT_SMOG = 90;
+const NOISE_LEN = 16;
+const NOISE_HALF0 = 2, NOISE_HALF_K = 0.25;
+const NOISE_FEATHER = 1.5;
+const NOISE_K = 3.2;
+const NOISE_NEAR = 3, NOISE_NEAR_K = 6;
+const NOISE_LV = 1.0;
+const PORT_TRIP_PER_JOB = 0.55;
+const AIR_TRIPS = 260;
+const PORT_SPREAD = 4;
+const PORT_DECAY = 0.62;
 const WATER_LABEL = { [OV.WATERTOWER]: "water tower", [OV.PUMP]: "water pump" };
 const PLANT_PRIME_AGE = 30;   // full nameplate through this age
 const PLANT_EOL_AGE   = 45;   // decayed to the floor by here
@@ -1050,6 +1122,42 @@ const INFRA_GATES = Object.freeze([
     test: (c, i) => SVC_LABEL[c.over[i]] !== undefined && c.anc[i] === i && !c.powered[i],
     text: (c, i) => `${SVC_LABEL[c.over[i]]} has no power — an unpowered station stamps ZERO coverage. Run a wire to it.`,
     evid: (c, i) => [["Powered", "no"], ["Coverage stamped", "0"]] },
+
+  /* GP2: the three TERMINAL verdicts. First match wins, so this ORDER is the
+     message priority — power is the deeper failure, connection the next, and
+     the working row is the fallthrough for any port anchor that passed both.
+     Every row reads the ONE pure record (portRecord) the economy itself
+     consumes, so the panel can never disagree with the sim about why a §10,000
+     airport is doing nothing.
+     The evidence chips deliberately do NOT restate the query table's own rows
+     (Connection / Jobs served / Freight / Upkeep / Powered are all printed
+     there already). A chip earns its space by carrying something the table does
+     not: what the terminal is costing you in forgone demand and net §. */
+  { code: "PORT_UNPOWERED", sev: "crit", label: "Terminal dark",
+    test: (c, i) => isPort(c.over[i]) && c.anc[i] === i && !c.powered[i],
+    text: (c, i) => `The ${PORT_LABEL[c.over[i]].toLowerCase()} has no power — a dark terminal moves nothing: ` +
+      `no demand bonus, no revenue, no traffic. Run a wire to it.`,
+    evid: (c, i) => [["Powered", "no"], ["Demand added", "0.000"], ["Net", "§0/mo"]] },
+
+  { code: "PORT_UNCONNECTED", sev: "crit", label: "Terminal cut off",
+    test: (c, i) => isPort(c.over[i]) && c.anc[i] === i && !c.portRecord(i).connected,
+    text: (c, i) => `The ${PORT_LABEL[c.over[i]].toLowerCase()} touches no road or rail — nothing can reach the gates, ` +
+      `so it earns nothing and adds no demand. Lay a road or a rail line against the footprint.`,
+    evid: (c, i) => [["Gates", "0"], ["Demand added", "0.000"], ["Net", "§0/mo"]] },
+
+  { code: "PORT_WORKING", sev: "ok", label: "Terminal working",
+    test: (c, i) => isPort(c.over[i]) && c.anc[i] === i,
+    text: (c, i) => { const r = c.portRecord(i);
+      return r.t === OV.SEAPORT
+        ? `Freight is moving — ${r.jobs} industrial jobs inside the ${PORT_R[r.t]}-tile catchment, ` +
+          `§${r.rev}/mo of cargo${r.rail ? " (rail spur bonus)" : ""}, and industrial demand up ${r.demI.toFixed(3)}.`
+        : `Flights are running — §${r.rev}/mo of tourism on land value ${Math.round(r.meanLv)} in reach, ` +
+          `commercial demand up ${r.demC.toFixed(3)}. The approach cone runs east-west and costs houses under it.`; },
+    evid: (c, i) => { const r = c.portRecord(i); return [
+      ["Catchment", PORT_R[r.t] + " tiles"],
+      [r.t === OV.SEAPORT ? "Industrial demand" : "Commercial demand",
+       "+" + (r.t === OV.SEAPORT ? r.demI : r.demC).toFixed(3)],
+      ["Net", "§" + (r.rev - r.cost) + "/mo"]]; } },
 ]);
 
 // short label for a verdict code (status-bar hover readout) — a pure lookup, so
@@ -1112,6 +1220,35 @@ class City {
     // (same policy as polCov/watered/railCov), so bulldozing a landmark fully
     // reverts its land-value halo on the next pass with zero bookkeeping.
     this.landmarkCov = new Uint8Array(n);
+    /* GP2: ALL DERIVED port state — rebuilt by recomputePorts()/stampAirportNoise()
+       from over[]/anc[]/powered[]/rail[] every pass and NEVER serialized (the
+       landmarkCov / watered / railCov / districtStats policy). Consequence:
+       bulldozing a port reverts every effect on the next rebuild with zero
+       persisted bookkeeping, and a loaded save reproduces all of it exactly.
+         ports        [portRecord, …] for every port ANCHOR on the map
+         portWork     per-tile 0/1 flag over WORKING port footprints (the flag
+                      the pollution loop reads, so it cannot disagree)
+         noiseCov     airport approach-noise stamp, 0..255 (world-fixed cone)
+         portDemI/C   the demand terms folded into recomputeDemand
+         portsRev/Cost the monthly § the budget charges
+         portDep      per-anchor ledger of load[] actually deposited by the last
+                      recomputeTraffic (traceability, never a sim input)
+         _portVisit/_portTok  BFS visited scratch for spreadPortTrips (allocated
+                      once, stamped per call — no per-tick GC, like _waterReach) */
+    this.ports = [];
+    this.portWork = new Uint8Array(n);
+    this.noiseCov = new Uint8Array(n);
+    this.portDemI = 0; this.portDemC = 0;
+    this.portsRev = 0; this.portsCost = 0;
+    this.portDep = Object.create(null);
+    this._portDepAny = false;
+    this._portVisit = new Int32Array(n);
+    this._portTok = 0;
+    /* one-bit memo: is noiseCov currently non-empty? Lets a city with no
+       working airport skip the cone pass AND the 0-fill entirely (it is the
+       overwhelmingly common case), while still guaranteeing that the LAST
+       airport's scar is cleared on the very next pass. */
+    this._noiseAny = false;
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
     // M19: build year of the power plant anchored at each tile (0 = no plant
     // here). Only meaningful at anchor tiles; drives the aging capacity curve.
@@ -1150,6 +1287,7 @@ class City {
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
+      ports: 0, portsRev: 0, portsCost: 0, // GP2: ports & terminals line
       dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0, water: 0, transit: 0 } }; // M24 water / M25 transit upkeep
     this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
     this.disastersEnabled = true;
@@ -1327,12 +1465,20 @@ class City {
 
   // GQ10: >=1 orthogonal TERR.WATER neighbour of any tile of the s x s
   // footprint at (x, y) — the M24 pump adjacency loop, hoisted verbatim.
+  // GP2: generalized to footprintTouches(x, y, s, pred) — the SAME body, same
+  // scan order, same early-out, with the terrain test replaced by a callback
+  // over the neighbour index. footprintTouchesWater stays a one-line wrapper so
+  // canPlace's pump/seaport gates are byte-equivalent to GQ10.
   footprintTouchesWater(x, y, s) {
+    return this.footprintTouches(x, y, s, (j) => this.terr[j] === TERR.WATER);
+  }
+
+  footprintTouches(x, y, s, pred) {
     for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
       const X = x + dx, Y = y + dy;
       for (const [nx, ny] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const NX = X + nx, NY = Y + ny;
-        if (this.inMap(NX, NY) && this.terr[this.idx(NX, NY)] === TERR.WATER) return true;
+        if (this.inMap(NX, NY) && pred(this.idx(NX, NY), NX, NY)) return true;
       }
     }
     return false;
@@ -1877,6 +2023,35 @@ class City {
         prev = cur; cur = nxt;
       }
     }
+    /* GP2: port trips — deposited AFTER the zone walk and BEFORE the EWMA blend,
+       so a port's freight rides the same load[] every other penalty already
+       reads. One bounded, RNG-FREE BFS per GATE tile (see spreadPortTrips): a
+       terminal pushes its trucks onto whatever street you actually connected it
+       to, and a rail-only port (no road gate) deposits nothing on the roads at
+       all. portDep is the per-anchor ledger of what was really deposited —
+       traceability only, never a sim input. With no working port this loop makes
+       ZERO writes, so load[] and traffic[] stay byte-identical.
+       PERF: a portless city allocates nothing here at all — the ledger object
+       is only rebuilt when there is a port now, or there was one last pass and
+       its entries still need clearing. */
+    if (this.ports.length || this._portDepAny) {
+      const dep = this.portDep = Object.create(null);
+      let anyDep = false;
+      for (let k = 0; k < this.ports.length; k++) {
+        const r = this.ports[k];
+        // gated on the SAME per-tile flag plane the pollution loop and the noise
+        // stamp read, so the three map effects can never disagree about which
+        // ports are live (and clearing portWork suppresses the deposit for a
+        // trace run without touching anything else)
+        if (!this.portWork[this.idx(r.x, r.y)] || !(r.trips > 0)) continue;
+        let sum = 0;
+        for (let g = 0; g < r.gates.length; g++) sum += this.spreadPortTrips(load, r.gates[g], r.trips);
+        r.deposited = sum;
+        dep[this.idx(r.x, r.y)] = sum;
+        anyDep = true;
+      }
+      this._portDepAny = anyDep;
+    }
     // blend toward the new load so congestion is stable; roads only.
     // winter (M12): snow keeps drivers home — the effective load every road
     // carries is scaled DOWN by 0.72, so measured congestion drops ~28%
@@ -1961,6 +2136,12 @@ class City {
       if (t === OV.COAL) src[i] += coalSmog;
       if (t === OV.GAS) src[i] += gasSmog;   // gas smokes; solar & wind stay clean
       if (t === OV.ROAD || t === OV.WIREROAD) src[i] += 8 * pm; // M26: crossing pollutes like a road
+      // GP2: a WORKING seaport smokes — cranes, shunting diesels and idling
+      // ships. Reads the precomputed per-tile portWork flag, so this loop can
+      // never disagree with the port state; NOT scaled by pollMul (combustion,
+      // not curbside waste — the COAL/GAS precedent). A dark, cut-off or
+      // bulldozed seaport contributes exactly nothing.
+      if (t === OV.SEAPORT && this.portWork[i]) src[i] += SEAPORT_SMOG;
       if (this.fire[i]) src[i] += 100;
     }
     this.diffuse(src, this.poll, 3, 0.24);
@@ -1994,11 +2175,25 @@ class City {
     // M28: wonder-landmark civic pride — a wide-radius land-value stamp rebuilt
     // fresh from over[] every pass, so removal fully reverts on the next call.
     this.stampLandmarkPride();
+    // GP2: the airport approach cone, rebuilt fresh from over[]/portWork the
+    // same way — a stalled or razed airport lifts its scar on the next pass.
+    this.stampAirportNoise();
+    // PERF: hoisted out of the fold below so a city with no working airport
+    // (noiseCov provably all-zero) does not pay a per-tile over[] compare for a
+    // term that is identically 0. `noisy && …` short-circuits to the SAME
+    // literal 0, so the accumulation stays bit-identical either way.
+    const noisy = this._noiseAny;
 
     for (let i = 0; i < n; i++) {
       let v = 40 + lvOut[i] - this.poll[i] * 0.7 - trOut[i] * 0.4  // traffic penalty
             + this.eduCov[i] * 0.1 + this.medCov[i] * 0.1          // good schools sell houses
-            + this.landmarkCov[i] * 0.6;                           // M28: wonder-landmark pride
+            + this.landmarkCov[i] * 0.6                            // M28: wonder-landmark pride
+            // GP2: jet noise, RESIDENTIAL ONLY and deliberately so — it is what
+            // makes "an airport wants commerce near and good neighbourhoods
+            // far" literally true: a shop under the approach keeps its land
+            // value (and so its upgrade odds via gFit), a house does not.
+            // noiseCov is 0 everywhere with no working airport, and x - 0 === x.
+            - (noisy && this.over[i] === OV.ZR ? this.noiseCov[i] * NOISE_LV : 0);
       this.landv[i] = Math.max(0, Math.min(255, v));
     }
 
@@ -2087,6 +2282,245 @@ class City {
     }
   }
 
+  /* ---------- ports & terminals (GP2) ----------
+     ONE PURE RECORD. portRecord(a) is the single definition of what a port IS —
+     whether it works, what it serves, what it earns, where its gates are. It
+     draws ZERO RNG, writes NOTHING, and is consumed by recomputePorts, the
+     budget, the INFRA gate rows and the query panel alike, so there is no second
+     copy of the rules to desync (the GP1a discipline that makes diagnoseTile
+     trustworthy). `powered` reads the ANCHOR tile — the convention stampCoverage
+     and SVC_DARK already use.
+
+     CONNECTION RULE: a ROAD/WIREROAD tile, or ANY rail feature, ORTHOGONALLY
+     adjacent to the footprint. Deliberately NOT the access[] BFS (which reaches
+     3 tiles): a terminal has gates, not a driveway. Only ROAD/WIREROAD
+     neighbours become `gates` — a rail-only port moves its freight by rail and
+     therefore deposits no truck traffic at all.
+
+     CATCHMENT: manhattan radius PORT_R[type] measured from the anchor tile.
+     Jobs are the industrial jobs in reach (seaport); meanLv/meanPride are the
+     mean land value / landmark pride over the same disc (airport). */
+  portRecord(a) {
+    const t = this.over[a], s = sizeOf(t), sea = t === OV.SEAPORT;
+    const x = a % MAP, y = (a / MAP) | 0;
+    const powered = this.powered[a] === 1;
+    const gates = [];
+    let road = false, rail = false;
+    for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
+      const X = x + dx, Y = y + dy;
+      for (const [nx, ny] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const NX = X + nx, NY = Y + ny;
+        if (!this.inMap(NX, NY)) continue;
+        const j = this.idx(NX, NY);
+        if (this.anc[j] === a) continue;   // a tile of this same footprint (a subway under it is not a connection)
+        const o = this.over[j];
+        if (o === OV.ROAD || o === OV.WIREROAD) { road = true; if (gates.indexOf(j) < 0) gates.push(j); }
+        if (this.rail[j] !== RL.NONE) rail = true;
+      }
+    }
+    const connected = road || rail;
+    const working = powered && connected;
+    // catchment scan — ~221 tiles at r=10, ~313 at r=12, per port per tick
+    const R = PORT_R[t];
+    let jobs = 0, lvSum = 0, prSum = 0, cells = 0;
+    for (let dy = -R; dy <= R; dy++) {
+      const Y = y + dy;
+      if (Y < 0 || Y >= MAP) continue;
+      const rx = R - Math.abs(dy);
+      for (let dx = -rx; dx <= rx; dx++) {
+        const X = x + dx;
+        if (X < 0 || X >= MAP) continue;
+        const j = Y * MAP + X;
+        if (this.over[j] === OV.ZI) jobs += IND_JOB[this.lvl[j]];
+        lvSum += this.landv[j]; prSum += this.landmarkCov[j]; cells++;
+      }
+    }
+    const meanLv = cells ? lvSum / cells : 0;
+    const meanPride = cells ? prSum / cells : 0;
+    const demI = (working && sea) ? SEA_DEM_I * Math.min(1, jobs / SEA_JOBS_FULL) : 0;
+    const demC = (working && !sea) ? AIR_DEM_C * (0.6 + 0.4 * Math.min(1, meanLv / 120)) : 0;
+    const rev = !working ? 0 : sea
+      ? Math.round(FREIGHT_PER_JOB * jobs * (rail ? FREIGHT_RAIL_MUL : 1))
+      : Math.round(AIR_TOUR_BASE * (meanLv / 128) * (1 + meanPride / 255));
+    const cost = working ? (sea ? SEAPORT_OP : AIRPORT_OP) : 0;
+    const trips = !working ? 0 : sea ? PORT_TRIP_PER_JOB * jobs : AIR_TRIPS;
+    return { t, x, y, s, powered, road, rail, connected, working,
+             jobs, pax: sea ? 0 : AIR_TRIPS, meanLv, meanPride,
+             demI, demC, rev, cost, gates, trips,
+             deposited: this.portDep[a] || 0,
+             code: !powered ? "PORT_UNPOWERED" : !connected ? "PORT_UNCONNECTED" : "PORT_WORKING" };
+  }
+
+  /* THE PASS. A REBUILD pass: a pure function of serialized state, idempotent,
+     re-entrant, never serialized — so a load and an out-of-band UI recompute
+     both reproduce it exactly. Called from recomputeDemand() (immediately after
+     computeDemandParts, before the three demand expressions), which inherits
+     every existing entry point for free: tick(), deserialize's load cascade,
+     ui.js's overlay refresh and scenarios.js's setup.
+
+     `anchors` is the list computeDemandParts already collected in its existing
+     full-map loop — GP2 adds NO new O(n) per-tick scan. Called with no argument
+     (the load cascade) it does its own one-off scan. */
+  recomputePorts(anchors) {
+    this.ports.length = 0;
+    this.portWork.fill(0);
+    let demI = 0, demC = 0, rev = 0, cost = 0;
+    if (!anchors) {
+      anchors = this._portScan || (this._portScan = []);
+      anchors.length = 0;
+      for (let i = 0; i < this.over.length; i++)
+        if (isPort(this.over[i]) && this.anc[i] === i) anchors.push(i);
+    }
+    for (let k = 0; k < anchors.length; k++) {
+      const r = this.portRecord(anchors[k]);
+      this.ports.push(r);
+      if (!r.working) continue;
+      demI += r.demI; demC += r.demC; rev += r.rev; cost += r.cost;
+      for (let dy = 0; dy < r.s; dy++) for (let dx = 0; dx < r.s; dx++)
+        this.portWork[this.idx(r.x + dx, r.y + dy)] = 1;
+    }
+    // exactly the integer 0 / literal 0 with no working port, so the demand fold
+    // and the budget line are bit-identical no-ops on a portless city
+    this.portDemI = demI; this.portDemC = demC;
+    this.portsRev = rev; this.portsCost = cost;
+  }
+
+  /* O(#ports) monthly balance — the ordinanceBudget()/powerTradeBudget() idiom.
+     A port that is dark or cut off contributes NOTHING on either side: no
+     upkeep for a terminal that isn't running, which is what makes the dead-port
+     gate's "zero revenue, zero funds delta" exactly true. */
+  portsBudget() {
+    let rev = 0, cost = 0;
+    for (let k = 0; k < this.ports.length; k++) {
+      const r = this.ports[k];
+      if (!r.working) continue;
+      rev += r.rev; cost += r.cost;
+    }
+    return { rev, cost, net: rev - cost };
+  }
+
+  /* The airport approach cone — stampLandmarkPride's shape, with a DIRECTIONAL
+     footprint instead of a disc. WORLD-FIXED: the corridor runs along the world
+     X axis in BOTH directions from the footprint edge, half-width
+     NOISE_HALF0 + NOISE_HALF_K*d around the footprint's centre row, axial
+     potency (NOISE_LEN - d) * NOISE_K, max-combined and clamped 255. It never
+     reads cam.r — rotating the camera must not move the model (M32a/b). (The
+     shipped airport SPRITE bakes its runway on a fixed SCREEN diagonal at every
+     facing, so the cone cannot align visually at all four rotations; that is
+     pre-existing sprite behaviour and is documented, not "fixed" by rotating
+     the sim.) .fill(0) + rebuild from over[]/portWork each recomputeMaps, so a
+     bulldozed or stalled airport reverts its land-value scar in one pass.
+
+     It is a FIELD, not a stencil. Two shaping terms keep the stamp from reading
+     as a hard-edged blocky bowtie the way a bare in/out mask does, and both are
+     confined to the corridor so the "off-approach falls < 3" contract is still
+     satisfied by geometry rather than by the artifact bleeding nothing:
+       LATERAL FALLOFF — potency is multiplied by 1 - t^2 with t the lateral
+         offset normalised over (half + NOISE_FEATHER), so the corridor fades to
+         nothing NOISE_FEATHER tiles outside its nominal half-width instead of
+         cliff-edging from full strength to zero between two neighbours.
+       APRON RING — an isotropic manhattan ring of radius NOISE_NEAR around the
+         footprint itself. Without it the field was inverted from physical
+         sense: a house sharing a fence with the airport measured 0 while a
+         house 16 tiles off the runway end measured 5. The ring is 3 tiles, so
+         it never reaches the >= 4-tile on/off-approach sample sets. */
+  stampAirportNoise() {
+    const out = this.noiseCov;
+    // PERF: a city with no WORKING airport must not pay for this pass at all —
+    // no full-map over[] scan, and no 6,400-byte fill once the plane is already
+    // clear. this.ports is the list recomputePorts just rebuilt, so the scan is
+    // O(#ports); _noiseAny is the one-bit memo that lets the LAST airport's scar
+    // still be cleared in a single pass (the C6 revert contract).
+    let any = false;
+    for (let k = 0; k < this.ports.length; k++) {
+      const r = this.ports[k];
+      if (r.t !== OV.AIRPORT) continue;
+      const a = this.idx(r.x, r.y);
+      if (this.over[a] === OV.AIRPORT && this.anc[a] === a && this.portWork[a]) { any = true; break; }
+    }
+    if (!any) {
+      if (this._noiseAny) { out.fill(0); this._noiseAny = false; }
+      return;
+    }
+    out.fill(0);
+    this._noiseAny = true;
+    for (let k = 0; k < this.ports.length; k++) {
+      const rec = this.ports[k];
+      if (rec.t !== OV.AIRPORT) continue;
+      const a = this.idx(rec.x, rec.y);
+      if (this.over[a] !== OV.AIRPORT || this.anc[a] !== a || !this.portWork[a]) continue;
+      const s = sizeOf(OV.AIRPORT);
+      const x = rec.x, y = rec.y;
+      const cy = y + (s - 1) / 2;          // centre ROW of the footprint
+      for (let d = 1; d <= NOISE_LEN; d++) {
+        const half = NOISE_HALF0 + NOISE_HALF_K * d;
+        const hw = half + NOISE_FEATHER;   // where the lateral falloff reaches 0
+        const axial = (NOISE_LEN - d) * NOISE_K;
+        const y0 = Math.max(0, Math.ceil(cy - hw)), y1 = Math.min(MAP - 1, Math.floor(cy + hw));
+        for (const X of [x - d, x + s - 1 + d]) {
+          if (X < 0 || X >= MAP) continue;
+          for (let Y = y0; Y <= y1; Y++) {
+            const t = Math.abs(Y - cy) / hw;
+            const pot = Math.min(255, Math.round(axial * Math.max(0, 1 - t * t)));
+            if (pot <= 0) continue;
+            const j = Y * MAP + X;
+            out[j] = Math.max(out[j], pot);
+          }
+        }
+      }
+      // apron ring: manhattan distance to the footprint RECTANGLE, 1..NOISE_NEAR
+      for (let Y = Math.max(0, y - NOISE_NEAR); Y <= Math.min(MAP - 1, y + s - 1 + NOISE_NEAR); Y++) {
+        const dy = Y < y ? y - Y : Y > y + s - 1 ? Y - (y + s - 1) : 0;
+        for (let X = Math.max(0, x - NOISE_NEAR); X <= Math.min(MAP - 1, x + s - 1 + NOISE_NEAR); X++) {
+          const dx = X < x ? x - X : X > x + s - 1 ? X - (x + s - 1) : 0;
+          const dist = dx + dy;
+          if (dist < 1 || dist > NOISE_NEAR) continue;
+          const pot = Math.min(255, Math.round((NOISE_NEAR + 1 - dist) * NOISE_NEAR_K));
+          const j = Y * MAP + X;
+          out[j] = Math.max(out[j], pot);
+        }
+      }
+    }
+  }
+
+  /* Freight/passenger trips onto the street grid: a bounded BFS over ROAD/
+     WIREROAD tiles from one gate tile, depth <= PORT_SPREAD, depositing
+     trips * PORT_DECAY^d on every road tile at BFS depth d. DETERMINISTIC AND
+     RNG-FREE by construction — deliberately NOT recomputeTraffic's reservoir
+     walk, which draws from the TRAFFIC hash domain and would make the "port
+     code path draws zero RNG" gate vacuous. Each tile is visited exactly once
+     per call (token-stamped visited plane), and the frontier is walked in
+     ascending index order, so the deposit is order-independent. Returns the
+     total deposited, for the traceability ledger. */
+  spreadPortTrips(load, gate, trips) {
+    if (!(gate >= 0) || !(trips > 0)) return 0;
+    const vis = this._portVisit, tok = ++this._portTok;
+    let frontier = [gate], deposited = 0;
+    vis[gate] = tok;
+    for (let d = 0; d <= PORT_SPREAD; d++) {
+      const amt = trips * Math.pow(PORT_DECAY, d);
+      frontier.sort((p, q) => p - q);
+      const next = [];
+      for (let k = 0; k < frontier.length; k++) {
+        const i = frontier[k];
+        load[i] += amt; deposited += amt;
+        if (d === PORT_SPREAD) continue;
+        const x = i % MAP, y = (i / MAP) | 0;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const j = Y * MAP + X;
+          if (vis[j] === tok) continue;
+          if (this.over[j] !== OV.ROAD && this.over[j] !== OV.WIREROAD) continue;
+          vis[j] = tok; next.push(j);
+        }
+      }
+      frontier = next;
+      if (!frontier.length) break;
+    }
+    return deposited;
+  }
+
   // ---------- demand ----------
   /* GP1a: the census + every modifier term, extracted VERBATIM out of
      recomputeDemand into one pure read that fills a caller-supplied object.
@@ -2097,6 +2531,12 @@ class City {
      `dem > 0.15` comparisons and therefore into the RNG stream. */
   computeDemandParts(out) {
     let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0, schools = 0, hospitals = 0, resTiles = 0;
+    // GP2: port ANCHOR DISCOVERY is FUSED into this existing full-map loop, so
+    // the port pass costs no new O(n) scan per tick. Reuses the caller's array
+    // (zero allocation on the hot path) and stays a pure read: it writes only
+    // into `out`, exactly like every other field here.
+    const pa = out.portAnchors || (out.portAnchors = []);
+    pa.length = 0;
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] === OV.ZR) { pop += RES_POP[this.lvl[i]]; resTiles++; }
       else if (this.over[i] === OV.ZC) cJobs += COM_JOB[this.lvl[i]];
@@ -2109,6 +2549,8 @@ class City {
       // this.pop then feeds tierForPop + growth unchanged — an arco genuinely
       // pushes the city up the tier ladder. Jobs go in the industrial bucket.
       else if (isArco(this.over[i]) && this.anc[i] === i) { pop += ARCO_POP[this.over[i]]; iJobs += ARCO_JOB[this.over[i]]; }
+      // GP2: one anchor index per port — the list recomputePorts() consumes
+      else if (isPort(this.over[i]) && this.anc[i] === i) pa.push(i);
     }
     const jobs = cJobs + iJobs;                       // === the committed this.jobs
     const taxMod = (7 - this.taxRate) * 0.05;         // low taxes juice demand
@@ -2144,9 +2586,17 @@ class City {
     // revenue scales with comJobs, smoke-detector cost with resTiles). Runs every
     // tick before the monthly collectBudget, so figures are current at rollover.
     this.comJobs = cJobs; this.resTiles = p.resTiles;
+    /* GP2: the port pass runs HERE — after the census (whose loop already found
+       every port anchor) and BEFORE the three expressions, which then read the
+       committed portDemI/portDemC. The terms are APPENDED to the existing
+       expressions, never re-associated: with no working port both are exactly
+       0.0 and IEEE754 `x + 0.0 === x`, so a portless city's demand — and
+       therefore every `dem > 0.15` / `dem < -0.25` comparison feeding the RNG
+       stream — is bit-identical to pre-GP2. */
+    this.recomputePorts(p.portAnchors);
     this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR);
-    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC);
-    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI);
+    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC + this.portDemC);
+    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI + this.portDemI);
   }
 
   /* GP1a: the UI-facing decomposition of the RCI bars — NAMED SIGNED
@@ -2182,6 +2632,10 @@ class City {
         ["Schools & hospitals", p.svcMod * 0.5],
         ["Events", p.evC],
         ["Ordinances", p.om.demC],
+        // GP2: the airport term, in the SAME source order as the expression —
+        // omitting it would break the shipped invariant that summing the parts
+        // left-to-right reproduces pre-clamp demand bit-for-bit
+        ["Ports & terminals", this.portDemC],
       ]),
       mk("i", "Industrial", this.demand.i, [
         ["Workers vs jobs", (p.pop * 0.42 - p.iJobs) / 180],
@@ -2190,6 +2644,7 @@ class City {
         ["Schools & hospitals", p.svcMod * 0.5],
         ["Events", p.evI],
         ["Ordinances", p.om.demI],
+        ["Ports & terminals", this.portDemI], // GP2: the seaport term (see above)
       ]),
     ];
   }
@@ -2862,13 +3317,20 @@ class City {
     // M27: monthly regional power-trade balance (sell earns +, buy costs −),
     // gated on an open border wire so it is 0 when no power deal is live.
     const trade = this.powerTradeBudget();
-    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - debt + ob.net + trade;
+    // GP2: freight & tourism less terminal operating costs — O(#ports) over the
+    // records recomputeDemand already built. EXACTLY the integer 0 with no
+    // WORKING port (a dark or cut-off terminal is charged nothing at all), so a
+    // portless city's net and funds are bit-identical to pre-GP2.
+    const pb = this.portsBudget();
+    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - debt + ob.net + trade + pb.net;
     this.funds += net;
     this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost,
       water: waterCost, transit: transitCost, debt, net, // M24 water / M25 transit upkeep lines
       trade, // M27: regional power-trade line
       // M22: the ordinance line (net = revenue - cost) charged this month
       ord: ob.net, ordCost: ob.cost, ordRev: ob.rev,
+      // GP2: the ports & terminals line (same ord/ordCost/ordRev shape)
+      ports: pb.net, portsRev: pb.rev, portsCost: pb.cost,
       // M23: the per-department breakdown actually charged this month
       dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
               edu: dc.edu, health: dc.health, water: dc.water, transit: dc.transit } };
@@ -3437,6 +3899,13 @@ class City {
     // sets carries forward. railDirty is cleared afterward (nothing pending).
     c.recomputeRail(true);
     c.railDirty = false;
+    /* GP2: rebuild the DERIVED port state from the loaded over[]/anc[]/rail[]
+       BEFORE recomputeTraffic (which deposits port trips) and recomputeMaps
+       (which reads portWork for seaport smog and stamps the airport cone).
+       Nothing about a port is serialized, so this is the whole restore; the
+       recomputeDemand at the end of the cascade re-runs it once more against
+       the freshly diffused landv, which is what the live timeline carries. */
+    c.recomputePorts();
     c.recomputeTraffic();
     /* GP1b: overlay the three serialized accumulators. The ORDERING here is
        load-bearing — AFTER recomputeTraffic (whose single-pass EWMA result over

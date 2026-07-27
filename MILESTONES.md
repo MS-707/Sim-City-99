@@ -6,6 +6,47 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
+- [ ] **GP2 — Working Ports** *(gameplay roadmap 3/11)* — implemented, verify
+  pending. The airport and the seaport stop being ornaments: both now need
+  POWER **and** a road or rail tile touching the footprint, and a terminal
+  missing either produces exactly zero of everything and says which one it is
+  missing on its own line in the query panel. A working **seaport** adds
+  industrial demand scaled by the industrial jobs inside a 10-tile catchment,
+  earns freight §/mo per job served (×1.25 with a rail spur), and smokes. A
+  working **airport** adds commercial demand scaled by the land value it can
+  reach, earns tourism §/mo that is strictly monotone in that land value plus
+  landmark pride, and stamps a WORLD-FIXED east–west approach cone that
+  suppresses **residential** land value only — so it wants commerce near and
+  good neighbourhoods far. The cone is a FIELD, not a stencil: potency falls
+  off laterally to nothing 1.5 tiles outside the corridor half-width, and a
+  3-tile isotropic apron ring keeps the house that shares a fence with the
+  airport from reading quieter than one 16 tiles off the runway end. Both push
+  freight/passenger trips onto load[] at their gate tiles through a
+  deterministic bounded BFS (depth 4, so every deposited unit lands inside
+  manhattan 5 of the footprint and the whole increase is accountable there).
+  On the map a dark terminal now blinks the same no-power bolt a dark
+  schoolhouse does, and a working seaport smokes. New "Ports &
+  terminals" budget row, three new gate-table verdicts
+  (`PORT_UNPOWERED` / `PORT_UNCONNECTED` / `PORT_WORKING`), and query rows
+  for connection, jobs served or passengers, §/mo and approach.
+  **All port state is DERIVED** (`ports`, `portWork`, `noiseCov`,
+  `portDemI/portDemC`, `portsRev/portsCost`) and never serialized: the save
+  stays **v12** with an unchanged key set, and razing a port reverts every
+  effect on the next rebuild. Anchor discovery is fused into
+  `computeDemandParts`' existing loop, so no new O(n) per-tick scan; the port
+  path draws **zero RNG** (all four draw surfaces counted at 0). Re-measured
+  after the fix pass against a pinned-HEAD worktree: 20/20 pinned baseline
+  seeds byte-identical at 600 ticks; 12 no-port scenes (3 season/time × 4
+  rotations) and all 635 sprite canvases pixel-identical to HEAD; no-port tick
+  +0.5% median; ports 1.60× the control's road load in a 5-tile window with
+  the window delta sum matching the port's own deposit ledger to 1.1e-6% and
+  zero deposit outside the gate BFS; approach ZR land value −15.57 against
+  −0.00 off-approach; tourism strictly monotone (§57 → §108 → §221 at
+  catchment mean land value 18 / 34 / 71); `noiseCov` identical at all four
+  rotations; all four scenarios still 10/10 with identical medals. Two
+  gate-wording issues and one pre-existing-behaviour bound are recorded in
+  `docs/gameplay-roadmap.json`.
+
 - [ ] **GP1b — Seeded Simulation Substrate** *(gameplay roadmap 2/11)* —
   running via the milestone workflow; verify + panel are DONE, the fix pass is
   DONE, ship still pending. An implement-phase agent prematurely marked this

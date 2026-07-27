@@ -220,14 +220,33 @@ input[type=range]::-moz-range-thumb {
 
 /* ---------- status bar ---------- */
 #statusbar {
-  display: flex; gap: 3px; padding: 2px 3px; background: #c0c0c0;
+  display: flex; flex-wrap: nowrap; gap: 3px; padding: 2px 3px; background: #c0c0c0;
   border-top: 1px solid #fff;
 }
 .sb-cell {
   border: 1px solid; border-color: #808080 #fff #fff #808080;
   padding: 2px 8px; white-space: nowrap;
 }
-.sb-cell.wide { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.sb-cell.wide { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* GP1a: the two new cells NEVER wrap the row (a wrap would change #statusbar's
+   height, resize the #game backing store and invalidate every pinned scene) —
+   #statusbar is flex-nowrap, both cells shrink instead, and neither is ever
+   taller than the cells already there, so the bar keeps its exact height.
+   Neither may GROW either: #sb-tool is the Win95 message field and keeps the
+   whole flex remainder (flex:1 via .wide). #sb-hover is sized to its own text
+   (flex:0 1 auto) so it can never claim half the bar, and both disappear
+   outright while empty — with nothing to say they cost zero width and #sb-tool
+   is exactly as wide as it was before GP1a. */
+#sb-hover {
+  /* shrink-factor 4: when the bar runs out of room the READOUT gives way first,
+     so the message field is the last thing to ellipsize, not the first */
+  flex: 0 4 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  max-width: 44ch;
+}
+/* wide enough that the full warning — "Drag 180 tiles §21,600 ⚠ §4,800 short"
+   — fits without clipping the word the warning is about */
+#sb-drag { flex: 0 4 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 44ch; }
+#sb-drag:empty, #sb-hover:empty { display: none; }
 
 /* ---------- ticker ---------- */
 #ticker {
@@ -246,6 +265,42 @@ input[type=range]::-moz-range-thumb {
 .dlg-body { padding: 10px; }
 .dlg-buttons { text-align: center; margin-top: 10px; }
 .dlg-buttons .btn95 { min-width: 70px; }
+/* ---------- GP1a: growth verdict + RCI breakdown ---------- */
+/* A period-correct 95 dialog does not breathe. The verdict box is a FIXED
+   width (not max-width) and its prose reserves four lines, so the 500 ms live
+   re-render cannot resize the frame under the reader's cursor as the verdict
+   text changes length. renderQuery pins the frame's top-left as well. */
+#query-verdict {
+  border: 1px solid; border-color: #808080 #fff #fff #808080;
+  background: #dfdfdf; padding: 6px 8px; margin-bottom: 8px; width: 330px;
+}
+#query-verdict .qv-head { font-weight: bold; margin-bottom: 3px; }
+#query-verdict .qv-text { font-size: 11px; line-height: 14px; min-height: 56px; }
+#query-verdict .qv-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+#query-verdict .qv-chip {
+  font-size: 10px; line-height: 12px; padding: 1px 4px; background: #c0c0c0;
+  border: 1px solid; border-color: #fff #808080 #808080 #fff; white-space: nowrap;
+}
+#query-verdict .qv-chip b { font-weight: bold; }
+#query-verdict.crit { background: #f0d4d4; }
+#query-verdict.crit .qv-head { color: #a00000; }
+#query-verdict.warn { background: #f2ead0; }
+#query-verdict.warn .qv-head { color: #7a5300; }
+#query-verdict.ok { background: #d8ecd8; }
+#query-verdict.ok .qv-head { color: #006000; }
+
+#rci { cursor: pointer; }
+#dlg-rci .dlg-body { max-height: 80vh; overflow-y: auto; }
+.rci-bd { margin-bottom: 8px; min-width: 250px; }
+.rci-bd h4 { font-size: 12px; margin: 0 0 2px; }
+.rci-bd table { width: 100%; border-collapse: collapse; }
+.rci-bd td { padding: 1px 4px; font-size: 11px; }
+.rci-bd td:last-child { text-align: right; font-family: "Courier New", monospace; }
+.rci-bd td.pos { color: #006000; }
+.rci-bd td.neg { color: #a00000; }
+.rci-bd tr.total td { border-top: 1px solid #808080; font-weight: bold; }
+.rci-bd .clamped { color: #7a5300; font-size: 10px; }
+
 .budget-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
 .budget-table td { padding: 2px 6px; font-size: 12px; }
 .budget-table td:last-child { text-align: right; font-family: "Courier New", monospace; }

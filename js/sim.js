@@ -1785,12 +1785,19 @@ class City {
     this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI);
   }
 
-  /* GP1a: the UI-facing decomposition of the RCI bars — a fresh object of
-     NAMED SIGNED contributors per bar, from the very same computeDemandParts
-     the sim runs on. `clamped` flags a bar whose raw sum was cut by clampD, so
-     "the bar is pinned and more of X changes nothing" becomes visible. */
+  /* GP1a: the UI-facing decomposition of the RCI bars — NAMED SIGNED
+     contributors per bar, read from `this._dparts`: the EXACT snapshot
+     recomputeDemand committed this.demand.r/c/i from. It must not be a fresh
+     computeDemandParts: recomputeDemand runs at the top of tick() and growthPass
+     then moves pop/jobs underneath it, so a re-measured breakdown would print
+     parts that are provably not what the bar on screen is made of (measured
+     divergence up to 0.34 on a live city). Summing the parts left-to-right in
+     the source order reproduces the pre-clamp demand bit-for-bit, so the ONLY
+     legal gap between `raw` and `value` is clampD — which `clamped` flags.
+     Falls back to a fresh read only before the first tick, when no snapshot
+     exists yet (and demand is still 0 anyway). */
   demandBreakdown() {
-    const p = this.computeDemandParts({});
+    const p = this._dparts || this.computeDemandParts({});
     const mk = (key, label, value, parts) => {
       let raw = 0;
       for (const q of parts) raw += q[1];
@@ -2016,7 +2023,11 @@ class City {
       const row = firstGate(this, i, k);
       let severity = row.sev;
       let text = row.text(this, i, k);
-      const gridlock = k.lvl > 1 && gCong(this, i, k) > 0.8;
+      // The gridlock phase only ever runs on a tile that got PAST the gate walk:
+      // growthPass `continue`s on the stopping rows (BURNING, UNPOWERED) before
+      // it is reached, so a burning or blacked-out lot cannot lose a level to
+      // congestion and must never be told that it can.
+      const gridlock = !row.stop && k.lvl > 1 && gCong(this, i, k) > 0.8;
       if (gridlock && gUpP(this, i, k) < GRIDLOCK_P) {
         if (severity === "ok") severity = "warn";
         text += ` Gridlock outweighs it: at ${gPct(gCong(this, i, k))}% congestion this lot has a ` +

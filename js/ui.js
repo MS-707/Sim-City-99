@@ -23,6 +23,16 @@ const UI = {
     landv: { on: true, color: "#00aaaa", key: "landv", label: "Land value", idx: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
+  // GP1a: the open Tile Info target ({x, y, at}) — null whenever the dialog is
+  // hidden, which is what keeps diagnoseTile off the frame budget when closed.
+  query: null,
+  rciAt: -1,            // GP1a: last Demand Breakdown re-render (performance.now)
+  // GP1a: drag-cost PREVIEW. Accumulated strictly AFTER city.place() returns,
+  // from its {ok, reason, cost} — never before it, never as a guard. It warns
+  // about a shortfall; the refusal itself is still place()'s existing path.
+  drag: { active: false, until: 0, count: 0, spent: 0, short: 0, blocked: 0 },
+  // GP1a: transient status message + its expiry (see setStatus)
+  status: null,
 };
 
 /* --------- user preferences (localStorage, separate from the save) --------- */
@@ -169,7 +179,16 @@ function uiInit() {
   bindMinimap();
   bindTicker();
   pickerInit();
+  bindRCI();
   setTool("road");
+}
+
+// GP1a: the RCI meter is now a button into its own decomposition
+function bindRCI() {
+  const r = document.getElementById("rci");
+  if (!r) return;
+  r.title = "What is driving demand? (click)";
+  r.addEventListener("click", () => { Snd.click(); openRCI(); });
 }
 
 /* ================= splash map picker (M11) ================= */
@@ -297,7 +316,22 @@ function setTool(id) {
   if (id === "district" && city && city.districts.length === 0) openDistricts();
 }
 
-function setStatus(msg) { document.getElementById("sb-tool").textContent = msg; }
+/* GP1a: a status message now carries a TTL. refreshHUD restores the idle tool
+   line once it expires, so a message is never left stale — and because the live
+   tile readout moved to its OWN cell (#sb-hover), a mouse sweep can no longer
+   eat a message the player has not read yet. Existing call sites are unchanged
+   (they all take the 6s default). */
+function setStatus(msg, ttl = 6000) {
+  document.getElementById("sb-tool").textContent = msg;
+  UI.status = ttl > 0 ? { text: msg, until: performance.now() + ttl } : null;
+}
+
+// what #sb-tool falls back to with nothing to say
+function idleStatusLine() {
+  const t = typeof TOOLS !== "undefined" ? TOOLS.find(t => t.id === UI.tool) : null;
+  const cost = COST[UI.tool];
+  return t ? `${t.name}${cost ? ` — §${cost} each` : ""}` : "Ready, Mayor.";
+}
 
 /* ================= menus ================= */
 const MENUS = {
@@ -415,6 +449,7 @@ function bindCanvas() {
         return;
       }
       UI.painting = true;
+      dragMeterReset();
       applyToolAt(e);
     }
   });
@@ -437,6 +472,7 @@ function bindCanvas() {
 
   window.addEventListener("mouseup", () => {
     UI.painting = false; UI.panning = false; UI.lastMouse = null;
+    dragMeterEnd(); // totals stay readable for DRAG_TTL, then clear themselves
   });
 
   // GQ11: eased zoom-to-cursor. The wheel no longer writes cam.z directly —
@@ -491,6 +527,7 @@ function bindCanvas() {
         ? "choppertap" : "tap";
       UI.hover = touch.mode === "tap"
         ? screenToTile(t.clientX - r.left, t.clientY - r.top) : null;
+      if (touch.mode === "tap") dragMeterReset(); // GP1a: a finger drag meters too
     }
   }, { passive: false });
 
@@ -536,7 +573,7 @@ function bindCanvas() {
       openTrafficReport();
     }
     // a gesture keeps its claim until every finger lifts — no accidental builds
-    if (e.touches.length === 0) { touch.mode = null; UI.hover = null; }
+    if (e.touches.length === 0) { touch.mode = null; UI.hover = null; dragMeterEnd(); }
   };
   c.addEventListener("touchend", touchDone, { passive: false });
   c.addEventListener("touchcancel", touchDone, { passive: false });
@@ -582,6 +619,39 @@ function rotateView(dir) {
   UI.prefs.viewRot = cam.r; savePrefs();
 }
 
+/* GP1a: the drag-cost meter. `active` opens on mousedown/touchstart and the
+   counters accumulate ONLY from what city.place() already returned, so this is
+   a pure observer: no projection, no pre-check, no early return. The refusal a
+   player hits is still place()'s own {ok:false, reason:"funds"} + Snd.denied(). */
+function dragMeterReset() {
+  UI.drag.active = true; UI.drag.until = 0;
+  UI.drag.count = 0; UI.drag.spent = 0; UI.drag.short = 0; UI.drag.blocked = 0;
+}
+/* The totals describe ONE drag on ONE city. They linger just long enough to be
+   read (DRAG_TTL after the button comes up) and are wiped outright by New/Load
+   City — a status bar must never advertise a spend against a city that no
+   longer exists. */
+const DRAG_TTL = 5000;
+function dragMeterEnd() {
+  if (!UI.drag.active) return;
+  UI.drag.active = false;
+  UI.drag.until = (UI.drag.count || UI.drag.blocked) ? performance.now() + DRAG_TTL : 0;
+}
+function dragMeterClear() {
+  UI.drag.active = false; UI.drag.until = 0;
+  UI.drag.count = 0; UI.drag.spent = 0; UI.drag.short = 0; UI.drag.blocked = 0;
+}
+function dragMeterNote(res, tool, x, y) {
+  if (!UI.drag.active) return;
+  if (res.ok) {
+    UI.drag.count++;
+    UI.drag.spent += res.cost != null ? res.cost : city.toolCost(tool, x, y);
+  } else if (res.reason === "funds") {
+    UI.drag.blocked++;
+    UI.drag.short += res.cost != null ? res.cost : city.toolCost(tool, x, y);
+  }
+}
+
 let lastPaint = -1;
 function applyToolAt(e) {
   const c = document.getElementById("game");
@@ -600,6 +670,7 @@ function applyToolAt(e) {
   if (UI.tool === "district") { city.paintDistrict(x, y, UI.curDistrict); Snd.zone(); return; }
 
   const res = city.place(UI.tool, x, y);
+  dragMeterNote(res, UI.tool, x, y); // strictly AFTER place(): observe, never gate
   if (res.ok) {
     switch (UI.tool) {
       case "bulldoze": Snd.bulldoze(); break;
@@ -1517,20 +1588,64 @@ function bindGraphControls() {
   _graphControlsBound = true;
 }
 
+// overlay id -> display name (indices are over[] byte values, never renumbered)
+const OV_NAMES = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
+  "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
+  "Mayor's House", "Stadium", "School", "Hospital", "Gas plant", "Wind farm",
+  "Road + power line", // M26: index 18 = WIREROAD crossing
+  "Water pipe", "Water tower", "Water pump", // M24: indices 19/20/21
+  // M28: indices 22..28 — arcologies then wonder landmarks
+  "Plymouth Arcology", "Forest Arcology", "Darco Arcology", "Launch Arcology",
+  "Statue of Liberty", "Eiffel Tower", "Great Pyramid",
+  // GQ10: indices 29..31 (the plant age/output row keys on isPlant and is
+  // automatic for the nuke)
+  "Nuclear plant", "Airport", "Seaport"];
+
+const htmlEsc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/* GP1a: the query dialog is now LIVE. openQuery pins the tile; refreshHUD
+   re-renders it every 500 ms while the dialog is visible and clears UI.query
+   the moment it closes, so diagnoseTile is never called against a hidden box. */
 function openQuery(x, y) {
+  UI.query = { x, y, at: 0 };
+  renderQuery();
+  showDlg("dlg-query");
+}
+
+/* GP1a: paint the verdict block. A null verdict (bare grass, water, forest,
+   road, wire, pipe, park, rubble…) renders NO box at all. */
+function renderVerdict(i) {
+  const box = document.getElementById("query-verdict");
+  if (!box) return;
+  const v = city.diagnoseTile(i);
+  if (!v) { box.className = "hidden"; box.innerHTML = ""; return; }
+  const head = { crit: "⛔", warn: "⚠️", ok: "✅" }[v.severity] || "";
+  const chips = v.evidence.map(e =>
+    `<span class="qv-chip">${htmlEsc(e[0])} <b>${htmlEsc(e[1])}</b></span>`).join("");
+  box.className = v.severity;
+  box.innerHTML =
+    `<div class="qv-head">${head} ${htmlEsc(GATE_LABEL[v.code] || v.code)}</div>` +
+    `<div class="qv-text">${htmlEsc(v.text)}</div>` +
+    `<div class="qv-chips">${chips}</div>`;
+}
+
+function renderQuery() {
+  if (!UI.query) return;
+  // a New/Load City under an open dialog can change MAP: drop the pin rather
+  // than read off the end of the new city's arrays
+  if (!city.inMap(UI.query.x, UI.query.y)) { UI.query = null; hideDlg("dlg-query"); return; }
+  UI.query.at = performance.now();
+  // A live re-render must never move the frame the player is reading. The .dlg
+  // is centred on its left/top (translate(-50%,-50%)), so ANY size change walks
+  // the box — and the OK button with it. Pin the current top-left across the
+  // re-render, in the same viewport coordinates the titlebar drag already uses.
+  const dlgEl = document.getElementById("dlg-query");
+  const pin = dlgEl && !dlgEl.classList.contains("hidden") ? dlgEl.getBoundingClientRect() : null;
+  const x = UI.query.x, y = UI.query.y;
   const i = y * MAP + x;
   const terrName = ["Grass", "Water", "Forest"][city.terr[i]];
-  const ovName = ["—", "Road", "Power line", "Residential", "Commercial", "Industrial",
-    "Park", "Police station", "Fire station", "Coal plant", "Solar plant", "Rubble",
-    "Mayor's House", "Stadium", "School", "Hospital", "Gas plant", "Wind farm",
-    "Road + power line", // M26: index 18 = WIREROAD crossing
-    "Water pipe", "Water tower", "Water pump", // M24: indices 19/20/21
-    // M28: indices 22..28 — arcologies then wonder landmarks
-    "Plymouth Arcology", "Forest Arcology", "Darco Arcology", "Launch Arcology",
-    "Statue of Liberty", "Eiffel Tower", "Great Pyramid",
-    // GQ10: indices 29..31 (the plant age/output row keys on isPlant and is
-    // automatic for the nuke)
-    "Nuclear plant", "Airport", "Seaport"][city.over[i]];
+  const ovName = OV_NAMES[city.over[i]];
+  renderVerdict(i);
   // M19: for a power-plant anchor, surface its age and aged output vs nameplate
   let plantRow = "";
   if (isPlant(city.over[i]) && city.anc[i] === i) {
@@ -1598,7 +1713,29 @@ function openQuery(x, y) {
     <tr><td>Crime</td><td>${city.crime[i]}</td></tr>
     <tr><td>Education</td><td>${city.eduCov[i]}</td></tr>
     <tr><td>Health</td><td>${city.medCov[i]}</td></tr>`;
-  showDlg("dlg-query");
+
+  if (pin) {
+    const now = dlgEl.getBoundingClientRect();
+    if (now.width !== pin.width || now.height !== pin.height) {
+      dlgEl.style.left = (pin.left + now.width / 2) + "px";
+      dlgEl.style.top = (pin.top + now.height / 2) + "px";
+    }
+  }
+}
+
+/* --------- GP1a: RCI decomposition --------- */
+function openRCI() { UI.rciAt = -1; renderRCI(); showDlg("dlg-rci"); }
+
+function renderRCI() {
+  UI.rciAt = performance.now();
+  const sgn = (v) => (v >= 0 ? "+" : "") + v.toFixed(3);
+  document.getElementById("rci-breakdown").innerHTML = city.demandBreakdown().map(b =>
+    `<div class="rci-bd"><h4>${htmlEsc(b.label)} — ${sgn(b.value)}</h4><table>` +
+    b.parts.map(p =>
+      `<tr><td>${htmlEsc(p[0])}</td><td class="${p[1] >= 0 ? "pos" : "neg"}">${sgn(p[1])}</td></tr>`).join("") +
+    `<tr class="total"><td>Sum</td><td>${sgn(b.raw)}</td></tr></table>` +
+    (b.clamped ? `<div class="clamped">⚠️ pinned by the −1…+1 clamp — more of the same changes nothing</div>` : "") +
+    `</div>`).join("");
 }
 
 /* --------- "Traffic on the 5s" chopper report (M18) --------- */
@@ -1802,8 +1939,84 @@ function refreshHUD() {
   setBar("rci-c", city.demand.c);
   setBar("rci-i", city.demand.i);
 
+  gp1aHUD();
+
   // scenario progress cell (M9) — hidden & empty in free play
   if (typeof scenarioHUD === "function") scenarioHUD();
+}
+
+/* ================= GP1a HUD: hover readout, drag meter, live dialogs =======
+   All four surfaces ride the ONE refreshHUD call main.js already makes per rAF
+   — no timers, nothing that could leak across newCity/loadCity. Every read is
+   gated so a closed dialog and a parked mouse cost exactly zero diagnoseTile
+   calls, and the hover verdict is memoized per (tile, tickCount) so a per-pixel
+   mousemove pays at most ONE walk per sim tick. */
+let hoverMemo = { key: "", text: "", city: null };
+
+function hoverReadout() {
+  const h = UI.hover;
+  // nothing to read: drop the memo too, so the pointer leaving the map never
+  // leaves this closure holding the last City's typed arrays alive
+  if (!h || !city.inMap(h.x, h.y)) {
+    if (hoverMemo.city) hoverMemo = { key: "", text: "", city: null };
+    return "";
+  }
+  const i = h.y * MAP + h.x;
+  const key = i + ":" + city.tickCount;
+  // the city identity is part of the key: New/Load City can land on the same
+  // tickCount and must never serve a verdict computed against the old world
+  if (hoverMemo.key === key && hoverMemo.city === city) return hoverMemo.text;
+  const ov = city.over[i];
+  const what = ov ? OV_NAMES[ov] : ["Grass", "Water", "Forest"][city.terr[i]];
+  const lvl = city.lvl[i] ? ` L${city.lvl[i]}` : "";
+  const v = city.diagnoseTile(i);
+  const mark = v ? ({ crit: "⛔", warn: "⚠️", ok: "✅" }[v.severity] || "") + " " + (GATE_LABEL[v.code] || v.code) : "";
+  const text = `(${h.x}, ${h.y}) ${what}${lvl}${mark ? " — " + mark : ""}`;
+  hoverMemo = { key, text, city };
+  return text;
+}
+
+function gp1aHUD() {
+  const now = performance.now();
+
+  // 1. transient status TTL — restore the idle line once a message has expired
+  if (UI.status && now >= UI.status.until) {
+    UI.status = null;
+    document.getElementById("sb-tool").textContent = idleStatusLine();
+  }
+
+  // 2. drag-cost preview — expires so it can never describe a finished drag on
+  //    a city that has since been replaced
+  const d = UI.drag;
+  if (!d.active && d.until && now >= d.until) dragMeterClear();
+  const dTxt = d.count || d.blocked
+    ? `Drag ${d.count} tile${d.count === 1 ? "" : "s"} §${Math.round(d.spent).toLocaleString()}` +
+      (d.short ? ` ⚠ §${Math.round(d.short).toLocaleString()} short` : "")
+    : "";
+  const dEl = document.getElementById("sb-drag");
+  if (dEl && dEl.textContent !== dTxt) dEl.textContent = dTxt;
+
+  // 3. live tile readout in its OWN cell (never #sb-tool). While the drag meter
+  //    is up it stands down: the running total is the story mid-drag, and two
+  //    mouse-driven cells at once would squeeze the message field on a narrow
+  //    screen. At most ONE of the two ever occupies the bar.
+  const hv = dTxt ? "" : hoverReadout();
+  const hEl = document.getElementById("sb-hover");
+  if (hEl && hEl.textContent !== hv) hEl.textContent = hv;
+
+  // 4. the two live dialogs, each gated on its own visibility
+  const q = document.getElementById("dlg-query");
+  if (q && !q.classList.contains("hidden")) {
+    if (UI.query && now - UI.query.at >= 500) renderQuery();
+  } else if (UI.query) {
+    UI.query = null; // closed: stop diagnosing entirely
+  }
+  const r = document.getElementById("dlg-rci");
+  if (r && !r.classList.contains("hidden")) {
+    if (UI.rciAt < 0 || now - UI.rciAt >= 500) renderRCI();
+  } else if (UI.rciAt >= 0) {
+    UI.rciAt = -1;
+  }
 }
 
 /* ================= save / load / new ================= */
@@ -1824,6 +2037,7 @@ function loadCity() {
   try {
     city = City.deserialize(json);
     chopperClear(); // the chopper (M18) is never saved — no stale flyovers
+    dragMeterClear(); // GP1a: last city's drag totals mean nothing here
     zoomAnim.active = false; // GQ11: never ease toward a stale pre-load anchor
     clampCam(); // a save may be a different map size than the last camera spot (M11)
     setStatus("City loaded. Welcome back, Mayor.");
@@ -1835,6 +2049,7 @@ function newCity() {
   // consume exactly the seed + size the splash picker is previewing (M11)
   city = new City(PICKER.seed, PICKER.size);
   chopperClear(); // presentation state (M18) never crosses into a new city
+  dragMeterClear(); // GP1a: never advertise a spend from the city just replaced
   const names = ["Llamaville", "Port Modem", "Beanieburg", "Dialup Falls",
     "Pixel Heights", "Cassette Creek", "Winsock City", "Grungetown"];
   city.cityName = names[(Math.random() * names.length) | 0];

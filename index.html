@@ -120,6 +120,12 @@
       <span id="sb-pop" class="sb-cell">Pop: 0</span>
       <span id="sb-scenario" class="sb-cell hidden"></span>
       <span id="sb-tool" class="sb-cell wide">Welcome, Mayor.</span>
+      <!-- GP1a: live tile readout. Owned by the hover path ALONE so a mouse
+           sweep can never eat a transient #sb-tool message. NOT .wide — the
+           message field #sb-tool keeps the whole remainder of the bar. -->
+      <span id="sb-hover" class="sb-cell"></span>
+      <!-- GP1a: drag-cost preview — warns, never blocks -->
+      <span id="sb-drag" class="sb-cell"></span>
       <span id="sb-speed" class="sb-cell">▶ Normal</span>
     </div>
 
@@ -364,7 +370,19 @@
 
   <div id="dlg-query" class="win95 dlg hidden">
     <div class="titlebar"><span>🔍 Tile Info</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
-    <div class="dlg-body"><table id="query-table"></table>
+    <div class="dlg-body">
+      <!-- GP1a: the growth verdict — why this lot is (or isn't) growing -->
+      <div id="query-verdict" class="hidden"></div>
+      <table id="query-table"></table>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
+    </div>
+  </div>
+
+  <!-- GP1a: RCI decomposition — what each demand bar is actually made of -->
+  <div id="dlg-rci" class="win95 dlg hidden">
+    <div class="titlebar"><span>📊 Demand Breakdown</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <div id="rci-breakdown"></div>
       <div class="dlg-buttons"><button class="btn95 dlg-close">OK</button></div>
     </div>
   </div>

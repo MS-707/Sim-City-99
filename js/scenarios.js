@@ -334,6 +334,7 @@ function startScenario(id) {
   if (!sc) return false;
   city = sc.build();
   chopperClear(); // news chopper (M18) never carries over into a scenario
+  if (typeof dragMeterClear === "function") dragMeterClear(); // GP1a: fresh city, fresh meter
   city.scenarioId = sc.id;
   city.scnWon = false; city.scnLost = false; city.scnBest = 9999;
   city.funds = sc.funds;

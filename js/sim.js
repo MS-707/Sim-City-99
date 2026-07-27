@@ -519,6 +519,250 @@ function computeNeighbors(seed) {
   return out;
 }
 
+/* ================= GP1a: the growth gate table =================
+   ONE ordered list of gates is the SINGLE SOURCE OF TRUTH for "why is this
+   lot not growing?". growthPass() walks it and runs the matched row's `apply`
+   (the mutation + the RNG draw); diagnoseTile() walks the SAME rows with the
+   SAME `test`s and reads `text`/`evid` only — it can never disagree with the
+   sim, because there is no second copy of the conditions.
+
+   The table is a LINE-BY-LINE transcription of the pre-GP1a if/else chain, so
+   the RNG stream is byte-identical:
+     • every draw stays behind the guard that used to short-circuit it — the
+       unpowered decay draw needs lvl>0 && unpow>6, the seed draw needs
+       road && dem>0, the upgrade draw needs road, the decline draw needs
+       lvl>0, and gridlock needs lvl>1 && cong>0.8 on the POST-chain lvl;
+     • rows that mutate nothing draw nothing (the original's empty `{}` arms);
+     • Z0_ODDS_NIL/Z0_SEEDING SHARE one applySeed and UPG_ODDS_NIL/UPG_GROWING
+       SHARE one applyUpgrade — a row names the GATE a tile sits at, not the
+       die's outcome, and the original spends exactly ONE draw across each pair.
+   Order traps that are load-bearing: WATER_CAP fires at ANY lvl 1..2 and so
+   PRE-EMPTS both level-2 caps; DECLINE precedes MAXED (a lvl-3 lot with
+   dem < -0.25 really does draw and really does decline); the three caps
+   precede UPG_NO_ROAD (the original never tested road once a cap hit).
+   Gridlock is deliberately NOT a row: it is a PHASE that can co-occur with an
+   upgrade in the same visit. */
+const P_MIN = 0.005;        // below this an "odds" gate reads as effectively nil
+const GRIDLOCK_P = 0.07;    // per-check chance a gridlocked lvl>1 lot sheds a level
+
+const ZONE_WORD = { [OV.ZR]: "residential", [OV.ZC]: "commercial", [OV.ZI]: "industrial" };
+const SVC_LABEL = { [OV.POLICE]: "Police station", [OV.FIRESTA]: "Fire station",
+                    [OV.SCHOOL]: "School", [OV.HOSPITAL]: "Hospital" };
+
+/* One preallocated scratch context per City (zero allocation inside the
+   340-iteration growth loop). cong/fit are memoized LAZILY: neither draws RNG,
+   both are pure reads of pre-apply state, so laziness cannot move the stream —
+   it only removes trafficNear() calls the original always paid. */
+function newGrowthCtx() { return { ov: 0, dem: 0, powered: 0, road: false, lvl: 0, cong: -1, fit: null }; }
+function resetGrowthCtx(k, c, i, ov) {
+  k.ov = ov;
+  // M27: commuterBias is exactly 0.0 where no commute link is open, so this is
+  // a bit-identical `+0.0` no-op vs pre-M27 (same expression as the original).
+  k.dem = (ov === OV.ZR ? c.demand.r : ov === OV.ZC ? c.demand.c : c.demand.i) + c.commuterBias[i];
+  k.powered = c.powered[i];
+  k.road = c.access[i] > 0;
+  k.lvl = c.lvl[i];
+  k.cong = -1;
+  k.fit = null;
+  return k;
+}
+// congestion on the serving roads (city.traffic) dampens growth
+function gCong(c, i, k) { return k.cong >= 0 ? k.cong : (k.cong = c.trafficNear(i) / 255); }
+// the upgrade "fit" product, transcribed verbatim from the shipped chain with
+// NO re-association (float association is a byte-identity hazard)
+function gFit(c, i, k) {
+  if (k.fit !== null) return k.fit;
+  const cong = gCong(c, i, k);
+  let fit = c.landv[i] / 255;
+  if (k.ov === OV.ZI) fit = 0.75;             // industry doesn't care about views
+  if (k.ov === OV.ZR) fit -= c.crime[i] / 400;
+  fit *= 1 - cong * 0.75;                     // nobody moves up on a gridlocked block
+  const svc = (c.eduCov[i] + c.medCov[i]) / 510; // 0..1
+  fit *= 0.7 + svc * 1.1;
+  fit *= 0.55 + 0.45 * c.waterPressure;       // M24: water gates DENSITY
+  return (k.fit = fit);
+}
+function gSeedP(c, i, k) { return k.dem * 0.85 * (1 - gCong(c, i, k) * 0.7); }
+function gUpP(c, i, k) { return k.dem * gFit(c, i, k) * 0.42; }
+// the upgrade bucket. lvl>0 is implied by the lvl===0 rows above it; stating it
+// makes every test SELF-SUFFICIENT (no hidden router diagnoseTile could miss).
+function gUp(k) { return k.lvl > 0 && k.dem > 0.15 && k.lvl < 3; }
+
+const gPct = (v) => Math.round(v * 100);
+const gOdds = (p) => { const v = Math.max(0, p) * 100; return v < 1 ? v.toFixed(2) : v.toFixed(1); };
+
+// the three mutating arms — each spends EXACTLY the draws the original spent
+function applySeed(c, i, k) {
+  if (Math.random() < gSeedP(c, i, k)) { c.lvl[i] = 1; c.varnt[i] = (Math.random() * 5) | 0; }
+}
+function applyUpgrade(c, i, k) {
+  if (Math.random() < gUpP(c, i, k)) { c.lvl[i]++; c.varnt[i] = (Math.random() * 5) | 0; }
+}
+function applyDecline(c, i, k) {
+  if (c.lvl[i] > 0 && Math.random() < -k.dem * 0.3) c.lvl[i]--;
+}
+
+const GROWTH_GATES = Object.freeze([
+  { code: "BURNING", sel: "any", sev: "crit", label: "Burning", stop: true, apply: null,
+    test: (c, i, k) => c.fire[i] > 0,
+    text: () => "🔥 On fire — the blaze suspends every growth check on this lot until it burns out.",
+    evid: (c, i) => [["Fire", c.fire[i]]] },
+
+  { code: "UNPOWERED", sel: "any", sev: "crit", label: "No power", stop: true,
+    test: (c, i, k) => !k.powered,
+    apply: (c, i, k) => {
+      c.unpow[i] = Math.min(250, c.unpow[i] + 1);
+      if (c.lvl[i] > 0 && c.unpow[i] > 6 && Math.random() < 0.35) c.lvl[i]--;
+    },
+    // three DIFFERENT true sentences — a lvl-0 lot has no level to lose, and the
+    // decay guard is unpow>6, so the loss claim appears only where it is real
+    text: (c, i, k) => k.lvl === 0
+      ? "No power — an unpowered lot never develops at all. Run a line from a plant."
+      : c.unpow[i] > 6
+        ? `No power for ${c.unpow[i]} checks — tenants are walking out and the lot is losing levels.`
+        : `No power — dark for ${c.unpow[i]} of the 7 checks that start the decline.`,
+    evid: (c, i) => [["Powered", "no"], ["Dark checks", c.unpow[i]]] },
+
+  { code: "Z0_NO_ROAD", sel: "zero", sev: "crit", label: "No road", apply: null,
+    test: (c, i, k) => k.lvl === 0 && !k.road,
+    text: () => "Zoned but off the street grid — nothing ever builds without road access. Lay a road within 3 tiles.",
+    evid: (c, i) => [["Road access", "no"], ["Access", c.access[i]]] },
+
+  { code: "Z0_NO_DEMAND", sel: "zero", sev: "warn", label: "No demand", apply: null,
+    test: (c, i, k) => k.lvl === 0 && !(k.dem > 0),
+    text: (c, i, k) => `Zoned and empty — ${ZONE_WORD[k.ov]} demand is ${k.dem.toFixed(2)}; nobody is looking to move in.`,
+    evid: (c, i, k) => [["Demand", k.dem.toFixed(2)], ["Zone", ZONE_WORD[k.ov]]] },
+
+  { code: "Z0_ODDS_NIL", sel: "zero", sev: "warn", label: "Odds nil", apply: applySeed,
+    test: (c, i, k) => k.lvl === 0 && gSeedP(c, i, k) < P_MIN,
+    text: (c, i, k) => `Zoned and empty — build odds ~${gOdds(gSeedP(c, i, k))}% per check: demand ${k.dem.toFixed(2)} against ${gPct(gCong(c, i, k))}% congestion.`,
+    evid: (c, i, k) => [["Build odds", gOdds(gSeedP(c, i, k)) + "%"], ["Demand", k.dem.toFixed(2)],
+                        ["Congestion", gPct(gCong(c, i, k)) + "%"]] },
+
+  { code: "Z0_SEEDING", sel: "zero", sev: "ok", label: "Ready to build", apply: applySeed,
+    test: (c, i, k) => k.lvl === 0,
+    text: (c, i, k) => `Zoned, served and waiting — build odds ~${gOdds(gSeedP(c, i, k))}% per check.`,
+    evid: (c, i, k) => [["Build odds", gOdds(gSeedP(c, i, k)) + "%"], ["Demand", k.dem.toFixed(2)],
+                        ["Congestion", gPct(gCong(c, i, k)) + "%"]] },
+
+  // M24: no mains → hard-capped (a shack has a well; density needs pipe). This
+  // fires at lvl 1 AND lvl 2, which is why it must sit above both level-2 caps.
+  { code: "WATER_CAP", sel: "up", sev: "warn", label: "No water", apply: null,
+    test: (c, i, k) => gUp(k) && k.lvl >= 1 && !c.watered[i],
+    text: (c, i, k) => k.lvl === 1
+      ? "No water mains — capped at level 1. Lay pipe from a tower or a pump to let it densify."
+      : "No water mains — it cannot rise past level 2. Lay pipe from a tower or a pump.",
+    evid: (c, i, k) => [["Water", "none"], ["Level", k.lvl]] },
+
+  { code: "SVC_CAP", sel: "up", sev: "warn", label: "No services", apply: null,
+    test: (c, i, k) => gUp(k) && k.lvl === 2 && c.eduCov[i] < 8 && c.medCov[i] < 8,
+    text: (c, i) => `No school or hospital in reach — towers need service coverage (education ${c.eduCov[i]}, health ${c.medCov[i]}; either must reach 8).`,
+    evid: (c, i) => [["Education", c.eduCov[i]], ["Health", c.medCov[i]]] },
+
+  { code: "PRESSURE_CAP", sel: "up", sev: "warn", label: "Low pressure", apply: null,
+    test: (c, i, k) => gUp(k) && k.lvl === 2 && c.waterPressure < 0.9,
+    text: (c) => `Water pressure ${gPct(c.waterPressure)}% — the mains are strained, so no tower rises here until it recovers past 90%.`,
+    evid: (c) => [["Pressure", gPct(c.waterPressure) + "%"],
+                  ["Supply/demand", c.waterSupply + "/" + c.waterDemand]] },
+
+  { code: "UPG_NO_ROAD", sel: "up", sev: "crit", label: "No road", apply: null,
+    test: (c, i, k) => gUp(k) && !k.road,
+    text: () => "Demand is there but the block has no road access — lay a street within 3 tiles.",
+    evid: (c, i) => [["Road access", "no"], ["Access", c.access[i]]] },
+
+  { code: "UPG_ODDS_NIL", sel: "up", sev: "warn", label: "Odds nil", apply: applyUpgrade,
+    test: (c, i, k) => gUp(k) && gUpP(c, i, k) < P_MIN,
+    text: (c, i, k) => `Upgrade odds ~${gOdds(gUpP(c, i, k))}% per check — land value ${c.landv[i]} and ${gPct(gCong(c, i, k))}% congestion are strangling it.`,
+    evid: (c, i, k) => [["Upgrade odds", gOdds(gUpP(c, i, k)) + "%"], ["Land value", c.landv[i]],
+                        ["Congestion", gPct(gCong(c, i, k)) + "%"], ["Demand", k.dem.toFixed(2)]] },
+
+  { code: "UPG_GROWING", sel: "up", sev: "ok", label: "Growing", apply: applyUpgrade,
+    test: (c, i, k) => gUp(k),
+    text: (c, i, k) => `Growing — upgrade odds ~${gOdds(gUpP(c, i, k))}% per check on demand ${k.dem.toFixed(2)}.`,
+    evid: (c, i, k) => [["Upgrade odds", gOdds(gUpP(c, i, k)) + "%"], ["Land value", c.landv[i]],
+                        ["Congestion", gPct(gCong(c, i, k)) + "%"], ["Demand", k.dem.toFixed(2)]] },
+
+  { code: "DECLINE", sel: "down", sev: "crit", label: "Declining", apply: applyDecline,
+    test: (c, i, k) => k.dem < -0.25,
+    text: (c, i, k) => `Demand ${k.dem.toFixed(2)} — tenants are leaving and the lot is shedding levels (~${gOdds(-k.dem * 0.3)}% per check).`,
+    evid: (c, i, k) => [["Demand", k.dem.toFixed(2)], ["Decline odds", gOdds(-k.dem * 0.3) + "%"]] },
+
+  { code: "MAXED", sel: "hold", sev: "ok", label: "Maxed", apply: null,
+    test: (c, i, k) => k.lvl === 3,
+    text: () => "Fully developed at level 3 — there is nothing left for this lot to build.",
+    evid: (c, i, k) => [["Level", k.lvl], ["Demand", k.dem.toFixed(2)]] },
+
+  // the invisible stall: positive demand that never reaches the upgrade gate
+  { code: "DEM_THRESHOLD", sel: "hold", sev: "warn", label: "Below threshold", apply: null,
+    test: (c, i, k) => k.dem > 0,
+    text: (c, i, k) => `Stalled: demand ${k.dem.toFixed(2)} — upgrades need 0.15. It holds where it is until demand clears that line.`,
+    evid: (c, i, k) => [["Demand", k.dem.toFixed(2)], ["Needed", "0.15"], ["Level", k.lvl]] },
+
+  { code: "DEM_FLAT", sel: "hold", sev: "warn", label: "Flat demand", apply: null,
+    test: () => true,
+    text: (c, i, k) => `Demand ${k.dem.toFixed(2)} is flat — the lot holds at level ${k.lvl} until demand climbs past 0.15.`,
+    evid: (c, i, k) => [["Demand", k.dem.toFixed(2)], ["Needed", "0.15"], ["Level", k.lvl]] },
+]);
+
+/* The ordered walk. `sel` is a documentation-only bucket tag: the walk is
+   deliberately UNFILTERED so the selected row can never depend on anything but
+   the row's own self-sufficient `test`. The final row's test is `true`. */
+function firstGate(c, i, k) {
+  for (let g = 0; g < GROWTH_GATES.length; g++)
+    if (GROWTH_GATES[g].test(c, i, k)) return GROWTH_GATES[g];
+  return GROWTH_GATES[GROWTH_GATES.length - 1];
+}
+
+/* Non-zone diagnoses. Every row is grounded in a REAL shipped rule:
+   a pump is a terminal receiver (recomputeWater: energized = tower || powered),
+   a station only carries riders when stationLive (>=2 stations on the line AND
+   power), a plant fades past PLANT_WARN_AGE, and stampCoverage skips unpowered
+   anchors outright — an unpowered station stamps a literal zero. */
+const INFRA_GATES = Object.freeze([
+  { code: "PUMP_DRY", sev: "crit", label: "Pump dark",
+    test: (c, i) => c.over[i] === OV.PUMP && c.anc[i] === i && !c.powered[i],
+    text: () => "The water pump has no power — a pump only lifts water while its own tile is energized. Run a wire to it.",
+    evid: (c, i) => [["Powered", "no"], ["Capacity", WATER_CAP[OV.PUMP] + " tiles"]] },
+
+  { code: "STATION_DEAD", sev: "warn", label: "Station closed",
+    test: (c, i) => c.rail[i] === RL.STATION && !c.stationLive[i],
+    text: (c, i) => {
+      const net = c.railNet[i];
+      let n = 0;
+      for (let j = 0; j < c.rail.length; j++) if (c.rail[j] === RL.STATION && c.railNet[j] === net) n++;
+      return n < 2
+        ? `Station carries nobody — a line needs 2 stations and this one has ${n}. Link it by rail.`
+        : "Station carries nobody — it has no power. Run a wire to it.";
+    },
+    evid: (c, i) => [["Line", "#" + (c.railNet[i] + 1)], ["Powered", c.powered[i] ? "yes" : "no"]] },
+
+  { code: "PLANT_AGING", sev: "warn", label: "Plant aging",
+    test: (c, i) => isPlant(c.over[i]) && c.anc[i] === i &&
+                    c.year - (c.plantYear[i] || c.year) >= PLANT_WARN_AGE,
+    text: (c, i) => `The ${PLANT_LABEL[c.over[i]] || "power plant"} is ${c.year - (c.plantYear[i] || c.year)} years old — ` +
+      `aging has cut it to ${c.plantEffectiveCap(i)} of ${POWER_CAP[c.over[i]]} MW. Bulldoze and rebuild for full output.`,
+    evid: (c, i) => [["Age", (c.year - (c.plantYear[i] || c.year)) + " yr"],
+                     ["Output", c.plantEffectiveCap(i) + "/" + POWER_CAP[c.over[i]] + " MW"]] },
+
+  { code: "SVC_DARK", sev: "crit", label: "Unpowered service",
+    test: (c, i) => SVC_LABEL[c.over[i]] !== undefined && c.anc[i] === i && !c.powered[i],
+    text: (c, i) => `${SVC_LABEL[c.over[i]]} has no power — an unpowered station stamps ZERO coverage. Run a wire to it.`,
+    evid: (c, i) => [["Powered", "no"], ["Coverage stamped", "0"]] },
+]);
+
+// short label for a verdict code (status-bar hover readout) — a pure lookup, so
+// the caller never pays a second diagnoseTile walk to get it
+const GATE_LABEL = (() => {
+  const m = Object.create(null);
+  for (const r of GROWTH_GATES) m[r.code] = r.label;
+  for (const r of INFRA_GATES) m[r.code] = r.label;
+  return Object.freeze(m);
+})();
+
+// demand clamp — module scope so recomputeDemand and demandBreakdown share ONE
+// definition (it used to be a hoisted function inside recomputeDemand)
+function clampD(v) { return Math.max(-1, Math.min(1, v)); }
+
 class City {
   constructor(seed, size = 80) {
     this.size = size;
@@ -1480,7 +1724,14 @@ class City {
   }
 
   // ---------- demand ----------
-  recomputeDemand() {
+  /* GP1a: the census + every modifier term, extracted VERBATIM out of
+     recomputeDemand into one pure read that fills a caller-supplied object.
+     It writes NOTHING on the city (recomputeDemand does the commits below), so
+     the UI can ask for the same contributors any time without touching state.
+     The three demand expressions stay in recomputeDemand, character-for-
+     character — reassociating them would move low-order bits into the
+     `dem > 0.15` comparisons and therefore into the RNG stream. */
+  computeDemandParts(out) {
     let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0, schools = 0, hospitals = 0, resTiles = 0;
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] === OV.ZR) { pop += RES_POP[this.lvl[i]]; resTiles++; }
@@ -1495,11 +1746,7 @@ class City {
       // pushes the city up the tier ladder. Jobs go in the industrial bucket.
       else if (isArco(this.over[i]) && this.anc[i] === i) { pop += ARCO_POP[this.over[i]]; iJobs += ARCO_JOB[this.over[i]]; }
     }
-    this.pop = pop; this.jobs = cJobs + iJobs;
-    // M22: cache the live counts the ordinance §-functions read (nostalgiaTax
-    // revenue scales with comJobs, smoke-detector cost with resTiles). Runs every
-    // tick before the monthly collectBudget, so figures are current at rollover.
-    this.comJobs = cJobs; this.resTiles = resTiles;
+    const jobs = cJobs + iJobs;                       // === the committed this.jobs
     const taxMod = (7 - this.taxRate) * 0.05;         // low taxes juice demand
     const stadMod = Math.min(2, stadiums) * 0.06;     // a stadium makes people move in
     // good schools & hospitals attract families (and the workers follow)
@@ -1511,15 +1758,69 @@ class City {
       else if (m.type === "demandC") evC += m.add || 0;
       else if (m.type === "demandI") evI += m.add || 0;
     }
-    const jobsAvail = this.jobs + 40 - pop * 0.62;    // 40 = external commuters
+    const jobsAvail = jobs + 40 - pop * 0.62;         // 40 = external commuters
     // M22: ordinance demand deltas fold into the SAME additive slot as the
     // time-capsule event mods (evR/evC/evI), so they compose and clamp
     // identically through clampD [-1,1]. All zero when nothing is enacted.
-    const om = this.ordMods;
+    out.pop = pop; out.jobs = jobs; out.cJobs = cJobs; out.iJobs = iJobs;
+    out.stadiums = stadiums; out.schools = schools; out.hospitals = hospitals;
+    out.resTiles = resTiles; out.taxMod = taxMod; out.stadMod = stadMod; out.svcMod = svcMod;
+    out.evR = evR; out.evC = evC; out.evI = evI; out.jobsAvail = jobsAvail;
+    out.om = this.ordMods;
+    return out;
+  }
+
+  recomputeDemand() {
+    const p = this.computeDemandParts(this._dparts || (this._dparts = {}));
+    const pop = p.pop, cJobs = p.cJobs, iJobs = p.iJobs;
+    const taxMod = p.taxMod, stadMod = p.stadMod, svcMod = p.svcMod;
+    const evR = p.evR, evC = p.evC, evI = p.evI, jobsAvail = p.jobsAvail, om = p.om;
+    this.pop = pop; this.jobs = p.jobs;
+    // M22: cache the live counts the ordinance §-functions read (nostalgiaTax
+    // revenue scales with comJobs, smoke-detector cost with resTiles). Runs every
+    // tick before the monthly collectBudget, so figures are current at rollover.
+    this.comJobs = cJobs; this.resTiles = p.resTiles;
     this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR);
     this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC);
     this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI);
-    function clampD(v) { return Math.max(-1, Math.min(1, v)); }
+  }
+
+  /* GP1a: the UI-facing decomposition of the RCI bars — a fresh object of
+     NAMED SIGNED contributors per bar, from the very same computeDemandParts
+     the sim runs on. `clamped` flags a bar whose raw sum was cut by clampD, so
+     "the bar is pinned and more of X changes nothing" becomes visible. */
+  demandBreakdown() {
+    const p = this.computeDemandParts({});
+    const mk = (key, label, value, parts) => {
+      let raw = 0;
+      for (const q of parts) raw += q[1];
+      return { key, label, value, raw, clamped: raw !== clampD(raw), parts };
+    };
+    return [
+      mk("r", "Residential", this.demand.r, [
+        ["Jobs available", p.jobsAvail / 220],
+        ["Tax rate", p.taxMod],
+        ["Stadiums", p.stadMod],
+        ["Schools & hospitals", p.svcMod],
+        ["Events", p.evR],
+        ["Ordinances", p.om.demR],
+      ]),
+      mk("c", "Commercial", this.demand.c, [
+        ["Shoppers vs jobs", (p.pop * 0.28 - p.cJobs) / 160],
+        ["Tax rate", p.taxMod * 0.6],
+        ["Schools & hospitals", p.svcMod * 0.5],
+        ["Events", p.evC],
+        ["Ordinances", p.om.demC],
+      ]),
+      mk("i", "Industrial", this.demand.i, [
+        ["Workers vs jobs", (p.pop * 0.42 - p.iJobs) / 180],
+        ["Export base", 0.28],
+        ["Tax rate", p.taxMod * 0.4],
+        ["Schools & hospitals", p.svcMod * 0.5],
+        ["Events", p.evI],
+        ["Ordinances", p.om.demI],
+      ]),
+    ];
   }
 
   // ---------- city ordinances (M22) ----------
@@ -1671,68 +1972,67 @@ class City {
   }
 
   // ---------- growth ----------
+  /* GP1a: the chain now lives in GROWTH_GATES (module scope). This loop is the
+     same PHASE ORDER it always was — tile draw, zone filter, gate walk, then
+     the unpow reset and the gridlock phase — so the RNG stream is unchanged:
+       • BURNING stops BEFORE the unpow reset (the original `continue`d on fire);
+       • UNPOWERED applies (increment + guarded decay draw) and stops;
+       • every other row resets unpow, runs its apply, then faces gridlock,
+         which reads the POST-chain lvl and can therefore co-occur with an
+         upgrade in the same visit — which is exactly why it is a phase and
+         never a table row. */
   growthPass() {
     const n = MAP * MAP;
     const tries = 340;
+    const k = this._gctx || (this._gctx = newGrowthCtx());
     for (let t = 0; t < tries; t++) {
       const i = (Math.random() * n) | 0;
       const ov = this.over[i];
       if (ov !== OV.ZR && ov !== OV.ZC && ov !== OV.ZI) continue;
-      if (this.fire[i]) continue;
-      // M27: commuterBias is exactly 0.0 where no commute link is open, so this
-      // is a bit-identical `+0.0` no-op vs pre-M27; an open link raises effective
-      // demand within K tiles of the connected edge → higher near-border growth.
-      let dem = (ov === OV.ZR ? this.demand.r : ov === OV.ZC ? this.demand.c : this.demand.i) + this.commuterBias[i];
-      const powered = this.powered[i], road = this.access[i] > 0;
-
-      if (!powered) {
-        this.unpow[i] = Math.min(250, this.unpow[i] + 1);
-        if (this.lvl[i] > 0 && this.unpow[i] > 6 && Math.random() < 0.35) this.lvl[i]--;
-        continue;
-      }
+      resetGrowthCtx(k, this, i, ov);
+      const row = firstGate(this, i, k);
+      if (row.stop) { if (row.apply) row.apply(this, i, k); continue; }
       this.unpow[i] = 0;
-
-      // congestion on the serving roads (city.traffic) dampens growth
-      const cong = this.trafficNear(i) / 255;
-
-      if (this.lvl[i] === 0) {
-        if (road && dem > 0 && Math.random() < dem * 0.85 * (1 - cong * 0.7)) {
-          this.lvl[i] = 1; this.varnt[i] = (Math.random() * 5) | 0;
-        }
-      } else if (dem > 0.15 && this.lvl[i] < 3) {
-        // upgrading needs decent conditions
-        let fit = this.landv[i] / 255;
-        if (ov === OV.ZI) fit = 0.75; // industry doesn't care about views
-        if (ov === OV.ZR) fit -= this.crime[i] / 400;
-        fit *= 1 - cong * 0.75;       // nobody moves up on a gridlocked block
-        // schools & hospitals raise the growth cap: coverage speeds upgrades…
-        const svc = (this.eduCov[i] + this.medCov[i]) / 510; // 0..1
-        fit *= 0.7 + svc * 1.1;
-        // M24: water gates DENSITY. A strained system (low pressure) damps EVERY
-        // upgrade citywide without ever forcing anyone down; full pressure is a
-        // no-op (0.55 + 0.45*1 = 1). The gate below is UPGRADE-ONLY — it never
-        // decrements lvl, so a pre-M24 save (waterPressure defaults to 1, all
-        // watered[]===0) keeps every loaded skyline and only pauses lots trying
-        // to rise above level 1 until the player lays pipe from a tower/pump.
-        fit *= 0.55 + 0.45 * this.waterPressure;
-        // …and top-tier development flat-out requires a school OR hospital in reach
-        if (this.lvl[i] >= 1 && !this.watered[i]) {
-          // M24: no water → hard-capped at level 1 (a shack has a well; density needs mains)
-        } else if (this.lvl[i] === 2 && this.eduCov[i] < 8 && this.medCov[i] < 8) {
-          // capped at level 2 — nobody builds towers without services
-        } else if (this.lvl[i] === 2 && this.waterPressure < 0.9) {
-          // M24: strained mains → no level-3 towers until pressure recovers
-        } else if (road && Math.random() < dem * fit * 0.42) {
-          this.lvl[i]++; this.varnt[i] = (Math.random() * 5) | 0;
-        }
-      } else if (dem < -0.25 && this.lvl[i] > 0 && Math.random() < -dem * 0.3) {
-        this.lvl[i]--;
-      }
-
+      if (row.apply) row.apply(this, i, k);
       // gridlock actively drives tenants away
-      if (this.lvl[i] > 1 && cong > 0.8 && Math.random() < 0.07) this.lvl[i]--;
+      if (this.lvl[i] > 1 && gCong(this, i, k) > 0.8 && Math.random() < GRIDLOCK_P) this.lvl[i]--;
     }
   }
+
+  /* ---- GP1a: the tile verdict — a PURE READ ----
+     Builds the same context with the same resetGrowthCtx, walks the same
+     GROWTH_GATES with the same tests, and returns only `text`/`evid`. It never
+     touches `apply`, never writes a byte, and never draws Math.random.
+     Severity escalation: a lot that is already losing more to gridlock than it
+     can win back is never painted green (the "ok verdict on a net-declining
+     tile" lie). Non-zone tiles fall through to INFRA_GATES; everything else —
+     grass, forest, water, road, wire, pipe, park, rubble — returns null, and a
+     null verdict renders no box at all. */
+  diagnoseTile(i) {
+    if (!(i >= 0) || i >= this.over.length) return null;
+    const ov = this.over[i];
+    if (ov === OV.ZR || ov === OV.ZC || ov === OV.ZI) {
+      const k = resetGrowthCtx(this._dctx || (this._dctx = newGrowthCtx()), this, i, ov);
+      const row = firstGate(this, i, k);
+      let severity = row.sev;
+      let text = row.text(this, i, k);
+      const gridlock = k.lvl > 1 && gCong(this, i, k) > 0.8;
+      if (gridlock && gUpP(this, i, k) < GRIDLOCK_P) {
+        if (severity === "ok") severity = "warn";
+        text += ` Gridlock outweighs it: at ${gPct(gCong(this, i, k))}% congestion this lot has a ` +
+          `~${gOdds(GRIDLOCK_P)}% chance of LOSING a level every check.`;
+      }
+      return { code: row.code, severity, text, evidence: row.evid(this, i, k), gridlock };
+    }
+    for (let g = 0; g < INFRA_GATES.length; g++) {
+      const row = INFRA_GATES[g];
+      if (!row.test(this, i)) continue;
+      return { code: row.code, severity: row.sev, text: row.text(this, i),
+               evidence: row.evid(this, i), gridlock: false };
+    }
+    return null;
+  }
+
 
   // ---------- fire ----------
   fireTick() {

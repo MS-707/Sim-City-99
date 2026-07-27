@@ -41,13 +41,15 @@ function normaliseHistory(h) {
    WHY BYTES AND NOT A JSON NUMBER ARRAY: JSON spends 2-4 characters per element
    (digits + comma); base64 spends 4 characters per 3 bytes. MEASURED on the
    milestone's own pinned reference city (docs/gp1-baseline.json build_script,
-   seed 4242, tick 600 — 1,656 road tiles), the three fields cost 4,985 B as
-   base64 packs versus 14,140 B as JSON-number packs and 39,226 B as plain JSON
-   arrays; the whole v12 addition is +3.88% over v11 there (and +1.11% on the
-   sparser reference stress city), against +10.83% / +2.64% for the JSON-number
-   packing this replaces — which passed the milestone's <= +5% save gate on the
-   stress city while BREACHING it on the pinned reference city. That is why the
-   encoding is re-measured on BOTH shipped workloads and the worse one quoted.
+   seed 4242, tick 600 — 1,495 road tiles), the three fields cost 4,333 B as
+   base64 packs; the whole v12 addition is +3.38% over v11 there and +1.11% on
+   the sparser reference stress city, against +10.83% / +2.64% for the
+   JSON-number packing this replaces — which passed the milestone's <= +5% save
+   gate on the stress city while BREACHING it on the pinned reference city. That
+   is why the encoding is re-measured on BOTH shipped workloads and the worse
+   one is the number quoted. Ceiling: no plane can ever cost more than the raw
+   mode, ceil(n/3)*4 + 1 chars — 8,537 for an 80x80 plane, so the three
+   together are hard-bounded at ~25.6 KB even on a fully noise-saturated map.
    Deterministic and an exact round-trip. */
 const B64C = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const B64I = (() => {
@@ -725,22 +727,39 @@ class RngStream {
 const RNG_SALT = { growth: 0x1B873593, fire: 0xCC9E2D51, hazard: 0x85EBCA6B, build: 0xC2B2AE35 };
 const RNG_STREAMS = ["growth", "fire", "hazard", "build"]; // fixed order == save order
 
-// Stateless 3-input 32-bit avalanche. Top-level (never a closure rebuilt per
-// call) and allocation-free. MEASURED in this browser over 5M draws:
-// 10.1 ns/draw for the hash and 10.4 ns for an RngStream cursor, against
-// 17.6 ns for Math.random — so BOTH new mechanisms are cheaper than what they
-// replace, which is why the migration lands neutral on tick time rather than
-// paying for determinism. Uniformity checked over 160k reservoir-shaped keys
-// (chi-square 33.8 on 31 df) and the 2/3/4-way reservoir picks it drives land
-// within 0.001 of uniform over 200k walks.
-function rngHash32(a, b, c) {
-  let h = Math.imul(a ^ 0x9E3779B1, 0x85EBCA6B);
-  h = Math.imul((h ^ (h >>> 13)) + b, 0xC2B2AE35);
+/* Stateless 3-input 32-bit avalanche. Top-level (never a closure rebuilt per
+   call) and allocation-free. Split into two halves so the two REBUILD passes,
+   which hash thousands of keys against a FIXED (domain, epoch), can hoist the
+   (a, b) rounds out of their inner loop: rngHashKey(a,b) is exactly the first
+   two rounds and rngHashFrom(h,c) exactly the last three, so
+   rngHash32(a,b,c) === rngHashFrom(rngHashKey(a,b), c) by construction — pure
+   integer ops, no re-association, BIT-IDENTICAL output, verified over 400,000
+   random (a,b,c) triples plus the int32 edge cases and by re-running the whole
+   20-seed determinism corpus to identical array and save hashes.
+   WHY THE SPLIT EXISTS: the first edition of this substrate claimed the hash
+   microbenchmarks ~1.6x cheaper than the Math.random it replaces, and that
+   claim does NOT reproduce — an independent workload-CONTROLLED measurement
+   (growthPass stubbed to a no-op on both sides, so the two builds do identical
+   work) found the tick 10.6% SLOWER. Per draw the hash is at PAR with
+   Math.random, not at a discount; hoisting the (domain, epoch) rounds out of
+   the two hot rebuild loops is what brings the controlled tick back to -2.8%
+   median / -3.4% min. Do not re-quote a per-draw nanosecond figure from this
+   file: the same Math.random loop timed 8.3 ns on one page and 13.7 ns on
+   another in one session — see perf_and_size.microbench_ns_per_draw.caution in
+   docs/gp1-baseline.json. Uniformity checked over 160k reservoir-shaped keys
+   (chi-square 33.8 on 31 df) and the 2/3/4-way reservoir picks it drives land
+   within 0.001 of uniform over 200k walks. */
+function rngHashKey(a, b) {
+  const h = Math.imul(a ^ 0x9E3779B1, 0x85EBCA6B);
+  return Math.imul((h ^ (h >>> 13)) + b, 0xC2B2AE35);
+}
+function rngHashFrom(h, c) {
   h = Math.imul((h ^ (h >>> 15)) + c, 0x27D4EB2F);
   h ^= h >>> 16; h = Math.imul(h, 0x85EBCA6B);
   h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35);
   return (h ^ (h >>> 16)) >>> 0;
 }
+function rngHash32(a, b, c) { return rngHashFrom(rngHashKey(a, b), c); }
 
 // hash DOMAINS. A domain keeps two pure sites keyed on the same (epoch, index)
 // from correlating — the brownout cut and the Y2K flicker both walk i over the
@@ -1204,6 +1223,20 @@ class City {
   rngHash(dom, epoch, k) {
     return rngHash32((this.seed ^ Math.imul(dom, 0x9E3779B1)) | 0, epoch | 0, k | 0) / 4294967296;
   }
+  /* The same draw with the (domain, epoch) half PRE-MIXED — for the two rebuild
+     passes, which spend ~80% of the tick's draws against one fixed (dom, epoch)
+     pair. `h = c.rngHashKeyFor(dom, epoch)` once outside the loop, then
+     rngHashFrom(h, k) / 2^32 inside it. Identical value to rngHash(dom, epoch,
+     k), by the split above. */
+  rngHashKeyFor(dom, epoch) {
+    return rngHashKey((this.seed ^ Math.imul(dom, 0x9E3779B1)) | 0, epoch | 0);
+  }
+  // the inner half. Kept a METHOD (not a bare call to rngHashFrom) so that any
+  // draw-mix instrumentation that wraps City.prototype still SEES the ~80% of
+  // tick-path hash draws that the two rebuild passes make — a counter that
+  // wraps only rngHash would silently report 16 draws per 600 ticks instead of
+  // ~837,000. Wrap BOTH rngHash and rngHashAt to count hash-domain draws.
+  rngHashAt(h, k) { return rngHashFrom(h, k | 0) / 4294967296; }
 
   idx(x, y) { return y * MAP + x; }
   inMap(x, y) { return x >= 0 && y >= 0 && x < MAP && y < MAP; }
@@ -1478,6 +1511,7 @@ class City {
     if (demand > supply && supply > 0) {
       // brownout: cut power to a fraction of consumers
       const cutRatio = 1 - supply / demand;
+      const bh = this.rngHashKeyFor(HZ.BROWNOUT, this.powerEpoch); // hoisted (dom, epoch) half
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         // GP1b: recomputePower is a REBUILD pass (deserialize + the UI re-enter
@@ -1485,7 +1519,7 @@ class City {
         // cursor. That is exactly what makes powered[] a pure function of
         // serialized state and lets the save omit it.
         if (this.powered[i] && t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t) &&
-            !isWaterOv(t) && !isMega(t) && this.rngHash(HZ.BROWNOUT, this.powerEpoch, i) < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out
+            !isWaterOv(t) && !isMega(t) && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -1497,11 +1531,12 @@ class City {
     }
     // Y2K bug (Dec '99): systems flicker at random, grid capacity be damned
     if (this.y2kActive()) {
+      const yh = this.rngHashKeyFor(HZ.Y2K_CUT, this.powerEpoch); // hoisted (dom, epoch) half
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
             t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) &&
-            this.rngHash(HZ.Y2K_CUT, this.powerEpoch, i) < 0.3) // GP1b: own domain, so it can't correlate with the brownout cut in the same epoch
+            this.rngHashAt(yh, i) < 0.3) // GP1b: own domain, so it can't correlate with the brownout cut in the same epoch
           this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer; M28: a power island doesn't flicker
       }
     }
@@ -1802,6 +1837,7 @@ class City {
     const load = this._trafficLoad || (this._trafficLoad = new Float32Array(n));
     load.fill(0);
     this.railRiders = 0; // M25: trips/mo diverted onto rail this pass (UI only)
+    const th = this.rngHashKeyFor(HZ.TRAFFIC, this.trafficEpoch); // hoisted (dom, epoch) half
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       if ((t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0) continue;
@@ -1835,7 +1871,7 @@ class City {
           // Measured fairness over 200k walks: 2/3/4-way picks land within
           // 0.001 of uniform. This is ~61% of all tick-path draws, and it is
           // now ORDER-INDEPENDENT: reordering this loop shifts nothing else.
-          if (this.rngHash(HZ.TRAFFIC, this.trafficEpoch, (i * 10 + step) * 4 + cnt) * cnt < 1) nxt = j;  // reservoir pick
+          if (this.rngHashAt(th, (i * 10 + step) * 4 + cnt) * cnt < 1) nxt = j;  // reservoir pick
         }
         if (nxt < 0) break;
         prev = cur; cur = nxt;

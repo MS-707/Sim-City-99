@@ -7,10 +7,42 @@ Queue policy: keep at least 5 open improvements at all times.
 ## In progress
 
 - [ ] **GP1b — Seeded Simulation Substrate** *(gameplay roadmap 2/11)* —
-  running via the milestone workflow; verify + panel still pending. An
-  implement-phase agent prematurely marked this done and self-certified "all 9
-  gates pass" before either ran; that claim was withdrawn and is preserved in
-  `docs/gameplay-roadmap.json` for comparison against the independent result.
+  running via the milestone workflow; verify + panel are DONE, the fix pass is
+  DONE, ship still pending. An implement-phase agent prematurely marked this
+  done and self-certified "all 9 gates pass" before either ran; that claim was
+  withdrawn and is preserved in `docs/gameplay-roadmap.json` for comparison
+  against the independent result.
+  **Fix pass (2026-07-27), four real defects closed, all measured:**
+  (1) the v12 accumulator encoding was **+10.83%** of the payload on the
+  milestone's own pinned reference city — a breach of its own `<= +5%` save
+  gate that the first measurement missed because it only timed the sparser
+  stress city. `packU8`/`unpackU8` now emit one base64 BYTE pack per plane with
+  four modes (raw / RLE / packbits / sparse bitmask, shortest wins): **+3.38%**
+  on the pinned city, **+1.11%** on the stress city, and a malformed or
+  truncated pack is now REJECTED with the target untouched instead of silently
+  zero-filled. (2) The tick really was **+10.6% slower** under a
+  workload-controlled comparison, because the "hash is 1.6x cheaper than
+  `Math.random`" microbenchmark does not reproduce; `rngHash32` is now split
+  into `rngHashKey(a,b)` + `rngHashFrom(h,c)` so the two rebuild passes hoist
+  the loop-invariant `(domain, epoch)` rounds out of their inner loops —
+  bit-identical output, verified over 400k random triples and by re-running the
+  whole determinism corpus to identical hashes — and the controlled delta is
+  now **-2.8% median / -3.4% min**. (3) The pinned `build_script` placed its
+  watertower, pipe run, school and hospital AFTER the zoning sweep, where
+  `place()` refuses an occupied tile: all four were silent no-ops, so the
+  reference city had `waterSupply` 0 and a level histogram of `{0:1316,
+  1:1100}` — a baseline for GP2..GP10 that never rendered the level-2 or
+  level-3 building art. Corrected; it now measures `{0:1211, 1:892, 2:37}` at
+  tick 600 and reaches level 3 by 1200. (4) The scenario reference solution won
+  only 1 of 4 scenarios — a defect in the SCRIPT (it laid isolated pipe tiles
+  the water flood never reaches, so `WATER_CAP` pinned both growth scenarios at
+  level 1, and it built on the Blackout scrapyard without bulldozing the
+  rubble). Rewritten: **40/40 playthroughs won, all gold, 0 console errors.**
+  **Still open and declared, not fixed:** `landv`/`crime`/`poll` (and the
+  coverage stamps) carry a pre-existing `recomputeMaps` cadence lag across a
+  load — quantified, including its visible Val/Cri minimap footprint, in
+  `docs/gp1-baseline.json`. Closing it costs either **+9.55%** more save payload
+  or a **+123%** tick, both against shipped gates.
 
 _(Nothing under verification. The block that used to sit here was the
 implementation log of the ABANDONED GP1 attempt at commit e5140a0 — it

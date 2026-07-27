@@ -85,7 +85,8 @@
       "effort_1_5": 3,
       "priority_rank": 1,
       "touches_save_format": false,
-      "status": "todo"
+      "status": "done",
+      "certified": "2026-07-27: all gates pass vs baseline b016adb/7c2f2f7; 5 panel defects fixed and independently re-verified. BYTE-IDENTICAL SIM proven: 10-20 seeds x 400-600 ticks on scripted developed 128x128 cities, all 17 tracked fields equal every seed (FNV of over/lvl/varnt/unpow/fire/traffic/landv/powered, pop/jobs/funds, demand.r/c/i, serialize length AND hash), RNG draw-count delta 0 and rolling stream hash equal — the refactor provably changes nothing. Gate-table fidelity: 1,098,387 recorded (tile,branch) samples vs a HEAD-sliced oracle, 0 mismatches. Both invisible stalls caught: 1029/1029 qualifying tiles return DEM_THRESHOLD, and negligible-fit-odds reports land value + congestion as evidence. Verdict truth swept 13,452 verdicts across 5 cities: 0 false level-1 claims, 0 false unpowered-loss claims, 0 gridlock claims on burning/unpowered; a fresh 128x128 returns 16,384/16,384 null (no box on bare terrain). Read-only proven: writeCount 0 across all 31 typed arrays, 0 RNG draws. UI-safe: 115/115 polls held the transient message inside its TTL through 200 synthetic mousemoves; status-bar width delta 0px at 9 viewports after the shrink fix; dialog updates in ~420-530ms. Save stays v11 and round-trips. Independent smoke check: 27 correct UNPOWERED verdicts on an unwired test city, 6373 nulls, 0 sim writes, zero console errors."
     },
     {
       "id": "GP1b",

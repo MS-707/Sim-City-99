@@ -233,10 +233,10 @@ input[type=range]::-moz-range-thumb {
    #statusbar is flex-nowrap, both cells shrink instead, and neither is ever
    taller than the cells already there, so the bar keeps its exact height.
    Neither may GROW either: #sb-tool is the Win95 message field and keeps the
-   whole flex remainder (flex:1 via .wide). #sb-hover is sized to its own text
-   (flex:0 1 auto) so it can never claim half the bar, and both disappear
-   outright while empty — with nothing to say they cost zero width and #sb-tool
-   is exactly as wide as it was before GP1a. */
+   whole flex remainder (flex:1 via .wide). Both new cells are flex-grow 0 and
+   sized to their own text, so neither can claim half the bar, and both
+   disappear outright while empty — with nothing to say they cost zero width
+   and #sb-tool is exactly as wide as it was before GP1a. */
 #sb-hover {
   /* shrink-factor 4: when the bar runs out of room the READOUT gives way first,
      so the message field is the last thing to ellipsize, not the first */

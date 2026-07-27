@@ -352,6 +352,26 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## Done
 
+- [x] **GP1a — Growth Verdicts: the Gate Table & Tile Diagnosis** *(gameplay
+  roadmap 1/11)*: the game finally explains itself. `growthPass`'s inline gate
+  chain became an ordered **declarative table that `growthPass` itself
+  consumes**, with `diagnoseTile()` a pure read walking the same rows — one
+  source of truth, so every future gate ships with a player-facing verdict for
+  free and cannot desync. Click or hover any tile and it names **the single
+  binding constraint with its proving number**, including the two stalls that
+  were previously invisible: *"demand 0.10 — upgrades need 0.15"* and *"upgrade
+  odds ~0.3%/yr: land value 18, congestion 71%"*. RCI bars decompose into their
+  named signed contributors; a new hover cell and drag-cost meter sit beside a
+  message field that now has a TTL so transient warnings survive the mouse.
+  **Certified**: the sim is **byte-identical** — 20 seeds × 600 ticks, RNG
+  draw-count delta 0, equal stream hash, all 17 tracked fields equal, 0 writes
+  and 0 RNG draws from diagnosis; gate-table fidelity 1,098,387 samples with **0
+  mismatches** against a HEAD-sliced oracle; 13,452 verdicts swept with **zero
+  false sentences**; a fresh map returns 16,384/16,384 nulls (no box on bare
+  ground); save stays v11. The panel refuted twice on UI defects — a hover cell
+  hogging half the status bar, false gridlock claims on burning lots, and RCI
+  arithmetic that didn't reconcile — all five fixed and re-verified.
+
 - [x] **GQ11 — Modern presentation & balance polish** *(graphics roadmap 11/11
   — ROADMAP COMPLETE)*: the modern-norms finale, certified clean 8/8 with 0
   refutes and no fix pass. **High-DPI**: a devicePixelRatio-aware backing store

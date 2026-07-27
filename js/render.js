@@ -1403,9 +1403,14 @@ let chopper = null;
 // Monthly spawn DECISION — called from tick()'s month-rollover branch in
 // sim.js, and from no other sim/render/UI path. One CHOPPER_CHANCE roll per
 // rollover; the congestion gate itself lives in chopperTrySpawn.
+// GP1b: this roll sits ON the sim tick path (sim.js tick() calls it from the
+// month-rollover branch), so it must not draw global Math.random. It is
+// COSMETIC — a flyover changes no sim state — so it takes the stateless
+// (seed, tickCount) hash rather than a cursor stream: retuning CHOPPER_CHANCE
+// or adding a second flyover kind must never re-pin the whole simulation.
 function chopperMonthTick(c) {
   if (chopper) return;                          // at most one chopper airborne
-  if (Math.random() >= CHOPPER_CHANCE) return;  // no flyover this month
+  if (c.rngHash(HZ.FX_CHOPPER, c.tickCount, 0) >= CHOPPER_CHANCE) return; // no flyover this month
   chopperTrySpawn(c);
 }
 

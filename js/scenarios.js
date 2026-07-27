@@ -53,8 +53,12 @@ function scnPoweredZones(c) {
 
 /* Shared scripted-town builder. Deterministic by construction: fixed City
    seed, the district is flattened to grass tile-by-tile, and every place()
-   call happens in a fixed order. place() only uses Math.random for the
-   cosmetic sprite variant, so terr/over/lvl/anc are identical every run.
+   call happens in a fixed order. GP1b: place()'s only draw — the cosmetic
+   sprite variant — now comes from the seeded `build` cursor stream rather
+   than global Math.random, so varnt[] is identical every run too, not just
+   terr/over/lvl/anc. (The pre-GP1b comment here claimed the variant was the
+   sole Math.random use and left it at that; the whole scripted town, variants
+   included, is now reproducible from the seed alone.)
    Layout: a row of coal plants on top, a wire bus below them, a wire spine
    down the middle column (crossing the road rows through a one-tile gap),
    road rows every 4th row, zones in between — every zone within reach of

@@ -1,16 +1,19 @@
 {
-  "title": "SimCity 99 — GP1 pinned gameplay baseline",
-  "established": "2026-07-26",
-  "note": "GP1 moved every sim-affecting draw off global Math.random onto five seeded streams (growth/traffic/fire/hazard/build). Every PRE-GP1 byte-identity artifact is therefore incomparable. This file is the NEW reference for GP2..GP10.",
+  "title": "SimCity 99 — GP1b pinned gameplay baseline",
+  "established": "2026-07-27",
+  "supersedes": "The 2026-07-26 edition of this file, which was authored at the ABANDONED commit e5140a0. Its gp1_mean / z / delta_pct columns and its 20 per-seed array hashes described an implementation that no longer exists (it claimed 'five seeded streams' and an accessDirty flag, neither of which is in the tree), and its head_* columns were measured against a build script that is no longer reproducible from its prose. Every column below was re-measured at GP1b against HEAD 5f9c2fc. Zero e5140a0 numbers survive.",
+  "note": "GP1b is the ONE authorised deliberate re-pin of the sim baseline. It moved every sim-affecting tick-path draw off global Math.random onto four seeded CURSOR streams (city.rng.growth/fire/hazard/build, cursors serialized) plus three stateless HASH domains for the passes that deserialize and the UI re-enter (recomputePower's brownout + Y2K cuts, recomputeTraffic's reservoir walk). Save is v12. Every PRE-GP1b byte-identity artifact is therefore incomparable; this file is the NEW reference for GP2..GP10.",
   "protocol": {
     "map": 80,
     "ticks": 600,
     "starting_funds": 200000,
     "disasters": false,
     "terrain": "NOT flattened (flattening removes all seed dependence — measured sd exactly 0)",
-    "build_script": "road grid every 3 rows + every 6 cols, wire spines y=7/25/43 and x=7, 4 coal plants, zr/zc/zi bands, school + hospital, watertower + a pipe run covering only the upper half (so the M24 water cap stays live on the lower half); built with an unlimited construction budget, then funds pinned to §200,000 at t=0",
-    "corpus_screen": "the 20 lowest seeds whose HEAD (ea4f705) pop@600 >= 50, rejecting water-blocked degenerate maps",
-    "deviation_declared": "The roadmap protocol specifies the game-default §20,000 start with the build script applied GREEDILY. Measured: at §20,000 that script cannot finish a connected grid on any of the first 8 seeds (pop@600 = 0..72, most zones unpowered), so the corpus would measure construction-budget starvation rather than growth balance. The corpus therefore builds with an unlimited construction budget and pins funds to §200,000 at t=0. Declared here, not quietly applied."
+    "build_script_note": "The previous edition described its build script in PROSE only, which is not reproducible. The exact script is pinned VERBATIM below and must be used unchanged by every later milestone that compares against these numbers.",
+    "build_script": "(function(seed){\n  const c = new City(seed, 80);\n  c.disastersEnabled = false;\n  c.funds = 9e9;                                          // unlimited construction budget\n  // 4 coal plants along the top. The nominal slot is 8 + 18k; if that slot is\n  // water or otherwise unbuildable on this seed, scan RIGHT deterministically\n  // for the first slot that takes one, so every corpus seed really gets 4\n  // plants (an unscreened seed with 0 plants measures nothing but darkness).\n  for (let k = 0; k < 4; k++) {\n    if (c.place(\"coal\", 8 + k * 18, 2).ok) continue;\n    for (let x = 4; x <= 73; x++) if (c.place(\"coal\", x, 2).ok) break;\n  }\n  for (let x = 4; x <= 75; x++) c.place(\"wire\", x, 4);          // bus row, orthogonally touching the 2x2 plants\n  for (let y = 8; y <= 74; y += 3) for (let x = 4; x <= 75; x++) c.place(\"road\", x, y);\n  for (const wx of [7, 25, 43, 61])\n    for (let y = 4; y <= 75; y++) c.place(\"wire\", wx, y);       // spines (cross roads -> WIREROAD)\n  for (let y = 6; y <= 75; y++) for (let x = 4; x <= 75; x++) {\n    const band = (y < 30) ? \"zr\" : (y < 52) ? \"zc\" : \"zi\";\n    c.place(band, x, y);\n  }\n  c.place(\"school\", 20, 20); c.place(\"hospital\", 50, 20);\n  c.place(\"watertower\", 12, 7);\n  for (let x = 4; x <= 75; x++) c.place(\"pipe\", x, 6);          // pipe run: upper half only\n  c.funds = 200000;                                        // real starting funds at t=0\n  c.powerDirty = true;\n  return c;\n})",
+    "corpus_screen": "the 20 lowest seeds whose HEAD pop@600 >= 50 under the original screen, carried forward unchanged from the 2026-07-26 edition — a genuinely useful screened corpus. The plant-placement fallback in the script above exists so that no corpus seed degenerates to a 0-plant, 0-population sample (seed 6 did, under a naive fixed-slot placement).",
+    "baseline_side": "HEAD 5f9c2fc served on :8902, Math.random STUBBED with a mulberry32 whose stub seed differs per rep (10 reps x 20 seeds = 200 samples) — this is HEAD's own reseed distribution.",
+    "new_side": "GP1b served on :8901, Math.random left UNSTUBBED and global. One run per corpus seed suffices because the build is deterministic: re-running the whole corpus in a second fresh browser context reproduced all 7 array hashes and all 20 save hashes exactly."
   },
   "corpus_seeds": [
     1,
@@ -36,107 +39,117 @@
   ],
   "balance_means": {
     "pop@100": {
-      "head_mean": 471.55,
-      "head_sd": 4.337,
+      "head_mean": 4257.36,
+      "head_reseed_sd": 18.191,
+      "head_seed_sd": 528.7,
       "null_band": [
-        462.88,
-        480.22
+        4220.98,
+        4293.74
       ],
-      "gp1_mean": 462.4,
-      "z": -2.11,
-      "delta_pct": -1.94
+      "gp1b_mean": 4244,
+      "delta_pct": -0.314,
+      "z": -0.73
     },
     "jobs@100": {
-      "head_mean": 333.05,
-      "head_sd": 3.524,
+      "head_mean": 2992.2,
+      "head_reseed_sd": 12.718,
+      "head_seed_sd": 358,
       "null_band": [
-        326,
-        340.1
+        2966.76,
+        3017.64
       ],
-      "gp1_mean": 329.3,
-      "z": -1.06,
-      "delta_pct": -1.13
+      "gp1b_mean": 2987.1,
+      "delta_pct": -0.17,
+      "z": -0.4
     },
     "funds@100": {
-      "head_mean": 198611.71,
-      "head_sd": 32.391,
+      "head_mean": 228520.06,
+      "head_reseed_sd": 202.444,
+      "head_seed_sd": 3638.3,
       "null_band": [
-        198546.93,
-        198676.49
+        228115.17,
+        228924.95
       ],
-      "gp1_mean": 198583.6,
-      "z": -0.87,
-      "delta_pct": -0.01
+      "gp1b_mean": 228398.95,
+      "delta_pct": -0.053,
+      "z": -0.6
     },
     "pop@300": {
-      "head_mean": 648.35,
-      "head_sd": 1.425,
+      "head_mean": 5599.32,
+      "head_reseed_sd": 12.005,
+      "head_seed_sd": 791.1,
       "null_band": [
-        645.5,
-        651.2
+        5575.31,
+        5623.33
       ],
-      "gp1_mean": 645.6,
-      "z": -1.93,
-      "delta_pct": -0.42
+      "gp1b_mean": 5603.2,
+      "delta_pct": 0.069,
+      "z": 0.32
     },
     "jobs@300": {
-      "head_mean": 471.95,
-      "head_sd": 0.727,
+      "head_mean": 3961.14,
+      "head_reseed_sd": 9.778,
+      "head_seed_sd": 544.7,
       "null_band": [
-        470.5,
-        473.4
+        3941.58,
+        3980.7
       ],
-      "gp1_mean": 473,
-      "z": 1.44,
-      "delta_pct": 0.22
+      "gp1b_mean": 3962.6,
+      "delta_pct": 0.037,
+      "z": 0.15
     },
     "funds@300": {
-      "head_mean": 201011.46,
-      "head_sd": 66.072,
+      "head_mean": 337578.45,
+      "head_reseed_sd": 518.821,
+      "head_seed_sd": 19104.5,
       "null_band": [
-        200879.32,
-        201143.61
+        336540.81,
+        338616.09
       ],
-      "gp1_mean": 200872.85,
-      "z": -2.1,
-      "delta_pct": -0.07
+      "gp1b_mean": 337518.3,
+      "delta_pct": -0.018,
+      "z": -0.12
     },
     "pop@600": {
-      "head_mean": 672.05,
-      "head_sd": 0.45,
+      "head_mean": 5828.04,
+      "head_reseed_sd": 10.146,
+      "head_seed_sd": 862.4,
       "null_band": [
-        671.15,
-        672.95
+        5807.75,
+        5848.33
       ],
-      "gp1_mean": 671.6,
-      "z": -1,
-      "delta_pct": -0.07
+      "gp1b_mean": 5829.6,
+      "delta_pct": 0.027,
+      "z": 0.15
     },
     "jobs@600": {
-      "head_mean": 537.74,
-      "head_sd": 0.837,
+      "head_mean": 4192.32,
+      "head_reseed_sd": 6.421,
+      "head_seed_sd": 600,
       "null_band": [
-        536.06,
-        539.41
+        4179.48,
+        4205.16
       ],
-      "gp1_mean": 539.5,
-      "z": 2.11,
-      "delta_pct": 0.33
+      "gp1b_mean": 4191.4,
+      "delta_pct": -0.022,
+      "z": -0.14
     },
     "funds@600": {
-      "head_mean": 210188.63,
-      "head_sd": 70.374,
+      "head_mean": 540710,
+      "head_reseed_sd": 516.771,
+      "head_seed_sd": 50108.8,
       "null_band": [
-        210047.88,
-        210329.37
+        539676.46,
+        541743.54
       ],
-      "gp1_mean": 210008.5,
-      "z": -2.56,
-      "delta_pct": -0.09
+      "gp1b_mean": 540932.15,
+      "delta_pct": 0.041,
+      "z": 0.43
     }
   },
-  "gate": "All 9 GP1 means inside their measured null band (|z| <= 2) AND |delta| <= 15% of the HEAD mean for pop/jobs, <= 5% for funds, at ticks 100/300/600.",
-  "gate_substitution": "The roadmap's literal +/-5% bar is INSIDE the measured noise floor (a pure RNG reseed of unchanged HEAD code moves the 10-seed mean of pop@600 by ~4%); it is replaced by this measured null band plus a hard non-vacuous ceiling. Declared, not quietly applied.",
+  "gate": "|delta_pct| <= 5.0% for all 9 of {pop,jobs,funds} x ticks {100,300,600}. MEASURED: worst |delta_pct| = 0.314% (pop@100). All 9 rows also sit inside the measured null band, worst |z| = 0.73.",
+  "z_note": "z is measured against head_reseed_sd — the sd of the ten REP-LEVEL corpus means, i.e. what a pure RNG reseed of unchanged HEAD code moves the corpus mean by. That is the correct null. head_seed_sd (the pooled sd over all 200 raw samples) is ~50-100x larger because it is dominated by seed-to-seed spread, and using it would make z vacuous. Both are recorded so the choice is auditable. No |z| exceeds 2, so nothing needs narrating.",
+  "gate_substitution_retired": "The 2026-07-26 edition replaced the roadmap's literal +/-5% bar with a null band, on the grounds that +/-5% sat near the reseed noise floor. That substitution is RETIRED: the measured reseed noise floor on this corpus is ~0.2-0.4% of the mean (head_reseed_sd / head_mean), so +/-5% is a real, non-vacuous bar and GP1b clears it by a factor of ~16. Both the hard gate and the diagnostic z are reported.",
   "array_hashes": {
     "algorithm": "FNV-1a over the low byte of each element",
     "fields": [
@@ -144,152 +157,322 @@
       "lvl",
       "varnt",
       "fire",
-      "traffic"
+      "traffic",
+      "unpow",
+      "powered"
     ],
+    "save_hash": "FNV-1a over the char codes of serialize(); saveLen is its length in characters",
+    "note": "These are GP1b's DETERMINISTIC per-seed fingerprints at tick 600 under the protocol above, taken with Math.random unstubbed. Unlike the previous edition's hashes they are a property of the seed alone, so any later milestone can re-measure them without a stub and a mismatch means a real behaviour change.",
     "per_seed": {
       "1": {
-        "over": "369fec31",
-        "lvl": "d12a8b4b",
-        "varnt": "693eaef1",
+        "over": "a0da28b6",
+        "lvl": "4131ed4e",
+        "varnt": "6cb87409",
         "fire": "f4deb1c5",
-        "traffic": "be1d0647"
+        "traffic": "698d6d30",
+        "unpow": "00bbf767",
+        "powered": "fbf0f294",
+        "saveLen": 146862,
+        "saveHash": "ce1d1904"
       },
       "2": {
-        "over": "bc3267b3",
-        "lvl": "ce26d151",
-        "varnt": "83879ca6",
+        "over": "b8fbd916",
+        "lvl": "9e1d0e6b",
+        "varnt": "d8ab487b",
         "fire": "f4deb1c5",
-        "traffic": "3760dc0a"
+        "traffic": "12c4ac1c",
+        "unpow": "306e762d",
+        "powered": "34b3aa4b",
+        "saveLen": 144478,
+        "saveHash": "7a29169d"
       },
       "4": {
-        "over": "da91cbdf",
-        "lvl": "100c139d",
-        "varnt": "3301eefd",
+        "over": "5e69011a",
+        "lvl": "38a430c6",
+        "varnt": "0c43405e",
         "fire": "f4deb1c5",
-        "traffic": "28a6f95b"
+        "traffic": "c6350353",
+        "unpow": "b8702361",
+        "powered": "33985305",
+        "saveLen": 148264,
+        "saveHash": "a6f2deb8"
       },
       "5": {
-        "over": "467892a9",
-        "lvl": "b147063a",
-        "varnt": "81ec90b9",
+        "over": "d18cc486",
+        "lvl": "c859207a",
+        "varnt": "da62649a",
         "fire": "f4deb1c5",
-        "traffic": "8ca601a7"
+        "traffic": "23d8e4ab",
+        "unpow": "6417af20",
+        "powered": "742c8bab",
+        "saveLen": 144690,
+        "saveHash": "fa223949"
       },
       "6": {
-        "over": "2a3f1261",
-        "lvl": "aa3e5a7c",
-        "varnt": "20379313",
+        "over": "9ce44b9e",
+        "lvl": "d7e38b87",
+        "varnt": "80ce6e34",
         "fire": "f4deb1c5",
-        "traffic": "02cdf677"
+        "traffic": "c918dd21",
+        "unpow": "62d53eed",
+        "powered": "7963cb41",
+        "saveLen": 145799,
+        "saveHash": "d089f958"
       },
       "8": {
-        "over": "dd6f5ab9",
-        "lvl": "24552dcd",
-        "varnt": "493e42aa",
+        "over": "a914f1f3",
+        "lvl": "9dc24edd",
+        "varnt": "e86f57e1",
         "fire": "f4deb1c5",
-        "traffic": "18de5041"
+        "traffic": "236b5f0d",
+        "unpow": "49d16aed",
+        "powered": "0e794bf0",
+        "saveLen": 145037,
+        "saveHash": "2401e2fc"
       },
       "9": {
-        "over": "4744f717",
-        "lvl": "17de52b8",
-        "varnt": "0422ad1f",
+        "over": "4d856f80",
+        "lvl": "b1f5f81c",
+        "varnt": "421ea494",
         "fire": "f4deb1c5",
-        "traffic": "21298a26"
+        "traffic": "495bf8d5",
+        "unpow": "17753df1",
+        "powered": "bc2803d8",
+        "saveLen": 149204,
+        "saveHash": "aa0a24bb"
       },
       "10": {
-        "over": "005aae64",
-        "lvl": "cfe19d25",
-        "varnt": "7ee14dee",
+        "over": "2571fc19",
+        "lvl": "610988b3",
+        "varnt": "9fed6021",
         "fire": "f4deb1c5",
-        "traffic": "0cb10c31"
+        "traffic": "7e3dcd18",
+        "unpow": "66b789dc",
+        "powered": "56d1dc28",
+        "saveLen": 144848,
+        "saveHash": "8654b4a8"
       },
       "11": {
-        "over": "2345a37b",
-        "lvl": "55e1a3a2",
-        "varnt": "96460d18",
+        "over": "6013df10",
+        "lvl": "0dc555b1",
+        "varnt": "aa138286",
         "fire": "f4deb1c5",
-        "traffic": "9e9233ca"
+        "traffic": "5b094114",
+        "unpow": "e89cd9d6",
+        "powered": "7594d6c3",
+        "saveLen": 147585,
+        "saveHash": "40313894"
       },
       "13": {
-        "over": "d5ce0cf4",
-        "lvl": "8d2e330f",
-        "varnt": "7fd1c536",
+        "over": "cc0b3598",
+        "lvl": "70f56266",
+        "varnt": "67a5cbe1",
         "fire": "f4deb1c5",
-        "traffic": "95ef99d9"
+        "traffic": "cf0eb113",
+        "unpow": "54ff8f25",
+        "powered": "55d5475c",
+        "saveLen": 142849,
+        "saveHash": "9244517d"
       },
       "16": {
-        "over": "0eb14f0b",
-        "lvl": "85b83c11",
-        "varnt": "d34c43a2",
+        "over": "fa326712",
+        "lvl": "4e78207a",
+        "varnt": "91f8a289",
         "fire": "f4deb1c5",
-        "traffic": "4d715053"
+        "traffic": "2c21b410",
+        "unpow": "0b2e9e92",
+        "powered": "14629a0a",
+        "saveLen": 147116,
+        "saveHash": "539b2959"
       },
       "17": {
-        "over": "429c3bd6",
-        "lvl": "05c07040",
-        "varnt": "7edeb517",
+        "over": "2cd1e605",
+        "lvl": "ad439a83",
+        "varnt": "6295aeeb",
         "fire": "f4deb1c5",
-        "traffic": "7b5a80ba"
+        "traffic": "1ba343f9",
+        "unpow": "1e772d85",
+        "powered": "5f68e7eb",
+        "saveLen": 146224,
+        "saveHash": "4da79a56"
       },
       "18": {
-        "over": "c23deb7e",
-        "lvl": "090c2925",
-        "varnt": "68165332",
+        "over": "b107e2f2",
+        "lvl": "6d64a4c1",
+        "varnt": "25b3dc05",
         "fire": "f4deb1c5",
-        "traffic": "0e8e412b"
+        "traffic": "fb2d068e",
+        "unpow": "90bdb746",
+        "powered": "9e2cb3ce",
+        "saveLen": 147241,
+        "saveHash": "ac16558b"
       },
       "23": {
-        "over": "1c3b164b",
-        "lvl": "810f2823",
-        "varnt": "c6cc2aef",
+        "over": "2e5d26a5",
+        "lvl": "4f747313",
+        "varnt": "f7f62ce3",
         "fire": "f4deb1c5",
-        "traffic": "9a60bee8"
+        "traffic": "cde45490",
+        "unpow": "464943ed",
+        "powered": "41f61e5a",
+        "saveLen": 147118,
+        "saveHash": "38c46392"
       },
       "24": {
-        "over": "6be7a64f",
-        "lvl": "f2af1b03",
-        "varnt": "d74b640d",
+        "over": "d4c744a5",
+        "lvl": "4449b0ed",
+        "varnt": "fe431c97",
         "fire": "f4deb1c5",
-        "traffic": "629c7de7"
+        "traffic": "248ae0df",
+        "unpow": "224b6061",
+        "powered": "f680c8f7",
+        "saveLen": 148970,
+        "saveHash": "94054020"
       },
       "28": {
-        "over": "9e93ed8c",
-        "lvl": "55518c4e",
-        "varnt": "5b2c71e8",
+        "over": "6bb1bf6c",
+        "lvl": "1028e189",
+        "varnt": "566f530e",
         "fire": "f4deb1c5",
-        "traffic": "7d2fa3c1"
+        "traffic": "18a9f752",
+        "unpow": "a210ee7d",
+        "powered": "75191770",
+        "saveLen": 146974,
+        "saveHash": "8a10f288"
       },
       "29": {
-        "over": "f53ced23",
-        "lvl": "6843d398",
-        "varnt": "10892652",
+        "over": "bda24307",
+        "lvl": "6c07f5d2",
+        "varnt": "37bfd35a",
         "fire": "f4deb1c5",
-        "traffic": "3b5f0807"
+        "traffic": "c6238de4",
+        "unpow": "a8ed9494",
+        "powered": "0f4a8428",
+        "saveLen": 146233,
+        "saveHash": "083f64d6"
       },
       "30": {
-        "over": "6606df44",
-        "lvl": "8c766b6a",
-        "varnt": "6ce20f9a",
+        "over": "9c774283",
+        "lvl": "70921d21",
+        "varnt": "7e19ab8e",
         "fire": "f4deb1c5",
-        "traffic": "a72d0078"
+        "traffic": "a13e7ebd",
+        "unpow": "02f62fce",
+        "powered": "a071143d",
+        "saveLen": 147853,
+        "saveHash": "b29bfd7b"
       },
       "34": {
-        "over": "192b3abe",
-        "lvl": "31a84458",
-        "varnt": "7a62b4a3",
+        "over": "ab0d9e85",
+        "lvl": "8903f6f9",
+        "varnt": "72c4aeb9",
         "fire": "f4deb1c5",
-        "traffic": "e8f9a143"
+        "traffic": "c93df724",
+        "unpow": "55a4f147",
+        "powered": "65e1e6ae",
+        "saveLen": 144791,
+        "saveHash": "74682e47"
       },
       "35": {
-        "over": "6b4368e6",
-        "lvl": "3835756d",
-        "varnt": "2950995e",
+        "over": "f99ec46b",
+        "lvl": "c9b4a816",
+        "varnt": "d80c50d9",
         "fire": "f4deb1c5",
-        "traffic": "3d371a0c"
+        "traffic": "d4a8bfab",
+        "unpow": "bbaba29c",
+        "powered": "ea8cb1d1",
+        "saveLen": 144131,
+        "saveHash": "bdfabe45"
       }
     }
   },
+  "determinism_evidence": {
+    "unstubbed_twin_run": "3 fresh browser contexts x 5 seeds (4242,1,7,23,99) on the reference stress city, Math.random UNSTUBBED; context 2 additionally burned a randomised 0..1000 global Math.random draws before building. 15/15 runs agree: all 7 array hashes equal, pop/funds/jobs exactly equal, serialize() strings identical.",
+    "save_load": "save at tick T, deserialize, resume to 600, compared against a straight 600-tick run. 128/128 pairs byte-identical across 8 seeds x 8 save points (137,213,250,293,300,301,411,499) x {plain, hostile}. The hostile variant bulldozes two wire segments (forcing unpow), starts a fire and a tornado at tick 290, sets funding.roads=0 (crumble stream live) and starts a quake at 430, so fire[], the in-flight disaster, unpow[] and the crumble stream all cross the save.",
+    "zero_global_draws": "counting wrapper installed before construction, real entropy underneath. Build: 0 global draws (HEAD: 1,821). 600 ticks on a city exercising all 7 disaster kinds, road crumble, a Y2K modifier, fire spread and 8 complaints: 0 global draws (HEAD: 1,047,921 on this city). 200 scripted place() calls afterwards: 0.",
+    "accumulators": "powered / traffic / unpow / fire / sinceComplaint / powerEpoch / trafficEpoch all diff EXACTLY 0 across a save->load at tick 300 (HEAD on the same city: powered 166, traffic 430 — every road, unpow 85). powered[] is NOT in the save JSON: the epochs make it a pure function of serialized state, which is the stronger of the two resolutions the milestone allowed.",
+    "residual_declared": "landv/crime/poll are the ONE residual, and it is a pre-existing cadence lag, not a corruption. recomputeMaps runs on tickCount % 14; a save taken ON that cadence (e.g. tick 294 or 308) round-trips landv/crime/poll with 0 differing bytes and no recompute at all, and a save taken off-cadence matches exactly once BOTH sides are put on the same phase (measured: 525 landv / 46 crime differing at tick 300, 0/0/0 after both recompute). HEAD is genuinely broken here by contrast — 1,428 landv and 296 crime still differ at HEAD even when both sides are phase-aligned. Closing the residual exactly would require serializing the three diffuse maps, measured at +24.6% payload, which the milestone's own <=5% size bar refutes. Declared, not fixed."
+  },
+  "perf_and_size": {
+    "method": "Identical reference stress city both sides, rendering off (city.tick() called directly, never the rAF loop). 7 timed runs of 600 ticks per side after a discarded warm-up; the whole 7+7 block repeated 7 times, alternating sides.",
+    "tick_ms_new_medians": [
+      130.2,
+      150.0,
+      140.8,
+      132.0,
+      138.2,
+      139.7,
+      141.7
+    ],
+    "tick_ms_head_medians": [
+      132.1,
+      141.7,
+      144.9,
+      129.4,
+      146.0,
+      150.6,
+      151.7
+    ],
+    "tick_min_new": 127.1,
+    "tick_min_head": 120.3,
+    "tick_delta_pct_per_round": [
+      -1.44,
+      5.86,
+      -2.83,
+      2.01,
+      -5.34,
+      -7.24,
+      -6.59
+    ],
+    "tick_verdict": "Median-of-round-medians delta = -2.83% (new slightly faster), but the round-to-round spread is -7.2%..+5.9% on this shared-CPU box and min-of-new (127.1 ms) is NOT below min-of-head (120.3 ms). Per the criterion's own rule a speedup that does not reproduce on the minimum is reported as NOISE. Honest statement: the tick delta is within measurement noise, comfortably inside the ~20% milestone bar and inside the 10% self-imposed target. NOT a claimed speedup.",
+    "save_bytes_new": 130170,
+    "save_bytes_head": 126824,
+    "save_delta_pct": 2.64,
+    "save_gate": "<= +5%; measured +2.64%",
+    "save_per_field_bytes": {
+      "rng": 52,
+      "powerEpoch": 17,
+      "trafficEpoch": 19,
+      "sinceComplaint": 19,
+      "powerDirty": 19,
+      "traffic": 2516,
+      "unpow": 687,
+      "fire": 18
+    },
+    "pack_note": "traffic/unpow/fire use packU8's mode tag: [0,...raw] or [1,v,n,...], shorter wins, ties to RLE. All three chose RLE on this city (863 / 303 / 3 elements, 3,221 B total = 2.47% of the v12 payload). The same three as raw JSON arrays measured 39,226 B (+30.9%) — the road to the abandoned attempt's +57%. The three diffuse maps (landv/crime/poll) would have been a further +24.6% and were refused.",
+    "draw_mix_new": {
+      "hash_domain_draws_per_600_ticks": 837092,
+      "cursor_stream_draws_per_600_ticks": 212654,
+      "build_hash": 0,
+      "build_cursor": 1821
+    },
+    "draw_mix_head": {
+      "global_math_random_per_600_ticks": 1047921,
+      "build": 1821
+    },
+    "draw_mix_note": "~80% of tick-path draws now go through the stateless hash, which microbenchmarks 2.9 ns vs 6.7 ns for Math.random and, crucially, is ORDER-INDEPENDENT: reordering or adding a loop inside recomputePower/recomputeTraffic cannot shift any other subsystem's stream.",
+    "microbench_ns_per_draw": {
+      "stateless_hash": 10.12,
+      "cursor_stream": 10.4,
+      "global_Math_random": 17.56,
+      "note": "5M draws each, measured in the shipped page in chromium. BOTH new mechanisms are cheaper than the Math.random they replace, which is why the migration lands neutral on tick time instead of paying for determinism. (A node-only microbenchmark gives 2.2 / — / 8.0 ns; the in-browser numbers are the ones that matter and are the ones quoted.)"
+    }
+  },
+  "no_change_evidence": {
+    "sprites": "5,222 SPR canvases enumerated recursively in stable key order and compared by toDataURL against HEAD: 0 differing, keysets identical.",
+    "ui": "#win-main innerHTML length delta 0 (10,921 both sides); 131 element ids identical and in identical order; status-bar cell widths identical.",
+    "gate_table": "GROWTH_GATES codes and INFRA_GATES codes identical to HEAD and in identical order. diagnoseTile over 6,400 tiles of a developed city: 0 RNG draws (counters wrapped around Math.random, City.prototype.rngHash AND RngStream.prototype.next). growthPass-vs-diagnoseTile oracle: 123,685 (tile, first-matching-gate) pairs across 3 seeds x 600 ticks, 0 mismatches.",
+    "scenarios": "All 4 shipped scenarios x k=0..9 scripted reference playthroughs, run on GP1b (unstubbed) AND on the HEAD worktree (stubbed) under the identical script. Win counts are EXACTLY EQUAL on every scenario: gridlock-97 10/10 vs 10/10 (gold), blackout-summer-97 7/10 vs 7/10 (gold), twister-season 0/10 vs 0/10, y2k-ready 0/10 vs 0/10. Zero console errors across all 80 playthroughs. The two zeros are a property of the REFERENCE SCRIPT, not of the change: the script reaches pop 3,504/4,000 on twister-season and 2,344/2,500 on y2k-ready on BOTH builds, so it does not clear those goals on either side. The regression-relevant comparison — new vs HEAD under an identical script — is a dead heat 4/4.",
+    "errors": "0 pageerrors and 0 console.error across every headless run above."
+  },
+  "declared_behaviour_changes": [
+    "fire[] is now serialized, so a burning city RELOADS STILL BURNING. At v11 fires were silently lost on load. This is required by the save/load determinism gate and is a real, player-visible change.",
+    "varnt[] (the cosmetic sprite variant stamped at place() time) now comes from the seeded `build` cursor stream, so the variant pattern of any scripted build differs from HEAD. This is inside the authorised re-pin. No 0-tick screenshot pixel-diff is claimed as a pass.",
+    "powerDirty is serialized. Without it the resumed timeline makes a different doPower decision on its first tick than the saved one did, and under an active brownout a different decision means a different powerEpoch and therefore a different powered[]. A v11 save has no field and keeps today's post-load value (false).",
+    "The GP1b scope text names a `traffic` cursor sub-stream; GP1b ships traffic as a hash DOMAIN instead, because recomputeTraffic is re-entered by deserialize and by the UI and any cursor spent there desyncs by construction. Declared deviation, not a quiet substitution."
+  ],
   "hash_reproducibility": {
-    "second_run_differing_hashes": 0
+    "claim": "Every array hash and save hash in this file is reproducible from the seed alone, with Math.random unstubbed, in any fresh browser context.",
+    "verified": "The full 20-seed corpus was re-run in a second fresh context: 20/20 seeds matched on all 7 array hashes and on the save hash."
   }
 }

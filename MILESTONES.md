@@ -6,9 +6,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GP1 — The Growth Truth Table** *(gameplay roadmap 1/10)* — running via
-  the milestone workflow. Gates in `docs/gameplay-roadmap.json`; the pinned
-  post-GP1 balance/identity reference is `docs/gp1-baseline.json`.
 
   Implementation status (under verification):
   - **The gate table**: `GROWTH_GATES` (js/sim.js, module scope above
@@ -71,15 +68,95 @@ Queue policy: keep at least 5 open improvements at all times.
     before v12), `traffic` is a blend accumulator, and `landv`/`crime`/`poll`
     are rebuilt only every 14th tick. Both the cursors and the planes are
     restored LAST, after the recompute cascade, so `deserialize` stays a pure
-    restore. Measured: determinism 10/10 seeds (run1 ≡ run2 on five array
-    hashes, pop/jobs/funds and the full `serialize()` string, **unstubbed**);
-    save-at-300 / resume-to-600 **10/10 identical**; `S2 === S3` idempotent;
-    a fabricated v11 save loads at v12 with all five cursors equal to the pure
-    `(seed ^ RNG_SALT[k] ^ imul(tickCount, 0x9E3779B1))` derivation, loads
-    identically twice, and survives 2,880 ticks (120 rollovers) with disasters
-    on and no errors. `normaliseHistory` is UNCHANGED and its
-    drop-unknown-keys behavior is re-asserted in a comment (verified: an
-    injected unknown key is dropped, all seven known arrays survive).
+    restore. `normaliseHistory` is UNCHANGED and its drop-unknown-keys
+    behavior is re-asserted in a comment (verified: an injected unknown key is
+    dropped, all seven known arrays survive).
+  - **Three MORE unserialized accumulators, found by diffing EVERY typed array
+    instead of the list the save happened to emit** (this is the honest form of
+    the "no unserialized accumulator" claim, and each one was a real resume
+    divergence):
+    1. **`fire[]` was never emitted.** ignite() writes it, fireTick decrements
+       it, nothing in the load cascade recomputes it. Measured on seed 202 at
+       tick 300 with 8 tiles alight: all 8 came back 0, the fires never
+       destroyed their buildings (pop 2688 → 2680, jobs 1890 → 1884,
+       powerDemand 1459 → 1457, demand.c 0.0915 → 0.1150) and the resumed run
+       then diverged from the straight run on nine planes and every scalar.
+       Now emitted SPARSE (`[idx, val, …]`) — a fire-free city costs 10 bytes.
+    2. **`powerDirty` — a boolean — was part of the stream.** `recomputePower()`
+       ends by drawing `rng.hazard` for the brownout / Y2K cut, so WHETHER it
+       runs on the first post-load tick is observable. deserialize's cascade
+       always cleared the flag, so a city saved with a pending refresh resumed
+       without one. It hid until `powered[]` started restoring exactly: with
+       the plane restored and the flag dropped, the resumed city re-rolled the
+       cut. 1 of 20 seeds failed on this alone. `railDirty`/`accessDirty`
+       deliberately do NOT ride along — their recomputes draw no RNG and the
+       cascade runs both unconditionally.
+    3. **`access[]` was stale, not derived** (see the next bullet).
+  - **`accessDirty`: access[] becomes a genuine pure function of over[]+terr[]
+    at all times.** `recomputeAccess()` is RNG-free and reads only over[] and
+    terr[], but it only ever ran inside tick()'s `doPower` branch — i.e. on
+    `powerDirty || tickCount % 10 === 0`. Two consequences, both real: a freshly
+    built road could take up to **nine ticks** to unlock growth on the lots it
+    served, and a stale row could outlive the road that seeded it (measured:
+    identical over[] across a round trip, yet `access[697]` = 4 live vs 3
+    reloaded — the live value came from a road that had since burned to rubble
+    under a `recomputePower()` called from `eventsTick`/`fireEvent`, which
+    clears powerDirty on the way out so the next tick's doPower was false).
+    That one cell feeds `k.road`, i.e. the `Z0_NO_ROAD` / `U_NO_ROAD` verdicts.
+    A dedicated `accessDirty` flag is now set at all ten sites that add or
+    remove a ROAD/WIREROAD or flood a tile (place, bulldoze, waterfill, the
+    roadWear crumble, the fireTick rubble conversion and the five disaster
+    demolition paths), consumed on its own trigger at the head of tick(), and
+    **flushed before tick() returns** so nothing that reads a city between
+    ticks (the save round trip, diagnoseTile, the renderer) can ever see an
+    access[] that disagrees with its own over[]. This is a behaviour change —
+    new roads unlock growth immediately — and it is deliberately inside GP1's
+    single authorized re-pin rather than after it.
+  - **Exhaustive round-trip audit** (not a hand-picked field list): for 5+
+    seeded cities at tick 300, `b = City.deserialize(a.serialize())`, then
+    every own property of the City compared — **every** TypedArray element-wise
+    and every finite number with `===`. Result after the three fixes above:
+    **0 differing typed-array entries across ALL properties** (it was fire[] 8,
+    access[] 1 before). `_trafficLoad`, the reused traffic scratch buffer, is
+    now zeroed at the END of `recomputeTraffic` as well as the start, so it too
+    is provably empty between passes rather than exempted by assertion.
+    Two scalars remain deliberately unserialized and are the only exemptions:
+    `terrRev` / `devRev`, the render-cache revision counters — render.js
+    already documents (`distLabelCache`) that these init to 0 on every fresh or
+    loaded city and that keying a cache on them alone would COLLIDE across
+    cities, which is exactly why they must not be restored. Nothing in
+    tick()/recompute*/growthPass reads either. `pop`/`jobs`/`comJobs`/
+    `powerDemand`/`demand.*` also read one growthPass stale on a live city
+    (recomputeDemand runs before growthPass, which then changes lvl) and fresh
+    on a loaded one; they are re-derived at the head of every tick, and the
+    decisive check is that **after one further tick on both cities, every
+    typed array, every scalar, all five cursors and the full serialize() string
+    are identical** (7/7 seeds).
+  - **Determinism, measured with the global `Math.random` DELIBERATELY
+    DIVERGENT** (not merely unstubbed): 20 seeds × 600 ticks, run A on the real
+    `Math.random` and run B on a constant 0.123456 — **20/20 byte-identical**
+    on nine array hashes, pop/funds/jobs, all five cursors and the full
+    `serialize()` string, with **0 `Math.random` calls counted** in either run.
+    save-at-300 / resume-to-600 vs straight-600: **20/20 identical**.
+    `S1 === S2 === S3` idempotent. A REAL v11 save generated on the ea4f705
+    worktree loads at v12 with all seven authored planes tile-identical, loads
+    identically twice, re-saves idempotently, and survives 125 month rollovers
+    with 0 errors.
+  - **Save payload: measured, then reduced.** The checkpoint's six new
+    full-map JSON number lists cost **+62.7%** on a developed 128×128 city.
+    Fix, zero dependencies and no build step: `packU8` (btoa over 8192-byte
+    `String.fromCharCode` chunks) for the 12 Uint8 planes, `packBits`
+    (8 tiles/byte, then base64) for the strictly-0/1 `powered`, and the sparse
+    pair list for `fire`. base64's alphabet needs no JSON escaping, so the
+    emitted length is exactly `ceil(n/3)*4 + 2` and is deterministic. All 13
+    plane round trips are **byte-exact** and every emitted string matches
+    `/^[A-Za-z0-9+/=]*$/`; `powered` at 128×128 goes 16,384 → 2,732 chars.
+    Every restore site accepts BOTH forms (`typeof === "string"` → unpack,
+    `Array.isArray` → the legacy path unchanged), and the `v<=3`
+    `sqrt(d.terr.length)` size inference is guarded with `Array.isArray` so a
+    packed plane can never be mistaken for a map edge. **Measured vs ea4f705 on
+    the same stamped world: 128×128 348,076 → 377,111 = +8.3%** (64: +8.8%;
+    48: +9.1%), replacing +62.7% and inside the ≤1.10× bar.
   - **Surfaces**: `#query-verdict` above the Inspect table, severity-coloured,
     driven live from `refreshHUD` on a 500ms rAF-paced cadence (**measured max
     latency 517ms over 20 trials**, no stray `setInterval`); `openQuery` split
@@ -99,13 +176,36 @@ Queue policy: keep at least 5 open improvements at all times.
     20-tile drag against §40 of funds: 19 `place()` calls, all from
     `applyToolAt`, 0 attributable to the meter, 0 `Snd.denied()` from the
     meter, 4 successes / 15 refusals decided entirely by `place()`.
-  - **No graphics or perf regression**: sprite hash map 5,222/5,222 identical
-    vs ea4f705; 2,000/2,000 click-picks identical across 4 rotations; 8
-    day/night × season × rotation frames pixel-identical (one run showed a
-    single differing frame, reproduced as a water-animation phase artifact —
-    clean on re-run); tick cost **0.792 ms/tick vs HEAD 0.776 (+2.1%)**, far
-    inside the 20% budget, because the lazy `cong`/`fit` pays back most of the
-    gate-walk cost; 0 console errors and 0 pageerrors across the suite.
+  - **No graphics regression**: sprite hash map 5,222/5,222 identical vs
+    ea4f705 (js/sprites.js is untouched by this milestone's diff, and
+    `mulberry32` is deliberately NOT merged with `makeStream` — ART_RNG plus
+    ~12 frozen side-streams and computeNeighbors depend on its exact identity,
+    so merging them would renumber every baked sprite variant);
+    2,000/2,000 click-picks identical across 4 rotations; 8 day/night × season
+    × rotation frames pixel-identical (one run showed a single differing frame,
+    reproduced as a water-animation phase artifact — clean on re-run); 0
+    console errors and 0 pageerrors across the suite.
+  - **Perf — the earlier figure is RETRACTED, with the method stated.** Three
+    plausible-looking protocols gave −24%, +13.3%, +17.9% and +25.3% on the
+    same code, so the number is only meaningful with its method attached:
+    unmatched build scripts diverge outright (head reaches pop 1024 / lvlSum
+    227 where base reaches 592 / 132), free-running matched cities still drift
+    (+28% denser by tick 140), and per-tick `performance.now()` medians
+    quantise to the 0.2 ms timer floor. **The only protocol that resolves**:
+    stamp the SAME authored world (terr/over/lvl/varnt/anc/rail/plantYear/
+    roadWear from one build of seed 4242 at 128×128, 250 ticks) into both
+    builds, assert the stamp matched (zones 5,845 and roads 6,727 equal on
+    both), **re-apply it after EVERY tick** so neither can drift, time a BLOCK
+    of 140 ticks (10 full 14-tick recompute cycles), time 140 bare restores
+    separately and subtract, median of 13 blocks, median of N fresh runs.
+    Measured under that protocol: **+4.2%** (V8/node `hrtime`, ns resolution,
+    base 2.363 → head 2.462 ms/tick, three runs spanning +3.5%..+5.0%) and
+    **+0.8%** in-browser (median of 9 fresh Chromium runs, base 0.4536 → head
+    0.4571 ms/tick — but the browser run-to-run spread is ±13%, i.e. the
+    browser cannot resolve a difference this small, which is the whole reason
+    the ns-resolution number is quoted first). Both are far inside the 20%
+    budget. The cost added since the checkpoint is the extra `recomputeAccess`
+    on ticks that destroy a road and one `Float32Array` fill per traffic pass.
   - **The re-pin is bounded** (`docs/gp1-baseline.json`): 20 pre-screened
     corpus seeds (HEAD pop@600 ≥ 50, terrain NOT flattened — flattening
     measures sd exactly 0 and makes the gate vacuous), 9 distribution means at
@@ -195,8 +295,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > **Save-version ladder:** GP1 owns v12; each later state-adding milestone takes
 > the next integer with backward-compatible loading.
 
-- [ ] **GP1 — The Growth Truth Table** *(I5/E3, save+)*: A player who zones a perfect block and watches it stall is finally told, in the game, exactly which gate is holding it — including the two invisible ones ('demand 0.10, needs 0.15' and 'upgrade odds ~0.3%/yr: land value 18, conges
-  **Gates:** Gate-table fidelity, not self-reference: an instrumented growthPass lo · The two missed stalls are caught: a tile with 0 < dem <= 0 · Determinism becomes real: with Math …
 
 - [ ] **GP2 — Working Ports** *(I4/E3)*: The two most expensive buildings in the game stop being ornaments — a port becomes a specialization bet that pays only if you dedicate a corridor to it and site it where its smog or its approach noise costs you least.
   **Gates:** A powered, road-connected seaport with >=200 industrial jobs in catchm · An unpowered or unconnected port produces zero demand delta, zero reve · Airport tradeoff: demand …

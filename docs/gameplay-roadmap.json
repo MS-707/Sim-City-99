@@ -43,7 +43,7 @@
       "pass_bar": "Every rule the sim enforces is discoverable in-game, from ONE source of truth — the growth gate table the sim itself consumes, so a new gate cannot ship without its verdict. Any tile is inspectable without a tool switch and reports the ONE binding constraint in plain language with the proving number, including the soft stalls (demand below the upgrade threshold, negligible fit odds), not just the hard gates. The headline quality-of-life number is derived from real state and backed by a ranked problem list whose rows jump the camera to the worst cluster. RCI and budget gauges decompose into named, signed contributors. Transient warnings are not stomped by hover chrome. Advisory output is severity-ranked."
     }
   ],
-  "save_version_ladder": "GP1 owns save v12 and establishes the ladder: every later state-adding milestone takes the next integer, the loader maintains backward compatibility for all earlier versions, and normaliseHistory must be extended for any new history key (it builds from a hardcoded key list and DROPS unknown keys). SHIPPED: migrateSave(d) in js/sim.js IS that ladder — v<11 -> 11 (every earlier field is already absent-tolerant at its restore site), v11 -> 12 (rng cursors absent -> null -> the pure (seed, tickCount) derivation). normaliseHistory is UNCHANGED at v12 (GP1 adds no history key) and its drop-unknown-keys behavior is re-asserted in a comment at the function.",
+  "save_version_ladder": "GP1b owns save v12 and establishes the ladder: every later state-adding milestone takes the next integer, the loader maintains backward compatibility for all earlier versions, and normaliseHistory must be extended for any new history key (it builds from a hardcoded key list and DROPS unknown keys). GP1a does NOT touch the save format.",
   "loop_protocol": {
     "driver": "/goal + /loop — each iteration runs the next todo milestone to completion via scratchpad/wf-milestone.mjs, ships it, and advances.",
     "per_milestone_workflow": [
@@ -65,35 +65,49 @@
   },
   "milestones": [
     {
-      "id": "GP1",
-      "title": "The Growth Truth Table — Tile Verdicts, RCI Decomposition & a Real Seeded Sim Stream",
+      "id": "GP1a",
+      "title": "Growth Verdicts — the Gate Table & Tile Diagnosis",
       "dimensions": [
         "feedback-legibility",
-        "simulation-depth",
         "services-quality"
       ],
-      "scope": "Two surgeries on one function, done once so nine milestones inherit them. (A) GATE TABLE: refactor growthPass (js/sim.js:1673-1735) so its gates become an ordered declarative table that growthPass ITSELF consumes; diagnoseTile(i) is a pure read walking the same table returning {code,severity,text,evidence}. One source of truth, so every later gate (strain, job-reach, blight) ships with a player-facing verdict for free and cannot desync. The table must cover what growthPass ACTUALLY does — the draft's seven codes missed the two commonest stalls: burning tile (`if (this.fire[i]) continue`, sim.js:1682, precedes everything); unpowered decay (unpow>6); no road access; water hard cap (fires at `lvl >= 1`, so it PRE-EMPTS the level-2 service cap — precedence is not what the draft described); level-2 service cap (eduCov<8 && medCov<8); level-2 pressure gate (waterPressure<0.9); gridlock eviction; DEMAND BELOW THE UPGRADE THRESHOLD (the branch is gated on `dem > 0.15` at sim.js:1701 — a tile at 0.10 stalls forever and the draft reported it 'growing normally'); NEGLIGIBLE FIT ODDS (the roll is `Math.random() < dem*fit*0.42` where fit compounds landv/255, -crime/400, (1-cong*0.75), the svc term and the pressure term, sim.js:1704-1712 — a blighted low-landv block passes every hard gate and still never upgrades; a headless rig showed demand.r at 0.78-1.00 with pop flat, i.e. fit was binding); decline (dem<-0.25); else growing normally. Non-zone verdicts: unpowered pump, one-station line, plant past PLANT_WARN_AGE, unconnected special. (B) SEEDED SIM STREAM: the shipped 'determinism' invariant is not real — there are 46 raw Math.random() calls in js/sim.js covering the whole tick path (growth sampling and every growth/decay roll at 1678/1690/1699-1700/1725-1728/1733, recomputeTraffic's reservoir pick at 1267, road wear 1318, fire spread 1774/1786, the disaster roll 2385), and mulberry32 (sim.js:463) serves only terrain and neighbor personalities. Byte-identity today is achieved by stubbing Math.random, making it hypersensitive to draw COUNT AND ORDER — which is why the draft's post-demand-change identity gates were unachievable. Route every tick-path draw through named seeded sub-streams on city.rng (growth / traffic / fire / hazard), cursor serialized. This is the ONE authorized deliberate re-pin of the baseline; after it, 'same seed -> identical result' is true UNSTUBBED and every later identity gate means something. SURFACES: verdict block at the top of openQuery (js/ui.js:1520), re-rendered on a 500ms cadence; RCI bars decompose on click into their named signed contributors (jobsAvail/220, taxMod, stadMod, svcMod, event mods, ordinance mods — all sitting visible in recomputeDemand, sim.js:1503-1520, and never shown); hover readout in a NEW status cell driven by UI.hover — NOT #sb-tool (index.html:122), which carries transient messages like '💧 Pumps must sit next to water' that a per-pixel mousemove would erase before they are read, so those get their own cell and a message TTL; and a running drag-cost meter ('§420 · 7 tiles'). Correct the draft's premise: drags do NOT truncate silently — place() returns {ok:false,reason:'funds'} (sim.js:764) and applyToolAt already plays Snd.denied() with '⛔ Not enough funds!' (ui.js:614). The meter is a PREVIEW and must not be stricter than the budget (collectBudget can legitimately push funds negative), so it warns and lets the existing refusal stand. Save: v12 for the rng cursor — this establishes THE version ladder (the draft had six milestones each independently claiming v12); every later state-adding milestone takes the next integer and the loader keeps a v11..vN migration chain.",
+      "scope": "SPLIT FROM THE ORIGINAL GP1 (which bundled three surgeries and was refuted by all three adversarial lenses on its first attempt). This half is PURE READ + UI: absolutely NO change to simulation behavior. (A) GATE TABLE: refactor growthPass in js/sim.js so its gates become an ordered DECLARATIVE TABLE that growthPass ITSELF consumes — same decisions, same order, same RNG draw count and order, byte-identical outcomes. This is a pure restructuring, not a behavior change. diagnoseTile(i) is a pure read walking that same table, returning {code, severity, text, evidence}. One source of truth, so later milestones ship their gates with a player-facing verdict for free and cannot desync. The table must cover what growthPass ACTUALLY does — verify each against the source, do not trust this list blindly: burning tile (precedes everything); unpowered decay (unpow > 6); no road access; water hard cap (fires at lvl >= 1, so it PRE-EMPTS the level-2 service cap); level-2 service cap (eduCov < 8 && medCov < 8); level-2 pressure gate (waterPressure < 0.9); gridlock eviction; DEMAND BELOW THE UPGRADE THRESHOLD (the branch is gated on dem > 0.15, so a tile at 0.10 stalls forever — the commonest invisible stall); NEGLIGIBLE FIT ODDS (the roll is rand < dem * fit * 0.42, where fit compounds landv/255, -crime/400, (1 - cong*0.75), the svc term and the pressure term — a blighted low-landv block passes every hard gate and still never upgrades); decline (dem < -0.25); else growing normally. Non-zone verdicts: unpowered pump, one-station line, plant past PLANT_WARN_AGE, unconnected special. (B) SURFACES: a verdict block at the top of openQuery, re-rendered on a ~500ms cadence; RCI bars that decompose on click into their named signed contributors (jobsAvail/220, taxMod, stadMod, svcMod, event mods, ordinance mods — all sitting visible in recomputeDemand and never shown to the player); a hover readout in a NEW status cell driven by UI.hover, NOT #sb-tool (which carries transient messages that a per-pixel mousemove would erase before they can be read — those keep their own cell and gain a message TTL); and a running drag-cost meter that is a PREVIEW which warns but never blocks (place() already returns {ok:false, reason:\"funds\"} and applyToolAt already plays Snd.denied()). EXPLICITLY OUT OF SCOPE: the seeded-RNG substrate migration and any save-format change — those are GP1b. This milestone must NOT bump the save version.",
       "player_facing_win": "A player who zones a perfect block and watches it stall is finally told, in the game, exactly which gate is holding it — including the two invisible ones ('demand 0.10, needs 0.15' and 'upgrade odds ~0.3%/yr: land value 18, congestion 71%') — and can read any tile, and the RCI bars themselves, just by hovering.",
       "quality_gates": [
-        "Gate-table fidelity, not self-reference: an instrumented growthPass logs the branch it actually short-circuits on; over 5,000 sampled tiles across 20 seeded cities diagnoseTile's code names that same first gate with 0 mismatches, and each of the 11 codes is reproduced by a scripted city that trips exactly it.",
-        "The two missed stalls are caught: a tile with 0 < dem <= 0.15 returns the demand-threshold code (never 'growing normally'), and a tile passing every hard gate whose fit-derived per-roll upgrade probability is < 0.005 returns the negligible-odds code with landv and congestion as its evidence numbers.",
-        "Determinism becomes real: with Math.random left UNSTUBBED and global, two fresh runs from the same seed and input script produce byte-identical over/lvl/varnt/fire/traffic arrays, pop, funds and save JSON over 600 ticks; a save at tick 300 resumed reproduces the tick-600 state byte-identically.",
-        "The re-pin is bounded and declared: vs the pre-change baseline, pop/funds/jobs at ticks 100/300/600 across 20 seeds stay within ±5% of the old distribution mean, and all 5 shipped scenarios remain winnable (medal condition met in >=8 of 10 seeded playthroughs of a scripted reference solution). The new baseline is pinned and published as the reference for every later milestone.",
-        "Read-only and UI-safe: diagnoseTile performs zero sim writes and draws zero RNG (write-trap proxy over every city array plus an rng-call counter both report 0); no hover event overwrites a transient status message before its TTL expires; frame time within 10% of the new baseline; an open query dialog reflects a sim change within 600ms; zero console errors.",
-        "Save-compat: a v11 save loads at v12 with the rng cursor seeded deterministically from seed+tickCount, resaves at v12, round-trips idempotently, and continues 120 rollovers without a console error."
+        "BYTE-IDENTICAL SIM: because this is a pure refactor plus a pure read, 20 seeds x 600 ticks with Math.random stubbed identically on both sides produce 0 differing bytes in over/lvl/varnt/unpow/fire/traffic, identical pop/funds/jobs, and identical save JSON versus the pre-change baseline. The RNG draw count and order must be unchanged.",
+        "Gate-table fidelity, not self-reference: an instrumented growthPass logs the branch it actually short-circuits on; over 5,000 sampled tiles across 20 seeded cities, diagnoseTile names that same first gate with 0 mismatches, and each code is reproduced by a scripted city that trips exactly it.",
+        "The two invisible stalls are caught: a tile with 0 < dem <= 0.15 returns the demand-threshold code (never 'growing normally'), and a tile passing every hard gate whose fit-derived per-roll upgrade probability is < 0.005 returns the negligible-odds code with land value and congestion as its evidence numbers.",
+        "Verdict text is TRUE in every case it renders: WATER_CAP must not claim 'capped at level 1' on a level-2 lot; UNPOWERED must not claim an in-progress level loss on a lot whose own apply-guard prevents the decrement; a tile whose gridlock loss exceeds its upgrade odds must not read as a green 'ok'; and no verdict box appears at all on unzoned bare grass or open water.",
+        "Read-only and UI-safe: diagnoseTile performs zero sim writes and draws zero RNG (a write-trap proxy over every city array and an rng-call counter both report 0); no hover event overwrites a transient status message before its TTL expires; an open query dialog reflects a sim change within 600ms; zero console errors.",
+        "No save change and no perf regression: the save version stays v11 and round-trips byte-identically; sim tick and frame time on a matched developed 128x128 city stay within ~10% of the pre-change baseline — re-measure honestly rather than asserting."
       ],
       "impact_1_5": 5,
       "effort_1_5": 3,
       "priority_rank": 1,
+      "touches_save_format": false,
+      "status": "todo"
+    },
+    {
+      "id": "GP1b",
+      "title": "Seeded Simulation Substrate — Make Determinism Real",
+      "dimensions": [
+        "simulation-depth"
+      ],
+      "scope": "SPLIT FROM THE ORIGINAL GP1. Pure infrastructure, no player-facing feature. The shipped determinism invariant is not real: js/sim.js makes ~43 raw Math.random() calls across the whole tick path (growth sampling and every growth/decay roll, recomputeTraffic reservoir pick, road wear, fire spread, the disaster roll, complaint scanning), while mulberry32 serves only terrain and neighbor personalities. Byte-identity has so far been achieved by STUBBING Math.random, which makes it hypersensitive to draw count and order. Route every tick-path draw through named seeded sub-streams on city.rng (growth / traffic / fire / hazard), with cursors serialized. Save bumps to v12 with backward-compatible v11 loading, establishing THE version ladder for every later state-adding milestone. CRITICAL, carried from the first attempt where all three lenses refuted: powered[] is NOT serialized and is NOT a pure function of the saved world — recomputePower stamps it with rng.hazard() brownout and Y2K flicker cuts — and City.sinceComplaint is a second unserialized accumulator gating rng.hazard() draws. Both must be resolved (serialize them, or make the stamping a pure function of serialized state) or the determinism claim is hollow. This is the ONE authorized deliberate RE-PIN of the sim baseline; after it, \"same seed produces the same city\" is true UNSTUBBED and every later identity gate means something. The first attempt is preserved in git history at commit e5140a0 and may be mined for reference, but its measured regressions must not be inherited unexamined: an independent re-measure found the tick ~14% SLOWER while the implement pass claimed 22% faster, and the save payload grew ~57%.",
+      "player_facing_win": "Two players who start the same seed and play the same moves get the same city — and saving and reloading no longer silently changes the simulation’s future.",
+      "quality_gates": [
+        "Determinism is real: with Math.random left UNSTUBBED and global, two fresh runs from the same seed and input script produce byte-identical over/lvl/varnt/fire/traffic arrays, pop, funds and save JSON over 600 ticks.",
+        "Save/load is determinism-preserving: a save at tick 300, reloaded, reproduces the tick-600 state byte-identically. This requires every array the sim reads back to be serialized or a pure function of serialized state — powered[] and City.sinceComplaint must both be explicitly resolved and the resolution demonstrated.",
+        "No global draws remain on the tick path: an instrumented counter reports 0 global Math.random calls across 600 ticks on a stress city exercising growth, traffic, fire, wear, disasters and complaints.",
+        "The re-pin is bounded and declared: versus the pre-change baseline, pop/funds/jobs at ticks 100/300/600 across 20 seeds stay within +/-5% of the old distribution mean, and all shipped scenarios remain winnable (medal condition met in at least 8 of 10 seeded playthroughs of a scripted reference solution). The new baseline is pinned and COMMITTED to git as the reference for every later milestone.",
+        "Save-compat and honesty: a genuine v11 save loads at v12 with cursors seeded deterministically, resaves, round-trips idempotently, and continues 120 rollovers cleanly; the save payload size delta and the sim-tick perf delta versus baseline are both re-measured and reported honestly (tick within ~20%), not asserted.",
+        "No gameplay or visual change: sprites byte-identical, UI unchanged, zero console errors."
+      ],
+      "impact_1_5": 3,
+      "effort_1_5": 4,
+      "priority_rank": 2,
       "touches_save_format": true,
-      "status": "implemented (under verification)",
-      "pinned_baseline": "docs/gp1-baseline.json — the 20 corpus seeds, the 5 array hashes per seed and the 9 distribution means. GP1 moved every sim-affecting draw off global Math.random, so EVERY pre-GP1 byte-identity artifact (M24-M32, GQ1-GQ11) is incomparable; this file is the reference GP2..GP10 measure against.",
-      "balance_gate_substitution": "The literal +/-5% balance bar is INSIDE the measured noise floor (a pure RNG reseed of unchanged HEAD code already moves the 20-seed mean by more than the change itself does). It is replaced by a measured null band (mean_HEAD +/- 2*sd over 8 HEAD repetitions) plus a hard non-vacuous ceiling of 15% for pop/jobs and 5% for funds. Declared here, not quietly applied.",
-      "shipped_deltas_vs_design": [
-        "A fifth RNG stream `build` was required (place() writes varnt at sim.js:780/806 and varnt is named in the byte-identity gate); the four-stream list in the scope could not satisfy its own gate.",
-        "chopperMonthTick (js/render.js) is called from inside City.tick() but is pure presentation and STAYS on global Math.random — the one documented carve-out to 'no global draws inside tick'.",
-        "Save v12 also carries five ACCUMULATED planes (unpow, traffic, landv, crime, poll). Cursors alone do not make a resume exact: unpow is authored by growthPass and nothing recomputes it (it was silently zeroed on every load before v12), traffic is a blend accumulator, and landv/crime/poll are rebuilt only every 14th tick so an off-phase save reloads maps measured on a different world. With the five planes restored after the load cascade, post-load state matches pre-save state on all 26 planes exactly (measured, 10 seeds)."
-      ]
+      "status": "todo"
     },
     {
       "id": "GP2",
@@ -114,7 +128,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 3,
-      "priority_rank": 2,
+      "priority_rank": 3,
       "touches_save_format": false,
       "status": "todo"
     },
@@ -138,7 +152,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 3,
+      "priority_rank": 4,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -162,7 +176,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 3,
-      "priority_rank": 4,
+      "priority_rank": 5,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -186,7 +200,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 5,
+      "priority_rank": 6,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -210,7 +224,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 3,
-      "priority_rank": 6,
+      "priority_rank": 7,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -234,7 +248,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 7,
+      "priority_rank": 8,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -258,7 +272,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 5,
-      "priority_rank": 8,
+      "priority_rank": 9,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -282,7 +296,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 9,
+      "priority_rank": 10,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -306,7 +320,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 10,
+      "priority_rank": 11,
       "touches_save_format": true,
       "status": "todo"
     }
@@ -335,5 +349,6 @@
     "ADDED A SCENARIO-WINNABILITY GATE to every growth-touching milestone. Nothing in the draft checked this, yet the tax reshape, service strain, commute gating and blight each independently suppress equilibrium growth and stack multiplicatively — while Twister Season requires pop >= 4000 and Y2K Ready 2500 pop + §4000 + a power margin, and medals persist across cities in localStorage (recordTrophy, scenarios.js:307), making previously earned golds unreproducible.",
     "FIXED FACTUAL ERRORS: the commute perf gate cited 'a fully built 120x120 map' — MAP_SIZES is [64, 80, 128] (sim.js:7), now 128x128. Restated every 'byte-identical vs baseline' gate that followed a demand change as either a null-configuration identity (no port / disasters off / uncrowded), a bounded statistical re-pin, or an unstubbed same-seed reproducibility check, since growthPass short-circuits on demand tests BEFORE drawing (sim.js:1699/1701/1728) and any demand change shifts the stream citywide.",
     "RE-RATED effort across the set per the feasibility lens (1:2->3, 2:2->3, 5:3->4, 8:4->5, 9:3->4, 10:3->4) and lowered transport-networks from 5 to 4 (ports inert, no destination-seeking trips, no road class hierarchy, no train), moving the overall current score from 49 to 47."
-  ]
+  ],
+  "split_note": "2026-07-27: the original GP1 bundled three surgeries (core-loop refactor, RNG substrate migration, UI feature set) and was refuted by all three adversarial lenses on its first attempt — a violation of the roadmap’s own independently-shippable principle. Split into GP1a (pure read + UI, byte-identical sim) and GP1b (isolated RNG infrastructure). The bundled attempt is preserved at commit e5140a0; the working tree was restored to the pre-GP1 code state so GP1a starts clean."
 }

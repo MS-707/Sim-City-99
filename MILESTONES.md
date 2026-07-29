@@ -6,10 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- ✅ **Phase 0 CLOSED** (R1 + R2 done, 2026-07-27): the tree is fully
-  reconciled — no live-but-uncertified layers. Certified through GP2; the
-  artifact reflects the certified tree. The 20-minute cron loop resumes with
-  GP3a next (commute surfaces, read-first split per S3).
+- **GP3b — Commute Coupling** (behavior half of the GP3 split): growth and
+  demand couple to the job-access field GP3a proved honest. Declared re-pin
+  per S3; outcome gates per S5 measured BY the GP3a instrumentation.
 
 ## Open
 
@@ -33,11 +32,10 @@ Queue policy: keep at least 5 open improvements at all times.
 > hardcoded list in `normaliseHistory` — unknown keys are silently dropped.
 
 
-- [ ] **GP2 — Working Ports** *(I4/E3)*: The two most expensive buildings in the game stop being ornaments — a port becomes a specialization bet that pays only if you dedicate a corridor to it and site it where its smog or its approach noise costs you least.
-  **Gates:** A powered, road-connected seaport with >=200 industrial jobs in catchm · An unpowered or unconnected port produces zero demand delta, zero reve · Airport tradeoff: demand …
-
-- [ ] **GP3 — Commute Model & Job Access** *(I5/E4, save+)*: Where you put housing relative to jobs finally matters — the one bridge into downtown genuinely carries every trip from the far shore and lights up red, and a second crossing measurably drains it.
-  **Gates:** Spatial sensitivity: identical zone counts in two layouts — housing be · Bottleneck emergence: in the single-bridge layout the bridge tiles lan · Load is not degenerate: on a uniform grid with 4 equally-short routes  …
+- [ ] **GP3b — Commute Coupling** *(I5/E4, behavior half of GP3)*: growth and
+  demand finally couple to job access — the far-shore block with no route to
+  work stalls, and a second bridge measurably revives it. Declared re-pin;
+  measured by GP3a's certified instrumentation + S5 outcome gates.
 
 - [ ] **GP4 — Expressways, Ramps & the First Moving Train** *(I5/E3, save+)*: The red bridge finally has an answer that is a decision and not just more asphalt — a high-capacity route you must pay for, route around good neighbourhoods, and deliberately plug into the grid — and the rail line you built years 
   **Gates:** Capacity is real: replacing a congested arterial with an expressway pl · Ramps gate access: an expressway with zero ramps carries zero trips an · Siting tradeoff bites: mean landv of residential tiles within 2 of an  …
@@ -88,6 +86,21 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP3a — Commute Surfaces** *(gameplay roadmap 4/11, certified
+  2026-07-29)*: the read-only half of the commute model. Every tile now
+  carries a **job-access field** (`city.jobAccess` — total zone jobs its
+  street network can reach, proven against an independent BFS oracle with 0
+  diffs on four scripted topologies), the HUD shows a citywide **commute
+  stat** (v13 save adds `history.commute`), and the query panel grows a
+  "Job access" row plus an advisory verdict that fires only where access is
+  genuinely low. All of it is **provably inert**: 20/20 seeds byte-identical
+  to the certified baseline with `Math.random` unstubbed, zero writes and
+  zero RNG draws on the read path, rotation-invariant, and — after the panel
+  caught a perf miss (1.18–1.23× vs a 1.10× budget) — a restructured
+  `recomputeJobAccess` (cached component planes, dirty-detection by road-mask
+  compare) landing at 1.015–1.059× with 0.1–0.2 ms steady-state self-time.
+  This field is the honest ruler GP3b's coupling will be measured with.
 
 - [x] **GP2 — Working Ports** *(gameplay roadmap 3/11, certified via R2
   fix-forward)*: the airport and seaport are **real economic engines now**. A

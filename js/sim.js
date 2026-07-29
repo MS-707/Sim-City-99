@@ -1312,17 +1312,18 @@ class City {
     this.jobAccess = new Int32Array(n);
     this._jaComp = new Int32Array(n);
     this._jaStack = new Int32Array(n);
-    /* GP3a PERF (C5): _jaComp and the per-tile nearest-road plane (_jaNear)
-       are pure functions of WHERE the ROAD/WIREROAD tiles sit in over[] —
-       nothing else. _jaRoadMask caches that road set; every pass does one
-       O(n) mask compare and only re-runs the flood fill + the ~16k-probe
-       nearest-road sweep when a road appeared or vanished (place/bulldoze/
-       crumble/disaster — the compare catches ALL of them, no event hooks to
-       desync). Steady state the pass is a few cheap O(n) scans (~0.1 ms at
-       128x128 vs ~1 ms recomputing the probes), which is what keeps the
-       600-tick loop inside the 1.10x budget. Deterministic: an unchanged
-       mask PROVES a fresh recompute would return byte-identical planes. */
-    this._jaNear = new Int32Array(n);
+    /* GP3a PERF (C5): _jaComp and the nearest-road-COMPONENT plane (_jaNC =
+       comp id of nearestRoad(i), -1 off-grid) are pure functions of WHERE
+       the ROAD/WIREROAD tiles sit in over[] — nothing else. _jaRoadMask
+       caches that road set; every pass does one O(n) mask compare and only
+       re-runs the flood fill + the ~16k-probe nearest-road sweep when a road
+       appeared or vanished (place/bulldoze/crumble/disaster — the compare
+       catches ALL of them, no event hooks to desync). Steady state the pass
+       is exactly TWO lean O(n) scans (~0.1-0.2 ms at 128x128 vs ~1 ms
+       recomputing the probes), which is what keeps the 600-tick loop inside
+       the 1.10x budget. Deterministic: an unchanged mask PROVES a fresh
+       recompute would return byte-identical planes. */
+    this._jaNC = new Int32Array(n);
     this._jaRoadMask = new Uint8Array(n);
     this._jaMaskValid = false; // first pass always rebuilds
     this._jaCid = 0;           // road-component count for the cached _jaComp
@@ -2185,33 +2186,43 @@ class City {
      Integer job sums only, so a rebuild is byte-stable across engines.
      Cost (C5): steps 1/1b (the flood fill + the O(n) * <=24-probe nearest-
      road sweep) are pure functions of the road SET, so they are cached in
-     _jaComp/_jaNear and re-run only when the O(n) road-mask compare (step 0)
+     _jaComp/_jaNC and re-run only when the O(n) road-mask compare (step 0)
      sees over[]'s roads move — place/bulldoze/crumble/disaster, all caught by
-     the compare itself. The steady-state pass is a handful of O(n) scans
-     (~0.1 ms at 128x128); the worst case (road edit) is the order of one
+     the compare itself. The steady-state pass is exactly TWO lean O(n) scans
+     (step 0 fused with the job-mass accumulation, and the step-4 assignment;
+     ~0.1-0.2 ms at 128x128); the worst case (road edit) is the order of one
      recomputeTraffic. Runs ONLY on the traffic cadence (tick %5)
      and in the load cascade: never per-frame, never from the UI (bakes are
      cached; staleness is bounded at 5 ticks). */
   recomputeJobAccess() {
     const n = MAP * MAP;
-    const comp = this._jaComp, stack = this._jaStack;
-    const ov = this.over;
-    // 0. road-set change detection (C5 perf). comp[] and _jaNear[] depend
-    //    ONLY on which tiles are ROAD/WIREROAD — compare against the cached
-    //    mask in one O(n) scan and skip the expensive rebuild when the road
-    //    layout is unchanged (the overwhelmingly common pass). The compare
-    //    itself catches EVERY mutation path — place, bulldoze, crumble,
-    //    disasters — because it reads over[] directly, so there is no event
-    //    hook to forget. An unchanged mask proves a fresh recompute would
-    //    produce byte-identical comp/_jaNear, so determinism (C1/C2/C6) and
-    //    the oracle equality are untouched.
-    //    The same O(n) loop also collects the LIVE stations (rare tiles) so
-    //    the rail-fusion step never rescans the full map: one fused scan
-    //    instead of three.
-    const mask = this._jaRoadMask;
+    const comp = this._jaComp;
+    const ov = this.over, lvl = this.lvl;
+    const mask = this._jaRoadMask, nc = this._jaNC;
     const stationLive = this.stationLive, railNet = this.railNet;
-    const RD = OV.ROAD, WR = OV.WIREROAD;
+    const RD = OV.ROAD, WR = OV.WIREROAD, ZC = OV.ZC, ZI = OV.ZI, ZR = OV.ZR;
+    /* 0. ONE fused O(n) scan (the C5 steady-state hot path, scan 1 of 2):
+         a) road-set change detection — comp[]/_jaNC[] depend ONLY on which
+            tiles are ROAD/WIREROAD; compare against the cached mask and only
+            re-run the flood fill + nearest-road sweep when a road appeared
+            or vanished. The compare reads over[] directly, so EVERY mutation
+            path (place, bulldoze, crumble, disasters) is caught — no event
+            hook to forget. An unchanged mask PROVES a fresh recompute would
+            produce byte-identical comp/_jaNC, so determinism (C1/C2/C6) and
+            the oracle equality are untouched;
+         b) live-station collection (rare tiles), so rail fusion never
+            rescans the full map;
+         c) OPTIMISTIC job-mass accumulation per raw component (valid iff the
+            mask turns out clean — the overwhelmingly common pass; a dirty
+            pass discards it and redoes the scan after the rebuild). */
+    let rawJobs = this._jaJobs;
     let dirty = !this._jaMaskValid;
+    const cidOld = this._jaCid;
+    // opt: the cached nc/cid are valid, so the fused scan may accumulate.
+    // On the very first pass (mask invalid) nc is unwritten and _jaJobs may
+    // not exist yet — skip; the dirty branch below redoes the accumulation.
+    const opt = !dirty;
+    if (opt) rawJobs.fill(0, 0, cidOld);
     let stn = this._jaStn || (this._jaStn = new Int32Array(64));
     let nStn = 0, nNet = 0;
     for (let i = 0; i < n; i++) {
@@ -2223,6 +2234,10 @@ class City {
         stn[nStn++] = i; // ascending order by construction
         if (railNet[i] >= nNet) nNet = railNet[i] + 1;
       }
+      if (opt && (t === ZC || t === ZI) && lvl[i] > 0) {
+        const c = nc[i];
+        if (c >= 0) rawJobs[c] += t === ZC ? COM_JOB[lvl[i]] : IND_JOB[lvl[i]];
+      }
     }
     let cid;
     if (dirty) {
@@ -2230,6 +2245,7 @@ class City {
       // 1. road-component flood fill (ascending scan, explicit stack). The four
       //    neighbour probes are unrolled (recomputeRail's [dx,dy] tuple loop
       //    allocates per node — fine on the rare rail cadence, not on this one).
+      const stack = this._jaStack;
       cid = 0;
       for (let s = 0; s < n; s++) {
         if (mask[s] !== 1 || comp[s] !== -1) continue;
@@ -2246,7 +2262,8 @@ class City {
         }
         cid++;
       }
-      // 1b. nearest-road plane. PERF: an interior tile (3 tiles clear of every
+      // 1b. nearest-road-component plane: _jaNC[i] = comp id of nearestRoad(i)
+      //     (-1 off-grid). PERF: an interior tile (3 tiles clear of every
       //     edge) probes the SAME ring as nearestRoad via precomputed index
       //     deltas — identical offsets in the identical order, so the first
       //     hit (the tie-break) cannot differ; only border tiles pay the
@@ -2254,7 +2271,6 @@ class City {
       const off = NEAR_ROAD_OFF;
       const didx = this._jaDidx || (this._jaDidx = new Int32Array(off.length >> 1));
       for (let k = 0; k < off.length; k += 2) didx[k >> 1] = off[k + 1] * MAP + off[k];
-      const near = this._jaNear;
       for (let y = 0; y < MAP; y++) {
         const yIn = y >= 3 && y < MAP - 3;
         for (let x = 0; x < MAP; x++) {
@@ -2266,12 +2282,23 @@ class City {
               if (mask[q] === 1) { j = q; break; }
             }
           } else j = this.nearestRoad(i);
-          near[i] = j;
+          nc[i] = j >= 0 ? comp[j] : -1;
         }
       }
       this._jaCid = cid;
       this._jaMaskValid = true;
-    } else cid = this._jaCid;
+      // the optimistic accumulation used the STALE nc/cid — redo it against
+      // the fresh planes (rare path: only when the road layout moved)
+      if (!this._jaJobs || this._jaJobs.length < cid) this._jaJobs = new Int32Array(Math.max(cid, 16));
+      rawJobs = this._jaJobs;
+      rawJobs.fill(0, 0, cid);
+      for (let i = 0; i < n; i++) {
+        const t = ov[i];
+        if ((t !== ZC && t !== ZI) || lvl[i] === 0) continue;
+        const c = nc[i];
+        if (c >= 0) rawJobs[c] += t === ZC ? COM_JOB[lvl[i]] : IND_JOB[lvl[i]];
+      }
+    } else cid = cidOld;
     // union-find over road-component ids (grown-only cached buffer)
     if (!this._jaUF || this._jaUF.length < cid) this._jaUF = new Int32Array(Math.max(cid, 16));
     const uf = this._jaUF;
@@ -2303,34 +2330,26 @@ class City {
         }
       }
     }
-    // 3. job mass per root (integer sums; zone jobs only — see block comment).
-    //    nearestRoad answers come from the cached _jaNear plane (identical to
-    //    a fresh probe by the mask proof above).
-    if (!this._jaJobs || this._jaJobs.length < cid) this._jaJobs = new Int32Array(Math.max(cid, 16));
-    const rootJobs = this._jaJobs, near = this._jaNear, lvl = this.lvl;
-    rootJobs.fill(0, 0, cid);
-    for (let i = 0; i < n; i++) {
-      const t = ov[i];
-      if ((t !== OV.ZC && t !== OV.ZI) || lvl[i] === 0) continue;
-      const j = near[i];
-      if (j < 0) continue;
-      rootJobs[find(comp[j])] += t === OV.ZC ? COM_JOB[lvl[i]] : IND_JOB[lvl[i]];
-    }
-    // 3b. collapse to per-COMPONENT job mass (compJobs[c] = its root's total)
-    //     so the O(n) assignment below does a flat lookup — no find() calls
-    //     in the hot loop (C5).
+    /* 3. collapse the per-raw-component masses onto their union roots, then
+         flatten to compJobs[c] = its root's total, so the O(n) assignment
+         below is a flat lookup — no find() in the hot loop. Union-by-LOWER-id
+         (+ path halving, which never changes roots) makes every set's root
+         its MINIMUM member id, so find(k) <= k: ascending k adds each
+         non-root's ORIGINAL raw mass to its root exactly once, and no
+         non-root ever receives mass. Integer sums only. */
+    for (let k = 0; k < cid; k++) { const r = find(k); if (r !== k) rawJobs[r] += rawJobs[k]; }
     if (!this._jaCJobs || this._jaCJobs.length < cid) this._jaCJobs = new Int32Array(Math.max(cid, 16));
     const compJobs = this._jaCJobs;
-    for (let k = 0; k < cid; k++) compJobs[k] = rootJobs[find(k)];
-    // 4. per-tile assignment + the citywide stat in the same pass — a single
-    //    O(n) scan over the cached planes (the C5 hot path: no probes here).
+    for (let k = 0; k < cid; k++) compJobs[k] = rawJobs[find(k)];
+    // 4. per-tile assignment + the citywide stat in the same pass — the
+    //    second (and last) O(n) scan of a steady-state pass: two typed-array
+    //    reads and one write per tile, no probes, no find().
     const healthy = jaHealthy(this);
     const out = this.jobAccess;
-    const ZR = OV.ZR;
     let totRes = 0, okRes = 0, wSum = 0;
     for (let i = 0; i < n; i++) {
-      const j = near[i];
-      const ja = j >= 0 ? compJobs[comp[j]] : 0;
+      const c = nc[i];
+      const ja = c >= 0 ? compJobs[c] : 0;
       out[i] = ja;
       if (ov[i] === ZR && lvl[i] > 0) {
         const p = RES_POP[lvl[i]];

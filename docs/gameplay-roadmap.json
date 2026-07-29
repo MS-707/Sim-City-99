@@ -419,10 +419,12 @@
   "baseline_ledger": {
     "purpose": "Docs may NEVER disagree with the tree. Every ship AND every checkpoint that leaves code live must update this ledger in the same commit. This rule exists because GP1b was parked as blocked while its code stayed live, and the next milestone was briefed against a false baseline.",
     "current": {
-      "commit": "(this ship commit \u2014 GP3a)",
+      "commit": "(GP3b checkpoint \u2014 certified baseline remains abe5a70)",
       "save_version": 13,
       "certified_through": "GP3a (commute surfaces, read-only) \u2014 tree fully reconciled, no live-but-uncertified layers",
-      "live_but_uncertified": [],
+      "live_but_uncertified": [
+        "GP3b commute-coupling implement pass (residential trips walk down the job-access gradient; avgCommute/strandedShare; growth-gate table row; minimap overlay; advisors/almanac lines; sim.js/ui.js/render.js/advisors.js/index.html) \u2014 checkpointed mid-verify, NOT shipped; the declared re-pin is certified or the work is fixed/reverted by the running workflow wf_9818f8a1-694."
+      ],
       "artifact_reflects": "this ship (bundle rebuilt at GP3a close)"
     }
   },

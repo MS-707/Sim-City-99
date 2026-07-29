@@ -18,10 +18,12 @@ function setMapSize(n) { MAP = n; }
 // GP3a (save v13): "commute" is appended LAST, so the seven v12 keys stay a
 // stable prefix of the serialized JSON and a v12 save loads with commute=[]
 // (records forward from the first post-load rollover — the M30 idiom).
+// GP3b (save v14): "avgcom" appended AFTER "commute" under the same ladder
+// rule — a v13 save loads with avgcom=[] and records forward.
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
-  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute"])
+  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom"])
     out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
   return out;
 }
@@ -839,7 +841,9 @@ function rngHash32(a, b, c) { return rngHashFrom(rngHashKey(a, b), c); }
 // hash DOMAINS. A domain keeps two pure sites keyed on the same (epoch, index)
 // from correlating — the brownout cut and the Y2K flicker both walk i over the
 // same map in the same epoch, so they MUST NOT share a domain.
-const HZ = { BROWNOUT: 1, Y2K_CUT: 2, TRAFFIC: 3, FX_CHOPPER: 4, FX_Y2KLINE: 5, FX_NAME: 6 };
+// GP3b: COMMUTE is a NEW domain for the residential commute walk, so its
+// picks can never collide with the C/I keys still drawn in TRAFFIC.
+const HZ = { BROWNOUT: 1, Y2K_CUT: 2, TRAFFIC: 3, FX_CHOPPER: 4, FX_Y2KLINE: 5, FX_NAME: 6, COMMUTE: 7 };
 
 /* ========================= M27: NEIGHBORING CITIES ========================= */
 // Four WORLD-fixed map edges: 0=N (y==0), 1=E (x==MAP-1), 2=S (y==MAP-1), 3=W
@@ -926,6 +930,20 @@ const GRIDLOCK_P = 0.07;    // per-check chance a gridlocked lvl>1 lot sheds a l
 const JA_LOW_SHARE = 0.5;      // healthy = reach >= ceil(0.5 * citywide jobs)
 const JA_MIN_CITY_JOBS = 50;   // advisory floor: below this the city is too young to judge
 function jaHealthy(c) { return Math.ceil(JA_LOW_SHARE * c.jobs); }
+/* GP3b: commute-coupling thresholds. MAX_COMMUTE is the hop BUDGET of the
+   residential trip walk — the walk descends exactly 1 hop per step, so the
+   budget is also the jobDist ceiling past which trips strand. JR_UPG_SHARE
+   drives the binding JOB_REACH growth gate (an upgrade needs the block's
+   street network to reach at least ceil(0.25 * citywide jobs); the existing
+   JA_MIN_CITY_JOBS=50 floor keeps young cities ungated). CMT_FIT_LO/_W shape
+   the gFit commute drag (exactly ×1.0 while avgCommute <= 8); CMT_DEM_LO is
+   where the citywide demand damping starts to bite. Calibration (design
+   phase, C1 twin-topology × 5 seeds): MAX_COMMUTE=32 / JR_UPG_SHARE=0.25
+   pinned — the values below are FROZEN gates (S6). */
+const MAX_COMMUTE = 32;
+const JR_UPG_SHARE = 0.25;
+const jrUpgMin = (c) => Math.ceil(JR_UPG_SHARE * c.jobs);
+const CMT_FIT_LO = 8, CMT_FIT_W = 0.30, CMT_DEM_LO = 10;
 
 const ZONE_WORD = { [OV.ZR]: "residential", [OV.ZC]: "commercial", [OV.ZI]: "industrial" };
 const SVC_LABEL = { [OV.POLICE]: "Police station", [OV.FIRESTA]: "Fire station",
@@ -958,6 +976,11 @@ function gFit(c, i, k) {
   let fit = c.landv[i] / 255;
   if (k.ov === OV.ZI) fit = 0.75;             // industry doesn't care about views
   if (k.ov === OV.ZR) fit -= c.crime[i] / 400;
+  // GP3b: long citywide commutes drag residential upgrades. The multiplier is
+  // EXACTLY 1.0 whenever avgCommute <= CMT_FIT_LO (x * 1 === x in IEEE754), so
+  // a short-commute or zero-ZR city's fit — and every draw it feeds — is
+  // bit-identical to pre-GP3b. Reads only the rounded this.avgCommute scalar.
+  if (k.ov === OV.ZR) fit *= 1 - Math.min(1, Math.max(0, (c.avgCommute - CMT_FIT_LO) / (MAX_COMMUTE - CMT_FIT_LO))) * CMT_FIT_W;
   fit *= 1 - cong * 0.75;                     // nobody moves up on a gridlocked block
   const svc = (c.eduCov[i] + c.medCov[i]) / 510; // 0..1
   fit *= 0.7 + svc * 1.1;
@@ -1051,6 +1074,23 @@ const GROWTH_GATES = Object.freeze([
     text: (c) => `Water pressure ${gPct(c.waterPressure)}% — the mains are strained, so no tower rises here until it recovers past 90%.`,
     evid: (c) => [["Pressure", gPct(c.waterPressure) + "%"],
                   ["Supply/demand", c.waterSupply + "/" + c.waterDemand]] },
+
+  /* GP3b: the binding commute gate — a residential upgrade needs the block's
+     street network to reach at least ceil(JR_UPG_SHARE * citywide jobs).
+     apply:null PRE-EMPTS the upgrade draw on gated tiles: THE declared RNG
+     re-pin of this milestone, deliberately fenced to ZR tiles in cities past
+     the JA_MIN_CITY_JOBS floor so ZC/ZI and young-city draws never move.
+     Sits with the other caps, BEFORE UPG_NO_ROAD (caps precede the road test
+     — the shipped order trap). Reads ONLY city.jobAccess, the GP3a field the
+     panel already shows — never a second access computation. */
+  { code: "JOB_REACH", sel: "up", sev: "warn", label: "No jobs in reach", apply: null,
+    test: (c, i, k) => k.ov === OV.ZR && gUp(k) && c.jobs >= JA_MIN_CITY_JOBS &&
+                       c.jobAccess[i] < jrUpgMin(c),
+    text: (c, i) => `Too few jobs in reach — the streets serving this block connect to ` +
+      `${c.jobAccess[i]} of the city's ${c.jobs} jobs; upgrades need ${jrUpgMin(c)}. ` +
+      `Link this district to the job side with a road or an open metro line.`,
+    evid: (c, i) => [["Jobs reachable", c.jobAccess[i]], ["Needed", jrUpgMin(c)],
+                     ["Citywide", c.jobs]] },
 
   { code: "UPG_NO_ROAD", sel: "up", sev: "crit", label: "No road", apply: null,
     test: (c, i, k) => gUp(k) && !k.road,
@@ -1189,7 +1229,7 @@ const ADVISORY_GATES = Object.freeze([
     test: (c, i) => c.over[i] === OV.ZR && c.nearestRoad(i) >= 0 &&
                     c.jobs >= JA_MIN_CITY_JOBS && c.jobAccess[i] < jaHealthy(c),
     text: (c, i) => `This block can reach ${c.jobAccess[i]} of the city's ${c.jobs} jobs ` +
-      `over the streets you built — commutes here WILL bind growth once GP3b lands.`,
+      `over the streets you built — commutes here bind growth.`,
     evid: (c, i) => [["Jobs reachable", c.jobAccess[i]], ["Citywide", c.jobs],
                      ["Healthy line", jaHealthy(c)]] },
 ]);
@@ -1312,6 +1352,18 @@ class City {
     this.jobAccess = new Int32Array(n);
     this._jaComp = new Int32Array(n);
     this._jaStack = new Int32Array(n);
+    /* GP3b: the commute-distance field. jobDist[i] = BFS hops along ROAD/
+       WIREROAD (live-rail edges cost 1) from road tile i to the nearest road
+       tile serving a developed ZC/ZI job lot; 255 = unreachable, 0 = a job
+       gate itself. FULLY DERIVED — rebuilt by recomputeJobDist() as the first
+       line of every recomputeTraffic (so the tick cadence, the load cascade
+       and every out-of-band UI re-entry refresh it for free) and NEVER
+       serialized. _jdQ is the BFS FIFO scratch; the _jd* live-station lists
+       are this pass's OWN caches (never the certified _ja* buffers). */
+    this.jobDist = new Uint8Array(n);
+    this._jdQ = new Int32Array(n);
+    this._jdNStn = 0;
+    this._jdNNet = 0;
     /* GP3a PERF (C5): _jaComp and the nearest-road-COMPONENT plane (_jaNC =
        comp id of nearestRoad(i), -1 off-grid) are pure functions of WHERE
        the ROAD/WIREROAD tiles sit in over[] — nothing else. _jaRoadMask
@@ -1329,6 +1381,15 @@ class City {
     this._jaCid = 0;           // road-component count for the cached _jaComp
     this.commutePct = -1;
     this.commuteJobsMean = 0;
+    /* GP3b: the two commute scalars the SIM reads (gFit drag + demand.r
+       damping) — SERIALIZED in save v14, because the load-cascade rebuild can
+       drift (lvl[] moves up to 4 ticks past trafficEpoch — the exact reason
+       traffic[] itself is serialized). Both are rounded before storage so a
+       serialize round-trip is exact. commuteDamp is derived per tick by
+       recomputeDemand from them and never saved. */
+    this.avgCommute = 0;
+    this.strandedShare = 0;
+    this.commuteDamp = 0;
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
     // M19: build year of the power plant anchored at each tile (0 = no plant
     // here). Only meaningful at anchor tiles; drives the aging capacity curve.
@@ -1365,7 +1426,9 @@ class City {
     // v12 keys stay a stable JSON prefix. All eight are pushed together and
     // trimmed in lockstep in collectBudget() so they stay index-aligned to the
     // same month. Serialized wholesale.
-    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [] };
+    // GP3b (save v14): avgcom samples the rounded avgCommute, appended AFTER
+    // commute under the same ladder rule (v13 prefix stays stable).
+    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
@@ -2059,14 +2122,112 @@ class City {
     return m;
   }
 
+  /* ---------- commute-distance field (GP3b) ----------
+     A REBUILD pass in the recomputeJobAccess house style: a pure function of
+     over[]/lvl[] + the derived stationLive/railNet — ZERO RNG, ascending-index
+     iteration only, never reads cam.r. Writes ONLY jobDist and the _jd*
+     scratch (its OWN live-station lists — never the certified _ja* caches), so
+     the tick byte-stream is untouched. jobDist is DERIVED, never serialized.
+     Algorithm (this exact spec is the harness oracle):
+       a. fill 255 (unreachable). Seeds: for each developed ZC/ZI tile in
+          ascending index order, j = nearestRoad(i) (the existing radius-3
+          probe); if j >= 0 and jobDist[j] !== 0 → jobDist[j] = 0, enqueue —
+          a road tile serving a job lot is a "job gate" at distance 0;
+       b. FIFO BFS over ROAD/WIREROAD 4-neighbours, cost 1 per hop;
+       c. live-rail edges cost 1: live stations collected in ascending index,
+          per railNet. When a dequeued road tile is 4-adjacent to a live
+          station of a net with >= 2 live stations and that net is not yet
+          expanded, every unvisited road tile 4-adjacent to any OTHER live
+          station of that net enqueues at d+1 and the net is marked done —
+          the first expansion happens at minimal distance, so BFS stays
+          correct with one expansion per net.
+     Called as the FIRST line of recomputeTraffic, so the traffic cadence
+     (tick % 5), deserialize's load cascade and every out-of-band UI re-entry
+     rebuild it for free — never per-frame. */
+  recomputeJobDist() {
+    const n = MAP * MAP;
+    const jd = this.jobDist, ov = this.over, lvl = this.lvl, q = this._jdQ;
+    const rail = this.rail, railNet = this.railNet, stationLive = this.stationLive;
+    const RD = OV.ROAD, WR = OV.WIREROAD, ZC = OV.ZC, ZI = OV.ZI;
+    jd.fill(255);
+    // live-station lists (ascending by construction) + per-net live counts
+    let stn = this._jdStn || (this._jdStn = new Int32Array(64));
+    let nStn = 0, nNet = 0;
+    for (let i = 0; i < n; i++) {
+      if (stationLive[i] !== 1) continue;
+      if (nStn === stn.length) { const g = new Int32Array(stn.length * 2); g.set(stn); stn = this._jdStn = g; }
+      stn[nStn++] = i;
+      if (railNet[i] >= nNet) nNet = railNet[i] + 1;
+    }
+    this._jdNStn = nStn; this._jdNNet = nNet;
+    let live = this._jdLive, netDone = this._jdNetDone;
+    if (nNet > 0) {
+      if (!live || live.length < nNet) live = this._jdLive = new Int32Array(Math.max(nNet, 16));
+      if (!netDone || netDone.length < nNet) netDone = this._jdNetDone = new Uint8Array(Math.max(nNet, 16));
+      live.fill(0, 0, nNet); netDone.fill(0, 0, nNet);
+      for (let k = 0; k < nStn; k++) live[railNet[stn[k]]]++;
+    }
+    // a. seeds — developed ZC/ZI tiles in ascending index order
+    let head = 0, tail = 0;
+    for (let i = 0; i < n; i++) {
+      const t = ov[i];
+      if ((t !== ZC && t !== ZI) || lvl[i] === 0) continue;
+      const j = this.nearestRoad(i);
+      if (j >= 0 && jd[j] !== 0) { jd[j] = 0; q[tail++] = j; }
+    }
+    // b + c. FIFO BFS, road hops + one live-rail expansion per net
+    while (head < tail) {
+      const i = q[head++];
+      const nd = jd[i] + 1;
+      if (nd > 254) continue; // 255 stays the unreachable sentinel
+      const x = i % MAP, y = (i / MAP) | 0;
+      let j;
+      if (x + 1 < MAP && ((j = i + 1, ov[j] === RD || ov[j] === WR)) && jd[j] === 255) { jd[j] = nd; q[tail++] = j; }
+      if (x > 0 && ((j = i - 1, ov[j] === RD || ov[j] === WR)) && jd[j] === 255) { jd[j] = nd; q[tail++] = j; }
+      if (y + 1 < MAP && ((j = i + MAP, ov[j] === RD || ov[j] === WR)) && jd[j] === 255) { jd[j] = nd; q[tail++] = j; }
+      if (y > 0 && ((j = i - MAP, ov[j] === RD || ov[j] === WR)) && jd[j] === 255) { jd[j] = nd; q[tail++] = j; }
+      if (nStn === 0) continue;
+      // c. station adjacency — expand a qualifying net exactly once
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const X = x + dx, Y = y + dy;
+        if (!this.inMap(X, Y)) continue;
+        const s = Y * MAP + X;
+        if (rail[s] !== RL.STATION || stationLive[s] !== 1) continue;
+        const net = railNet[s];
+        if (live[net] < 2 || netDone[net]) continue;
+        netDone[net] = 1;
+        for (let k = 0; k < nStn; k++) {
+          const o = stn[k];
+          if (railNet[o] !== net) continue;
+          const ox = o % MAP, oy = (o / MAP) | 0;
+          if (Math.abs(ox - x) + Math.abs(oy - y) === 1) continue; // not an OTHER station
+          for (const [ex, ey] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+            const RX = ox + ex, RY = oy + ey;
+            if (!this.inMap(RX, RY)) continue;
+            const r = RY * MAP + RX;
+            if ((ov[r] === RD || ov[r] === WR) && jd[r] === 255) { jd[r] = nd; q[tail++] = r; }
+          }
+        }
+      }
+    }
+  }
+
   // each developed zone emits trips onto its serving road, then the trips
-  // random-walk a short way along the road network (commutes / deliveries).
+  // walk along the road network (commutes / deliveries). GP3b: residential
+  // trips now have DESTINATIONS — they descend the jobDist field toward the
+  // nearest job gate (or strand); C/I trips keep the legacy 10-step walk.
   recomputeTraffic() {
+    this.recomputeJobDist(); // GP3b: FIRST — the walk below consumes jobDist
     const n = MAP * MAP;
     const load = this._trafficLoad || (this._trafficLoad = new Float32Array(n));
     load.fill(0);
     this.railRiders = 0; // M25: trips/mo diverted onto rail this pass (UI only)
     const th = this.rngHashKeyFor(HZ.TRAFFIC, this.trafficEpoch); // hoisted (dom, epoch) half
+    // GP3b: the residential walk draws from its OWN domain, so its picks can
+    // never collide with (or re-pin) the C/I keys still drawn from HZ.TRAFFIC.
+    const ch = this.rngHashKeyFor(HZ.COMMUTE, this.trafficEpoch);
+    const jd = this.jobDist;
+    let totR = 0, strR = 0, arrR = 0, hopSum = 0; // commute accounting (post-rail-diversion trips)
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       if ((t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0) continue;
@@ -2077,10 +2238,73 @@ class City {
       // trips onto rail — capped, never zeroing. This scales a DETERMINISTIC map
       // (railCov) BEFORE the reservoir walk, so the sole RNG (the walk) is
       // untouched and two runs from the same seed + same rail edits are identical.
+      // GP3b: the diversion runs BEFORE the commute walk — diverted riders are
+      // excluded from the commute accounting entirely.
       const share = this.railCov[i] ? Math.min(RAIL_MAX_SHARE, this.railCov[i] / 255) : 0;
       const trips = baseTrips * (1 - share);
       this.railRiders += baseTrips * share;
       let cur = this.nearestRoad(i);
+      if (t === OV.ZR) {
+        /* GP3b: the commute walk. Trips descend jobDist exactly one hop per
+           step for d0 steps, depositing at EVERY visited road tile (start and
+           the jobDist===0 destination included). All descending neighbours
+           compete in one reservoir pick (HZ.COMMUTE domain, key
+           (i*MAX_COMMUTE + step)*4 + cnt — max 16384*32*4 ≈ 2.1M, int32-safe;
+           identical pick shape to the C/I walk below), so parallel streets
+           share the load reproducibly. Off-grid / unreachable / over-budget
+           trips STRAND and deposit nothing. */
+        totR += trips;
+        if (cur < 0 || jd[cur] === 255 || jd[cur] > MAX_COMMUTE) { strR += trips; continue; }
+        const d0 = jd[cur];
+        load[cur] += trips;
+        for (let step = 0; step < d0; step++) {
+          const x = cur % MAP, y = (cur / MAP) | 0;
+          const down = jd[cur] - 1;
+          let nxt = -1, cnt = 0;
+          for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+            const X = x + dx, Y = y + dy;
+            if (!this.inMap(X, Y)) continue;
+            const j = Y * MAP + X;
+            if ((this.over[j] !== OV.ROAD && this.over[j] !== OV.WIREROAD) || jd[j] > down) continue;
+            cnt++;
+            if (this.rngHashAt(ch, (i * MAX_COMMUTE + step) * 4 + cnt) * cnt < 1) nxt = j; // reservoir pick
+          }
+          if (nxt < 0) {
+            /* No descending road neighbour: the distance came via a rail
+               expansion — take the station jump. Among road tiles 4-adjacent
+               to OTHER live stations of the adjacent live net(s), pick the
+               one with minimal jobDist, tie-break lowest index. RNG-FREE, and
+               nothing deposits while riding. */
+            let bestD = 256;
+            for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+              const X = x + dx, Y = y + dy;
+              if (!this.inMap(X, Y)) continue;
+              const s = Y * MAP + X;
+              if (this.rail[s] !== RL.STATION || this.stationLive[s] !== 1) continue;
+              const net = this.railNet[s];
+              if (this._jdLive[net] < 2) continue;
+              for (let k = 0; k < this._jdNStn; k++) {
+                const o = this._jdStn[k];
+                if (this.railNet[o] !== net) continue;
+                const ox = o % MAP, oy = (o / MAP) | 0;
+                if (Math.abs(ox - x) + Math.abs(oy - y) === 1) continue; // not an OTHER station
+                for (const [ex, ey] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                  const RX = ox + ex, RY = oy + ey;
+                  if (!this.inMap(RX, RY)) continue;
+                  const r = RY * MAP + RX;
+                  if ((this.over[r] !== OV.ROAD && this.over[r] !== OV.WIREROAD) || jd[r] === 255) continue;
+                  if (jd[r] < bestD || (jd[r] === bestD && r < nxt)) { bestD = jd[r]; nxt = r; }
+                }
+              }
+            }
+            if (nxt < 0) break; // defensive: a malformed field never loops
+          }
+          cur = nxt;
+          load[cur] += trips;
+        }
+        hopSum += trips * d0; arrR += trips;
+        continue;
+      }
       if (cur < 0) continue;
       let prev = -1;
       for (let step = 0; step < 10; step++) {
@@ -2100,12 +2324,19 @@ class City {
           // Measured fairness over 200k walks: 2/3/4-way picks land within
           // 0.001 of uniform. This is ~61% of all tick-path draws, and it is
           // now ORDER-INDEPENDENT: reordering this loop shifts nothing else.
+          // GP3b: the keys are per-tile and UNCHANGED — removing ZR from this
+          // arm shifts no C/I pick (the property GP1b's hash domain bought).
           if (this.rngHashAt(th, (i * 10 + step) * 4 + cnt) * cnt < 1) nxt = j;  // reservoir pick
         }
         if (nxt < 0) break;
         prev = cur; cur = nxt;
       }
     }
+    /* GP3b: the two commute scalars, rounded so serialize round-trips exactly
+       (1 decimal / 3 decimals). A zero-ZR city has totR === arrR === 0, so
+       both are the exact integer 0 — bit-identical to the ctor defaults. */
+    this.avgCommute = arrR ? Math.round(hopSum / arrR * 10) / 10 : 0;
+    this.strandedShare = totR ? Math.round(strR / totR * 1000) / 1000 : 0;
     /* GP2: port trips — deposited AFTER the zone walk and BEFORE the EWMA blend,
        so a port's freight rides the same load[] every other penalty already
        reads. One bounded, RNG-FREE BFS per GATE tile (see spreadPortTrips): a
@@ -2882,7 +3113,14 @@ class City {
        therefore every `dem > 0.15` / `dem < -0.25` comparison feeding the RNG
        stream — is bit-identical to pre-GP2. */
     this.recomputePorts(p.portAnchors);
-    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR);
+    /* GP3b: citywide commute damping on residential demand. Reads ONLY the
+       two rounded scalars the traffic pass committed. APPENDED LAST to the
+       demand.r expression, never re-associated: a no-ZR / short-commute /
+       zero-stranding city has commuteDamp === 0 exactly, and x - 0 === x in
+       IEEE754, so its demand — and every dem comparison feeding the RNG
+       stream — is bit-identical to pre-GP3b. */
+    this.commuteDamp = Math.min(0.25, Math.max(0, (this.avgCommute - CMT_DEM_LO) * 0.008) + this.strandedShare * 0.25);
+    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR - this.commuteDamp);
     this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC + this.portDemC);
     this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI + this.portDemI);
   }
@@ -2913,6 +3151,9 @@ class City {
         ["Schools & hospitals", p.svcMod],
         ["Events", p.evR],
         ["Ordinances", p.om.demR],
+        // GP3b: the commute term, in the SAME source order as the expression —
+        // preserving the parts-sum-reproduces-raw invariant (the GP2 rule)
+        ["Commute & stranded", -this.commuteDamp],
       ]),
       mk("c", "Commercial", this.demand.c, [
         ["Shoppers vs jobs", (p.pop * 0.28 - p.cJobs) / 160],
@@ -3658,10 +3899,13 @@ class City {
     // are coprime — max gap 4), well inside the field's 5-tick latency budget.
     // -1 ("no residents") records as 0 so the series stays plottable.
     this.history.commute.push(this.commutePct < 0 ? 0 : this.commutePct);
-    // trim all eight in lockstep under the one existing >240 guard so every
+    // GP3b (save v14): the average-commute series, pushed AFTER commute so the
+    // v13 keys keep their serialized order. Rounded to whole hops for the plot.
+    this.history.avgcom.push(Math.round(this.avgCommute));
+    // trim all nine in lockstep under the one existing >240 guard so every
     // array stays the same length and month-aligned.
     if (this.history.pop.length > 240)
-      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute"])
+      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom"])
         this.history[k].shift();
   }
 
@@ -3999,9 +4243,15 @@ class City {
        history.commute key (appended LAST by normaliseHistory/ctor/push order,
        so the v12 history keys stay a stable prefix). jobAccess/commutePct/
        advisories are DERIVED and never saved. Backward compatibility rides the
-       existing defensive guards — no v===13 test anywhere in deserialize. */
+       existing defensive guards — no v===13 test anywhere in deserialize.
+       GP3b (save v14): history.avgcom joins the ladder, and the two commute
+       scalars (avgCommute/strandedShare) are APPENDED after every v13 key —
+       they MUST persist because they are sim inputs (gFit / demand.r) and the
+       load-cascade rebuild can drift (lvl[] moves up to 4 ticks past
+       trafficEpoch — the exact reason traffic[] itself is serialized).
+       jobDist stays DERIVED and unsaved. No v===14 test anywhere. */
     return JSON.stringify({
-      v: 13, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 14, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -4084,6 +4334,10 @@ class City {
       // a different epoch and therefore a different powered[].
       powerDirty: this.powerDirty,
       traffic: packU8(this.traffic), unpow: packU8(this.unpow), fire: packU8(this.fire),
+      /* ---- GP3b (save v14) ---- appended AFTER every v13 key. Both scalars
+         are already rounded (1 dp / 3 dp) by recomputeTraffic, so the JSON
+         round-trip is exact. */
+      avgCommute: this.avgCommute, strandedShare: this.strandedShare,
     });
   }
 
@@ -4242,6 +4496,15 @@ class City {
     unpackU8(d.traffic, c.traffic);
     unpackU8(d.unpow, c.unpow);
     unpackU8(d.fire, c.fire);
+    /* GP3b (save v14): overlay the two commute scalars the cascade's
+       recomputeTraffic just re-derived — its rebuild ran against lvl[] that
+       may sit up to 4 ticks past trafficEpoch, so the recomputed values can
+       drift from the saved timeline. Placed BEFORE recomputeMaps/
+       recomputeDemand below, so the loaded demand.r (which reads them) matches
+       the saved timeline exactly. Defensive typeof guards, no v===14 test: a
+       v13 save lacks both fields and keeps the cascade-derived values. */
+    if (typeof d.avgCommute === "number") c.avgCommute = d.avgCommute;
+    if (typeof d.strandedShare === "number") c.strandedShare = d.strandedShare;
     c.recomputeMaps(); c.recomputeDemand();
     /* GP3a: warm the job-access field before the first frame. AFTER the
        cascade (it reads the final stationLive/railNet/lvl and the census jobs

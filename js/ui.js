@@ -25,6 +25,8 @@ const UI = {
     // OFF by default so the shipped default render is pixel-unchanged; idx
     // gives the raw-number legend + the 100yr monthly-tail fallback.
     commute: { on: false, color: "#4477aa", key: "commute", label: "Commute %", idx: true },
+    // GP3b: citywide average commute (hops). OFF by default, same policy.
+    avgcom: { on: false, color: "#b06030", key: "avgcom", label: "Avg commute", idx: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
   // GP1a: the open Tile Info target ({x, y, at}) — null whenever the dialog is
@@ -740,6 +742,9 @@ const MM_LEGENDS = {
   // M25: rail network — track, subway, live/dead station, and the ridership
   // catchment. GQ11: the dead-station slate joins the strip (G8 contract).
   transit: '<i class="sw" style="background:#6cf"></i>track <i class="sw" style="background:#55f"></i>subway <i class="sw" style="background:#2ff"></i>station <i class="sw" style="background:#78808c"></i>no svc <i class="grad" style="background:linear-gradient(90deg,#16305a,#3c78c8)"></i>catchment',
+  // GP3b: commute overlay — swatches/gradient echo the exact renderMinimap
+  // branch colors (job gate yellow, near→far ramp, no-route slate, ZR health)
+  commute: '<i class="sw" style="background:#ffe040"></i>jobs <i class="grad" style="background:linear-gradient(90deg,#46dc3c,#eba028,#8c101c)"></i>near / far <i class="sw" style="background:#484850"></i>no route <i class="sw" style="background:#25e8a8"></i>reached <i class="sw" style="background:#e08030"></i>job-poor',
   // M21: static fallback string (satisfies "MM_LEGENDS.dist is a non-empty
   // string"); updateMapLegend swaps in live per-district swatches when any exist.
   dist:    '<i class="sw" style="background:#e84448"></i>neighborhoods — paint with the 🏘️ tool',
@@ -1378,7 +1383,12 @@ function buildAlmanacRows() {
     `<tr><th>Year</th><th>Population</th><th>Tax Income</th>` +
     `<th>Net Budget</th><th>Disasters Survived</th></tr>` +
     city.records.map((r) => row(r, false)).join("") +
-    row(Object.assign({ pop: city.pop }, city.recCur), true);
+    row(Object.assign({ pop: city.pop }, city.recCur), true) +
+    // GP3b: the live commute line — avg hops, stranded share, and the GP3a
+    // near-jobs percentage (em-dash while the city has no residents)
+    `<tr><td colspan="5">Commute: avg ${city.avgCommute} hops · ` +
+    `${Math.round(city.strandedShare * 100)}% stranded · ` +
+    `${city.commutePct < 0 ? "—" : city.commutePct + "%"} of residents near jobs</td></tr>`;
 }
 
 function openAlmanac() {
@@ -1728,6 +1738,13 @@ function renderQuery() {
     }
   }
   const transitAccessRow = `<tr><td>Transit access</td><td>${city.railCov[i]}</td></tr>`;
+  // GP3b: jobs reachable + hop distance to the nearest job gate, read from the
+  // serving road's jobDist (em-dash off-grid, the existing shape)
+  const qnr = city.nearestRoad(i);
+  const qjd = qnr >= 0 ? city.jobDist[qnr] : 255;
+  const jobsCommuteCell = qnr >= 0
+    ? `${city.jobAccess[i]} of ${city.jobs} jobs · ${qjd === 255 ? "no route" : qjd + " hops"}`
+    : "—";
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
@@ -1741,7 +1758,7 @@ function renderQuery() {
     ${transitAccessRow}
     <tr><td>Water</td><td>${city.watered[i] ? "💧 yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
-    <tr><td>Job access</td><td>${city.nearestRoad(i) >= 0 ? city.jobAccess[i] + " of " + city.jobs + " jobs" : "—"}</td></tr>
+    <tr><td>Jobs / commute</td><td>${jobsCommuteCell}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
     <tr><td>Traffic</td><td>${(city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) ? city.traffic[i] : "—"}</td></tr>
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>

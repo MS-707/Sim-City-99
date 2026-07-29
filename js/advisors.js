@@ -336,6 +336,20 @@ function adviseTransport() {
   if (riders > 0)
     out.push("The Metro is pulling ~" + riders.toLocaleString() + " trips/month off " +
       "the roads. Every one of those is a car NOT idling on my blacktop, Mayor.");
+  // GP3b: three-band commute commentary — pure reads of the citywide scalars
+  // (avgCommute / strandedShare / commutePct), no RNG, no writes.
+  if (city.strandedShare >= 0.01)
+    out.push(Math.round(city.strandedShare * 100) + "% of commuters are STRANDED — " +
+      "their street reaches zero jobs. Build another crossing to the job side, " +
+      "Mayor, or they'll stay home watching Jerry Springer.");
+  else if (city.avgCommute > 16)
+    out.push("The average commute runs " + city.avgCommute + " hops — folks finish " +
+      "a whole Alanis album before they clock in. Bring jobs closer or open a " +
+      "metro shortcut.");
+  else
+    out.push("Commutes average " + city.avgCommute + " hops" +
+      (city.commutePct >= 0 ? " and " + city.commutePct + "% of residents live within " +
+      "reach of real jobs" : "") + " — smooth sailing on the morning drive.");
   out.push(...adviseOrdinances("transport")); // M22: pushes Carpool Incentive
   return out;
 }

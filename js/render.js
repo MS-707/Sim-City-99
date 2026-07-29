@@ -1892,6 +1892,9 @@ function minimapCityCol(city, i) {
 const MM_TRAFFIC = [[70, 220, 60], [235, 160, 40], [140, 16, 28]];  // free → amber → dark jam
 const MM_POLL = [[46, 66, 30], [150, 110, 36], [255, 190, 50]];     // clean olive → bright foul amber
 const MM_CRIME = [[34, 18, 30], [140, 40, 90], [255, 96, 190]];     // safe dark → bright red-magenta
+// GP3b: commute distance — near (bright green) → amber → far (dark red);
+// lightness falls monotonically with hops (GQ11 contract, same slope as traffic)
+const MM_COMMUTE = [[70, 220, 60], [235, 160, 40], [140, 16, 28]];
 function mmRamp(t, s) {
   const u = t <= 0 ? 0 : t >= 1 ? 1 : t;
   const k = u < 0.5 ? 0 : 1, f = (u - k * 0.5) * 2;
@@ -1974,6 +1977,21 @@ function renderMinimap(city, mode) {
         const v = city.railCov[i];
         col = `rgb(${20 + v * 0.3 | 0},${60 + v * 0.5 | 0},${90 + v * 0.4 | 0})`;
       } else col = minimapDim(minimapCityCol(city, i), 0.35);
+    } else if (mode === "commute") {
+      // GP3b: O(1) reads per tile (jobDist/jobAccess planes only — never a
+      // nearestRoad probe here). Roads paint their hop distance to the nearest
+      // job gate: slate = no route, yellow = a job gate itself, otherwise the
+      // monotonic-lightness near→far ramp (GQ11). Developed ZR tiles read
+      // their job-access health; everything else keeps dimmed City context.
+      const t = city.over[i];
+      if (t === OV.ROAD || t === OV.WIREROAD) {
+        const d = city.jobDist[i];
+        col = d === 255 ? "#484850"
+          : d === 0 ? "#ffe040"
+          : mmRamp(Math.min(1, d / MAX_COMMUTE), MM_COMMUTE);
+      } else if (t === OV.ZR && city.lvl[i]) {
+        col = city.jobAccess[i] >= jaHealthy(city) ? "#25e8a8" : "#e08030";
+      } else col = minimapDim(minimapCityCol(city, i), 0.35); // G8: keep district context
     } else if (mode === "dist") {
       const dc = city.district[i];
       // districted tiles paint their palette color; everything else keeps the

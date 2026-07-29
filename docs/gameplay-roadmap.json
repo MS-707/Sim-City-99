@@ -165,29 +165,52 @@
       "certified": "2026-07-27 (R2 fix-forward): ship_ready, 12-gate battery all pass on re-run vs fresh 5f7db10 worktree, zero errors, Math.random UNSTUBBED throughout. Runway/noise coherence: airport art re-baked to the world axis via a u/v reflection at odd facings — PCA of runway pixels vs projected world-X axis within 0.87 deg at ALL FOUR rotations (was ~53 deg wrong at r1/r3); sim never reads cam.r (0 matches in comment-stripped source; serialize + noiseCov byte-identical across 4 rotation runs). Noise is a field: measured lateral profile [0,0,0,6,16,24,29,32|mirror] — 5 monotone steps to zero. Failure states visible (panel caught the badges being painter-occluded by the port sprite at 3 of 4 rotations — fix moved them after the sprite draw at its own depth, 2x scaled): unpowered bolt 100/100/100/100 yellow px at all rotations for both port types (was 7/7/25/4), unconnected badge 117 red px, working seaport smokes 289/300 frames, all pairwise distinguishable, night byte-identical portless. Outcome economy vs identical 120-rollover control: seaport +32 IND jobs / +4 developed ZI tiles / 162,880 § cumulative freight (control 0); airport +3 built C tiles / +18 C jobs / 9,900 § tourism; approach-noise directionality proven with control-adjusted strictly-monotone effects (-23.75 < -18.77 < -0.38); DISCLOSED: one harness bin-clause (raw A<B) was amended by the fix pass after PROVING bin B abuts a street whose baseline landv penalty (6.98) exceeds the noise contrast — a measurement confounder, with every originally calibrated clause retained and the user-level gate met (14.0 under approach vs 37.8 off-axis; control 37.75 vs 38.2). Retained gates re-proven: 0 RNG on the port path, portless byte-identity 20/20, reversibility, save v12 round-trip. Sprite audit: differing canvases are EXACTLY the 16 airport f1/f3 bakes; seaport family + zap byte-identical; SPR.noLink the only new key. Perf: tick 0.95x, frame 1.03x."
     },
     {
-      "id": "GP3",
-      "title": "Commute Model & Job Access — Trips That Have a Destination",
+      "id": "GP3a",
+      "title": "Commute Surfaces — Job-Access Field, Commute Stat & Verdicts (read-only)",
       "dimensions": [
         "transport-networks",
         "simulation-depth",
         "economy-progression"
       ],
-      "scope": "This is the north star's central claim and it is promoted from rank 7 because everything ranked below it would otherwise be written against a growth model this replaces. Replace the blind 10-step random walk (recomputeTraffic, js/sim.js:1236-1270) for RESIDENTIAL trips: once per traffic pass, run ONE multi-source BFS over the road + live-rail graph seeded from every road tile serving a developed ZC/ZI, producing jobDist[] (hops to nearest job-serving road, 255 = unreachable). Residential trips then walk DOWN jobDist within a MAX_COMMUTE budget, depositing onto load[] at each step; trips exhausting the budget are 'stranded'. TWO CORRECTIONS the panel proved necessary. (1) A STRICTLY-downhill walk is a tie-break-deterministic shortest path — every trip from a neighbourhood collapses onto one canonical corridor and parallel streets sit at literal zero load, which looks wrong and makes the shipped animated cars (render.js:1188, which favor busy roads) bunch onto stripes. Instead choose among ALL neighbours with jobDist <= current-1, weighted by the seeded traffic sub-stream GP1 provides, so load spreads realistically while staying reproducible. (2) The draft's 'C/I trips keep the legacy walk so the change stays surgical' was false pre-GP1 — the reservoir pick at sim.js:1267 drew from the same global Math.random as the C/I trips, interleaved in one loop, so deleting residential walks would have shifted every subsequent C/I pick. GP1's named per-purpose sub-streams make the claim true and testable; this milestone hard-depends on that. Derive city.avgCommute (mean hops over arriving trips) and city.strandedShare; fold avgCommute into growthPass's residential fit and a mild demand.r damper, and add a minimum-job-reach gate on ZR upgrades above level 1 — registered in GP1's gate table so it ships with its own tile verdict for free. Surface it: a 'Jobs reachable / commute' query row, a Commute minimap overlay with legend, a new history series (normaliseHistory at sim.js:16-22 hardcodes ['pop','funds','net','tax','poll','crime','landv'] and DROPS unknown keys — the draft's claim that it 'already tolerates the new key' is wrong in the direction that silently destroys the series on every load, so that list MUST be edited), an almanac line and advisor commentary. jobDist is derived and rebuilt in the load cascade. Save takes the next ladder integer for avgCommute/strandedShare and the new series.",
+      "scope": "READ-ONLY half of GP3 per S3 (split at launch from pre_split). Build the job-access field (per-tile reachable-jobs measure over the road/rail network), a legible commute statistic surfaced in the UI (status cell / query panel / a graphs series if the history key is extended via normaliseHistory), and gate-table VERDICT rows that show what WILL bind before it does (e.g. JOB_ACCESS_LOW as an advisory row) — all as pure reads. The sim must remain BYTE-IDENTICAL: no growth coupling, no demand coupling, no new serialized state unless a history series is added (then save v13 with backward-compatible loading per the ladder). The field/stat become the proven instrumentation GP3b will couple growth to. Design against the actual recomputeAccess/recomputeTraffic/railNet code; the field must be a rebuild-pass pure function of serialized state (no cursor draws — S-rules), cheap enough to rebuild on the traffic cadence, and rotation-invariant (never reads cam.r).",
+      "player_facing_win": "Before anything changes about growth, you can SEE the commute: hover any tile and read how many jobs it can actually reach over the network you built, watch the citywide commute stat move when you cut a bridge, and get advisory verdicts where access is about to bind.",
+      "quality_gates": [
+        "BYTE-IDENTICAL SIM (S3 hard constraint): 20 seeds x 600 ticks vs the certified f080773 baseline with Math.random UNSTUBBED — 0 differing bytes in all serialized planes, pop/funds/jobs, and save JSON (modulo an added empty history key if v13 is taken; then the stripped-key control must equal baseline exactly).",
+        "The field is honest: on scripted topologies (one bridge, two bridges, severed network) the per-tile job-access values match an independent BFS oracle computed in the harness, and cutting the only bridge drops access on the far shore to the oracle value within one rebuild.",
+        "Read-only proven: the field/stat/verdict path performs zero sim writes and zero RNG draws (write-trap proxy + all-stream counters report 0).",
+        "Surfaces work: the commute stat updates within one traffic cadence of a network edit; query-panel verdict rows appear only where the field is genuinely low (no boxes on healthy or empty tiles); UI additions respect the message-TTL discipline.",
+        "Perf within ~10% of f080773 on developed-128 (the field rides an existing cadence, never per-frame); rotation-invariant (byte-equal field across all 4 cam.r); zero console errors; save round-trips."
+      ],
+      "impact_1_5": 4,
+      "effort_1_5": 3,
+      "priority_rank": 4,
+      "touches_save_format": false,
+      "status": "todo",
+      "split_of": "GP3 (read half; behavior half is GP3b)"
+    },
+    {
+      "id": "GP3b",
+      "title": "Commute Coupling — Trips With Destinations (behavior)",
+      "dimensions": [
+        "transport-networks",
+        "simulation-depth",
+        "economy-progression"
+      ],
+      "scope": "This is the north star's central claim and it is promoted from rank 7 because everything ranked below it would otherwise be written against a growth model this replaces. Replace the blind 10-step random walk (recomputeTraffic, js/sim.js:1236-1270) for RESIDENTIAL trips: once per traffic pass, run ONE multi-source BFS over the road + live-rail graph seeded from every road tile serving a developed ZC/ZI, producing jobDist[] (hops to nearest job-serving road, 255 = unreachable). Residential trips then walk DOWN jobDist within a MAX_COMMUTE budget, depositing onto load[] at each step; trips exhausting the budget are 'stranded'. TWO CORRECTIONS the panel proved necessary. (1) A STRICTLY-downhill walk is a tie-break-deterministic shortest path — every trip from a neighbourhood collapses onto one canonical corridor and parallel streets sit at literal zero load, which looks wrong and makes the shipped animated cars (render.js:1188, which favor busy roads) bunch onto stripes. Instead choose among ALL neighbours with jobDist <= current-1, weighted by the seeded traffic sub-stream GP1 provides, so load spreads realistically while staying reproducible. (2) The draft's 'C/I trips keep the legacy walk so the change stays surgical' was false pre-GP1 — the reservoir pick at sim.js:1267 drew from the same global Math.random as the C/I trips, interleaved in one loop, so deleting residential walks would have shifted every subsequent C/I pick. GP1's named per-purpose sub-streams make the claim true and testable; this milestone hard-depends on that. Derive city.avgCommute (mean hops over arriving trips) and city.strandedShare; fold avgCommute into growthPass's residential fit and a mild demand.r damper, and add a minimum-job-reach gate on ZR upgrades above level 1 — registered in GP1's gate table so it ships with its own tile verdict for free. Surface it: a 'Jobs reachable / commute' query row, a Commute minimap overlay with legend, a new history series (normaliseHistory at sim.js:16-22 hardcodes ['pop','funds','net','tax','poll','crime','landv'] and DROPS unknown keys — the draft's claim that it 'already tolerates the new key' is wrong in the direction that silently destroys the series on every load, so that list MUST be edited), an almanac line and advisor commentary. jobDist is derived and rebuilt in the load cascade. Save takes the next ladder integer for avgCommute/strandedShare and the new series. BEHAVIOR half of GP3 per S3: couple growth/demand to the GP3a job-access field (the DECLARED re-pin of this phase), so where you put housing relative to jobs matters, bottlenecks emerge from topology, and a second crossing measurably drains the first. Growth gates join the GP1a declarative table (verdicts free). Measured by GP3a instrumentation + outcome gates per S5 (built development over a horizon vs control topologies), never instantaneous demand deltas. Comparative scenario winnability per the R1 protocol. Save takes the next ladder version only if new state must persist.",
       "player_facing_win": "Where you put housing relative to jobs finally matters — the one bridge into downtown genuinely carries every trip from the far shore and lights up red, and a second crossing measurably drains it.",
       "quality_gates": [
-        "Spatial sensitivity: identical zone counts in two layouts — housing beside jobs vs housing 40 tiles away across a single bridge — differ in avgCommute by >=2.5x, and the far layout's equilibrium pop is >=25% lower.",
-        "Bottleneck emergence: in the single-bridge layout the bridge tiles land in the top 1% of load[] and appear in the traffic report's top 5; adding a second crossing cuts peak bridge load >=30% and avgCommute >=15%.",
-        "Load is not degenerate: on a uniform grid with 4 equally-short routes to the job mass, no route carries >45% of trips and no route carries <10%; no zero-load street sits adjacent and parallel to a saturated one within 3 tiles.",
-        "Transit substitution and cost: adding a rail line joining the housing mass to the job mass lowers avgCommute and strandedShare measurably with zero new road tiles; a full traffic pass on a fully built 128x128 map (MAP_SIZES is [64,80,128] — the draft's 120x120 does not exist) stays within 1.5x the GP2 baseline pass time and frame rate within 10%.",
-        "Growth-suppression is bounded and scenarios survive: equilibrium pop across 20 seeded reference cities drops no more than 20% vs the GP2 baseline, and all 5 scenarios remain winnable in >=8 of 10 seeded reference playthroughs (Twister Season pop>=4000, Y2K Ready 2500 pop are hard targets calibrated against the old growth economics).",
-        "Determinism/save-compat: same seed + script reproduces identical traffic[], jobDist and avgCommute series over 600 ticks with Math.random unstubbed; the BFS draws zero RNG; the commute series survives a save/load round-trip through the extended normaliseHistory key list; older saves load with jobDist rebuilt in the load cascade and round-trip idempotently."
+        "Topology matters (outcome, S5): over 120 rollovers, a far-shore district connected by ONE bridge builds measurably less than the same district with TWO crossings (thresholds set by design-phase calibration); the second crossing measurably drains load from the first (traffic deltas on both).",
+        "The coupling reads ONLY the GP3a field (single source of truth — no second access computation); growth gates appear as GP1a table rows with truthful verdicts (JOB_ACCESS binding states its number).",
+        "Declared re-pin bounded: pop/funds/jobs across 20 seeds within a declared envelope of the f080773 distribution; comparative scenario winnability >= baseline on every scenario (R1 protocol).",
+        "Determinism UNSTUBBED preserved (byte-identical same-seed runs; save resume reproduces the future); zero RNG on rebuild passes.",
+        "Sim-art coherence (S4): commute pressure is visible (existing traffic rendering + the GP3a stat), failure states legible via verdicts; zero console errors; perf within ~20%."
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 4,
+      "priority_rank": 5,
       "touches_save_format": true,
       "status": "todo",
-      "pre_split": "Split at launch per S3: GP3a = job-access field + commute stat + gate-table verdict rows as READ-ONLY surfaces (byte-identical sim; the verdicts show what WILL bind before it does). GP3b = couple growth/demand to job access (the declared re-pin), measured by GP3a instrumentation + outcome gates per S5."
+      "split_of": "GP3 (behavior half; read half is GP3a)"
     },
     {
       "id": "GP4",
@@ -209,7 +232,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 3,
-      "priority_rank": 5,
+      "priority_rank": 6,
       "touches_save_format": true,
       "status": "todo",
       "launch_note": "Must follow GP3 (the expressway is the ANSWER to visible commute pressure). 4a = expressway class + ramps (sim+art together per S4). 4b = the moving train (presentation; joins the alivenessStats guard, closing its N/A slot)."
@@ -234,7 +257,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 6,
+      "priority_rank": 7,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP5a = visible coverage previews + strain meters (read-only, byte-identical). GP5b = strain scaling + the education payoff (behavior; outcome gates: after 20 sustained years of high education, industrial composition shifts to clean/high-tech, measured by census)."
@@ -259,7 +282,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 3,
-      "priority_rank": 7,
+      "priority_rank": 8,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -283,7 +306,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 8,
+      "priority_rank": 9,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP7a = the assessed-value SHADOW ledger — show what taxes WOULD be under assessed valuation next to actual, read-only, byte-identical. GP7b = the cutover + debt ladder + stabilizer, measured against GP7a projections."
@@ -308,7 +331,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 5,
-      "priority_rank": 9,
+      "priority_rank": 10,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP8a = the risk readout (per-tile hazard odds from coverage/pollution/plant age; read-only; its honesty gate = empirical disaster rates over a long soak match the displayed odds). GP8b = coupled hazard rates + the emergency-response allowance (behavior)."
@@ -333,7 +356,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 10,
+      "priority_rank": 11,
       "touches_save_format": true,
       "status": "todo",
       "launch_note": "Waste chain per original M31 design; S4 applies — garbage must be visible (landfill fill states, truck traffic on load[])."
@@ -358,7 +381,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 11,
+      "priority_rank": 12,
       "touches_save_format": true,
       "status": "todo",
       "launch_note": "Last: consumes strain/blight substrates from GP5/GP6. S4: blight must be visible tile-by-tile, and the renewal campaign paints visibly back."

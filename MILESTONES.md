@@ -6,13 +6,10 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- ⏸ **Phase 0 — reconcile the branch** (plan v2, 2026-07-27). The branch
-  carries two live-but-uncertified layers above the last certified ship
-  (GP1a): the GP1b seeded substrate (save v12, 7/9 gates, blocked on two
-  mis-drafted gates) and GP2's port wiring (5/10 gates, 3 high fidelity
-  defects). **R1 is DONE** (GP1b certified & shipped; v12 is the official baseline). **R2** — the GP2 fix-forward — is running. No new milestone launches until Phase 0 closes. Full plan,
-  baseline ledger and the eight scaffolding rules (S1–S8) live in
-  `docs/gameplay-roadmap.json`.
+- ✅ **Phase 0 CLOSED** (R1 + R2 done, 2026-07-27): the tree is fully
+  reconciled — no live-but-uncertified layers. Certified through GP2; the
+  artifact reflects the certified tree. The 20-minute cron loop resumes with
+  GP3a next (commute surfaces, read-first split per S3).
 
 ## Open
 
@@ -91,6 +88,24 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP2 — Working Ports** *(gameplay roadmap 3/11, certified via R2
+  fix-forward)*: the airport and seaport are **real economic engines now**. A
+  working seaport grows measurably more industry (+32 jobs, +4 developed
+  tiles vs an identical 120-rollover control) and pays cumulative freight
+  revenue (162,880§ where the control earns 0); a working airport grows
+  commerce and tourism — while its **noise shadow falls where the runway
+  actually points at all four rotations** (art re-baked to the world axis,
+  within 0.87° everywhere; it was ~53° wrong at two rotations), fading as a
+  measured 5-step field. Failure states are finally visible: a dead port
+  shows a scaled power bolt (the panel caught the badge being painter-occluded
+  at 3 of 4 rotations — fixed), an unconnected one shows a no-link badge and
+  the query panel names the missing prerequisite, and a working seaport
+  smokes like the point source it is. Portless cities remain byte-identical
+  to baseline 20/20; zero RNG on the port path; save v12 round-trips. One
+  harness bin-clause was amended after proving a street-baseline confounder —
+  disclosed in the roadmap with control measurements; the user-level gate is
+  met outright.
 
 - [x] **GP1b — Seeded Simulation Substrate** *(gameplay roadmap 2/11, certified
   via R1 with user-approved amended gates)*: determinism is finally **real** —

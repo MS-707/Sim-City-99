@@ -3061,37 +3061,53 @@ function buildSprites() {
     // ---- Airport (4x4): tarmac slab, marked runway, glass-band terminal,
     //      control tower with teal cab (>=70px over the N corner), parked
     //      aircraft + windsock; runway edge lights on the glow layer ----
+    // GP2 R2: the noise cone (stampAirportNoise) runs along WORLD X, which
+    // projects to screen slope +1/2 at even cam.r but -1/2 at odd cam.r. The
+    // runway art must track it, so at odd BR every roof-plane point goes
+    // through A (a u/v swap = reflection about the sprite's vertical
+    // centerline — ruv keeps swapped points inside the (w+h)*HW canvas) and
+    // box corners through boxUV (relabeled so N stays topmost / E rightmost,
+    // preserving prismFrom's screen-welded SW/SE sun shading, M32b). Both are
+    // identity at even BR, so facings 0 and 2 stay byte-identical. Pure
+    // geometry — ZERO RNG draws, so every downstream bake is untouched.
     airport = withNight(4, 4, 90, (g, ox, oy) => {
       const foot = corners(ox, oy, 4, 4);
       const rc = [ox, (foot.N[1] + foot.S[1]) / 2];
+      const odd = (BR & 1) === 1;
+      const A = (c, u, v) => odd ? ruv(c, v, u) : ruv(c, u, v);
+      const boxUV = (c, hu, hv) => odd
+        ? { N: ruv(c, -hv, -hu), E: ruv(c, hv, -hu), S: ruv(c, hv, hu), W: ruv(c, -hv, hu) }
+        : { N: ruv(c, -hu, -hv), E: ruv(c, hu, -hv), S: ruv(c, hu, hv), W: ruv(c, -hu, hv) };
       poly(g, [foot.N, foot.E, foot.S, foot.W], "#3e4148", "rgba(0,0,0,.35)");
       const q = (u0, u1, v0, v1, fill) =>
-        poly(g, [ruv(rc, u0, v0), ruv(rc, u1, v0), ruv(rc, u1, v1), ruv(rc, u0, v1)], fill);
+        poly(g, [A(rc, u0, v0), A(rc, u1, v0), A(rc, u1, v1), A(rc, u0, v1)], fill);
       q(-20, 16, -22, -10, "#4a4e57"); // concrete apron by the terminal
-      q(-27, 27, 6, 15, "#33363d");    // the runway strip (long W->E diagonal)
+      q(-27, 27, 6, 15, "#33363d");    // the runway strip (long world-X diagonal)
       g.strokeStyle = "#f2f2f4"; g.lineWidth = 2;
       for (const ue of [-25, 25]) // painted threshold bars at both ends
         for (let k = 0; k < 4; k++) {
-          const a = ruv(rc, ue, 7 + k * 2), b = ruv(rc, ue + (ue < 0 ? 2 : -2), 7 + k * 2);
+          const a = A(rc, ue, 7 + k * 2), b = A(rc, ue + (ue < 0 ? 2 : -2), 7 + k * 2);
           g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
         }
       for (let u = -20; u <= 18; u += 5) { // dashed centerline
-        const a = ruv(rc, u, 10.5), b = ruv(rc, u + 2.4, 10.5);
+        const a = A(rc, u, 10.5), b = A(rc, u + 2.4, 10.5);
         g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
       }
       g.strokeStyle = "#e8c33a"; g.lineWidth = 1.5; // yellow taxiway line
-      const t0 = ruv(rc, -6, -10), t1 = ruv(rc, -6, 6);
+      const t0 = A(rc, -6, -10), t1 = A(rc, -6, 6);
       g.beginPath(); g.moveTo(t0[0], t0[1]); g.lineTo(t1[0], t1[1]); g.stroke();
       // glass-band terminal prism along the N edge
-      const tc = ruv(rc, -2, -16);
-      const tcn = { N: ruv(tc, -14, -4), E: ruv(tc, 14, -4), S: ruv(tc, 14, 4), W: ruv(tc, -14, 4) };
+      const tc = A(rc, -2, -16);
+      const tcn = boxUV(tc, 14, 4);
       prismFrom(g, tcn, 18, "#b9bfc8");
       windows(g, up(tcn.W, 0), up(tcn.S, 0), 18, 1, 6, 0.7, "#4fd4e4", "#1b3f46", "#49e0f0", 0.8);
       windows(g, up(tcn.S, 0), up(tcn.E, 0), 18, 1, 4, 0.7, "#4fd4e4", "#1b3f46", "#49e0f0", 0.8);
       g.strokeStyle = "#2ec8dc"; g.lineWidth = 2.5; // SIGNATURE teal fascia band
       g.beginPath(); g.moveTo(...up(tcn.W, 14)); g.lineTo(...up(tcn.S, 14)); g.lineTo(...up(tcn.E, 14)); g.stroke();
       // control tower: thin shaft + wide teal glass cab + rotating beacon
-      const bx = ox - 28, by = rc[1] - 16;
+      // (screen-space furniture: repositioned across the centerline at odd
+      // facings, silhouette itself untouched)
+      const bx = ox + (odd ? 28 : -28), by = rc[1] - 16;
       g.fillStyle = "#cdd2d8"; g.fillRect(bx - 3.5, by - 100, 7, 100);
       g.fillStyle = "#aab0b8"; g.fillRect(bx - 3.5, by - 100, 3, 100);
       g.fillStyle = "#9aa0a8"; g.fillRect(bx - 7, by - 104, 14, 5);   // collar
@@ -3107,20 +3123,22 @@ function buildSprites() {
       g.fillStyle = "#ff5a5a"; g.beginPath(); g.arc(bx, by - 128, 2, 0, 7); g.fill();
       glowDot(bx, by - 128, 4, "#ff8a8a");
       glowDot(bx, by - 110, 8, "#49e0f0"); // lit cab
-      // parked white aircraft silhouette on the apron
-      const px0 = ox + 68, py0 = rc[1] - 4;
+      // parked white aircraft silhouette on the apron (anchored on the
+      // swapped apron at odd facings, x-deltas mirrored to match)
+      const sx = odd ? -1 : 1;
+      const px0 = ox + sx * 68, py0 = rc[1] - 4;
       g.fillStyle = "#f2f4f6";
-      g.beginPath(); g.ellipse(px0, py0, 9, 2.6, 0.46, 0, 7); g.fill();
-      poly(g, [[px0 - 2, py0 - 5], [px0 + 3, py0 + 4], [px0 - 1, py0 + 5], [px0 - 6, py0 - 4]], "#e4e8ec");
-      poly(g, [[px0 - 8, py0 - 6], [px0 - 4, py0 - 3], [px0 - 9, py0 - 1]], "#cdd3da");
+      g.beginPath(); g.ellipse(px0, py0, 9, 2.6, sx * 0.46, 0, 7); g.fill();
+      poly(g, [[px0 - 2 * sx, py0 - 5], [px0 + 3 * sx, py0 + 4], [px0 - 1 * sx, py0 + 5], [px0 - 6 * sx, py0 - 4]], "#e4e8ec");
+      poly(g, [[px0 - 8 * sx, py0 - 6], [px0 - 4 * sx, py0 - 3], [px0 - 9 * sx, py0 - 1]], "#cdd3da");
       // orange windsock at the runway threshold
-      const wsk = ruv(rc, -24, 3);
+      const wsk = A(rc, -24, 3);
       g.strokeStyle = "#d8dade"; g.lineWidth = 1.2;
       g.beginPath(); g.moveTo(wsk[0], wsk[1]); g.lineTo(wsk[0], wsk[1] - 12); g.stroke();
       poly(g, [[wsk[0], wsk[1] - 12], [wsk[0] + 9, wsk[1] - 10], [wsk[0], wsk[1] - 7]], "#ff7a1a");
       // runway edge lights, both rows, on the glow layer only
       for (let u = -24; u <= 24; u += 6) {
-        const a = ruv(rc, u, 5.6), b = ruv(rc, u, 15.4);
+        const a = A(rc, u, 5.6), b = A(rc, u, 15.4);
         glowDot(a[0], a[1], 1.4, "#ffe9a0");
         glowDot(b[0], b[1], 1.4, "#ffe9a0");
       }
@@ -3371,6 +3389,25 @@ function buildSprites() {
     g.lineTo(13, 9); g.lineTo(9, 9); g.closePath();
     g.fill(); g.stroke();
     return { c, ox: 8, oy: 22 };
+  })();
+
+  // ---- GP2 R2: "no link" badge — a POWERED port with no road/rail
+  // connection (portWork false while powered true). Mutually exclusive with
+  // the zap, which keys on !powered. Deterministic geometry, zero RNG: a
+  // severed road stub under a red interdiction ring + diagonal bar. ----
+  SPR.noLink = (() => {
+    const c = document.createElement("canvas"); c.width = 22; c.height = 22;
+    const g = c.getContext("2d");
+    g.fillStyle = "#f2f2f2"; // light disc so the ring reads at night too
+    g.beginPath(); g.arc(11, 11, 10, 0, 7); g.fill();
+    g.fillStyle = "#565b62"; // grey road stub, broken in the middle
+    g.fillRect(3, 9, 6, 4); g.fillRect(13, 9, 6, 4);
+    g.fillStyle = "#e8e5d8"; // lane dashes on the stubs
+    g.fillRect(4.5, 10.5, 2, 1); g.fillRect(15.5, 10.5, 2, 1);
+    g.strokeStyle = "#e23b2e"; g.lineWidth = 2.5; // signature interdiction red
+    g.beginPath(); g.arc(11, 11, 8.6, 0, 7); g.stroke();
+    g.beginPath(); g.moveTo(4.9, 4.9); g.lineTo(17.1, 17.1); g.stroke();
+    return { c, ox: 11, oy: 26 }; // hovers above the anchor tile like the zap
   })();
 
   /* ---- GQ9: suspension-bridge towers ----

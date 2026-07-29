@@ -916,6 +916,31 @@ function renderFrame(city, uiState, clearBG) {
                 if (spr.night && city.powered[a] && !afire)
                   nightAdd(spr.night, awx, awy);
               }
+              // GP2 R2 fix (S4): port failure indicators draw HERE — after
+              // the sprite, at the trigger corner's painter depth. The old
+              // anchor-tile draw was occluded at cam.r 0/1/3: the anchor's
+              // diagonal paints first, then the front-corner sprite drew
+              // over the bolt, leaving a dark terminal nearly invisible by
+              // day. The bolt is scaled 2x so it reads at 3x3/4x4 terminal
+              // scale; nearest-neighbour scaling keeps the exact #ffd800.
+              // Hover point is the anchor's own world tile, so it tracks
+              // all 4 rotations for free. Zap keys on !powered, the noLink
+              // badge on powered && !portWork (= unconnected) — mutually
+              // exclusive, and both blink-gated like every other bolt.
+              if (blink && isPort(ov)) {
+                const zx = worldX(ax, ay), zy = worldY(ax, ay);
+                if (!city.powered[a]) {
+                  const sm = ctx.imageSmoothingEnabled;
+                  ctx.imageSmoothingEnabled = false;
+                  ctx.drawImage(SPR.zap.c,
+                    zx - SPR.zap.ox * 2, zy - SPR.zap.oy * 2 - 4,
+                    SPR.zap.c.width * 2, SPR.zap.c.height * 2);
+                  ctx.imageSmoothingEnabled = sm;
+                } else if (!city.portWork[a]) {
+                  ctx.drawImage(SPR.noLink.c,
+                    zx - SPR.noLink.ox, zy - SPR.noLink.oy - 4);
+                }
+              }
             }
           }
         }
@@ -957,14 +982,17 @@ function renderFrame(city, uiState, clearBG) {
       }
 
       // blinking "no power" bolt on developed but unpowered zones / civics.
-      // GP2: AIRPORT/SEAPORT join the list. Before GP2 a terminal's power state
-      // was inert, so the omission was correct; now a dark terminal earns §0,
-      // adds no demand and moves no freight, and the map has to say so as
-      // loudly as it does for a dark schoolhouse.
+      // GP2: a dark PORT terminal earns §0, adds no demand and moves no
+      // freight, and the map says so as loudly as for a dark schoolhouse —
+      // but the port bolt (and the powered-but-unconnected noLink badge)
+      // draws in the multi-tile trigger block above, AFTER the sprite: an
+      // anchor-tile draw here gets painted over by the front-corner sprite
+      // at cam.r 0/1/3 (GP2 R2 S4 fix), because the anchor's diagonal
+      // paints before the footprint's front corner.
       if (blink && !city.powered[i] &&
           ((ov >= OV.ZR && ov <= OV.ZI && city.lvl[i] > 0) ||
            ov === OV.POLICE || ov === OV.FIRESTA ||
-           ov === OV.SCHOOL || ov === OV.HOSPITAL || isPort(ov))) {
+           ov === OV.SCHOOL || ov === OV.HOSPITAL)) {
         if (city.anc[i] === -1 || city.anc[i] === i)
           ctx.drawImage(SPR.zap.c, wx - SPR.zap.ox, wy - SPR.zap.oy - 4);
       }

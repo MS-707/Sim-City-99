@@ -2404,11 +2404,8 @@ class City {
      X axis in BOTH directions from the footprint edge, half-width
      NOISE_HALF0 + NOISE_HALF_K*d around the footprint's centre row, axial
      potency (NOISE_LEN - d) * NOISE_K, max-combined and clamped 255. It never
-     reads cam.r — rotating the camera must not move the model (M32a/b). (The
-     shipped airport SPRITE bakes its runway on a fixed SCREEN diagonal at every
-     facing, so the cone cannot align visually at all four rotations; that is
-     pre-existing sprite behaviour and is documented, not "fixed" by rotating
-     the sim.) .fill(0) + rebuild from over[]/portWork each recomputeMaps, so a
+     reads cam.r — rotating the camera must not move the model (M32a/b).
+     .fill(0) + rebuild from over[]/portWork each recomputeMaps, so a
      bulldozed or stalled airport reverts its land-value scar in one pass.
 
      It is a FIELD, not a stencil. Two shaping terms keep the stamp from reading

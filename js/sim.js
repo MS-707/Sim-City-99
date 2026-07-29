@@ -10,15 +10,18 @@ const MAP_SIZES = [64, 80, 128];                   // sizes offered by the splas
 // and every indexing site stays consistent with the city that owns the world.
 function setMapSize(n) { MAP = n; }
 
-// M30: guarantee the history ring-buffer has all seven arrays. Any missing key
+// M30: guarantee the history ring-buffer has all its arrays. Any missing key
 // (a pre-M30 v10 save, whose history has only pop/funds) becomes []. Copies each
 // array so the loaded city owns its own buffers. Used by City.deserialize.
 // GP1b LADDER RULE: the key list below is HARDCODED and unknown keys are
 // DROPPED — any later milestone that adds a history key MUST extend it here.
+// GP3a (save v13): "commute" is appended LAST, so the seven v12 keys stay a
+// stable prefix of the serialized JSON and a v12 save loads with commute=[]
+// (records forward from the first post-load rollover — the M30 idiom).
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
-  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv"])
+  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute"])
     out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
   return out;
 }
@@ -913,6 +916,16 @@ function computeNeighbors(seed) {
    upgrade in the same visit. */
 const P_MIN = 0.005;        // below this an "odds" gate reads as effectively nil
 const GRIDLOCK_P = 0.07;    // per-check chance a gridlocked lvl>1 lot sheds a level
+/* GP3a: commute-surface thresholds. A residential block is "commute-healthy"
+   when the job mass its street network can reach (city.jobAccess, rebuilt by
+   recomputeJobAccess on the traffic cadence) covers at least JA_LOW_SHARE of
+   the citywide job total. JA_MIN_CITY_JOBS keeps the advisory silent in
+   empty/young towns where "half of nothing" would nag every lot. Both are
+   READ-ONLY inputs to the advisory table + HUD stat — the sim never reads
+   them (or jobAccess), so no growth/RNG path can move. */
+const JA_LOW_SHARE = 0.5;      // healthy = reach >= ceil(0.5 * citywide jobs)
+const JA_MIN_CITY_JOBS = 50;   // advisory floor: below this the city is too young to judge
+function jaHealthy(c) { return Math.ceil(JA_LOW_SHARE * c.jobs); }
 
 const ZONE_WORD = { [OV.ZR]: "residential", [OV.ZC]: "commercial", [OV.ZI]: "industrial" };
 const SVC_LABEL = { [OV.POLICE]: "Police station", [OV.FIRESTA]: "Fire station",
@@ -1160,18 +1173,54 @@ const INFRA_GATES = Object.freeze([
       ["Net", "§" + (r.rev - r.cost) + "/mo"]]; } },
 ]);
 
+/* GP3a: ADVISORY verdicts — a SEPARATE table walked ONLY by diagnoseTile
+   (the gridlock-escalation precedent: a panel annotation, never a growth row).
+   CRITICAL DISCIPLINE: these rows must NEVER join GROWTH_GATES — firstGate is
+   the unfiltered walk growthPass uses to pick the row whose `apply` spends the
+   growth cursor, so any matching row inserted there would shift the RNG stream
+   (an S3 violation). An advisory row attaches ALONGSIDE the primary verdict
+   (v.advisories), so the panel can never disagree with growthPass about the
+   binding row. `test` reads only jobAccess/jobs/over + nearestRoad — no RNG,
+   no writes. The predicate below is the exact machine-checkable definition of
+   "genuinely low job access" (over===ZR && nearestRoad>=0 && jobs>=50 &&
+   jobAccess<ceil(0.5*jobs)). */
+const ADVISORY_GATES = Object.freeze([
+  { code: "JOB_ACCESS_LOW", sev: "warn", label: "Few jobs in reach", advisory: true,
+    test: (c, i) => c.over[i] === OV.ZR && c.nearestRoad(i) >= 0 &&
+                    c.jobs >= JA_MIN_CITY_JOBS && c.jobAccess[i] < jaHealthy(c),
+    text: (c, i) => `This block can reach ${c.jobAccess[i]} of the city's ${c.jobs} jobs ` +
+      `over the streets you built — commutes here WILL bind growth once GP3b lands.`,
+    evid: (c, i) => [["Jobs reachable", c.jobAccess[i]], ["Citywide", c.jobs],
+                     ["Healthy line", jaHealthy(c)]] },
+]);
+
 // short label for a verdict code (status-bar hover readout) — a pure lookup, so
 // the caller never pays a second diagnoseTile walk to get it
 const GATE_LABEL = (() => {
   const m = Object.create(null);
   for (const r of GROWTH_GATES) m[r.code] = r.label;
   for (const r of INFRA_GATES) m[r.code] = r.label;
+  for (const r of ADVISORY_GATES) m[r.code] = r.label; // GP3a
   return Object.freeze(m);
 })();
 
 // demand clamp — module scope so recomputeDemand and demandBreakdown share ONE
 // definition (it used to be a hoisted function inside recomputeDemand)
 function clampD(v) { return Math.max(-1, Math.min(1, v)); }
+
+/* GP3a PERF: nearestRoad's probe ring, flattened to (sx, dy) pairs in the
+   EXACT order the original nested loops visited them (r=1..3, dy=-r..r, -dx
+   before +dx). 24 pairs; the transcription is mechanical so the first-match
+   tile — the tie-break every caller depends on — cannot move. */
+const NEAR_ROAD_OFF = (() => {
+  const o = [];
+  for (let r = 1; r <= 3; r++)
+    for (let dy = -r; dy <= r; dy++) {
+      const dx = r - Math.abs(dy);
+      for (const sx of dx === 0 ? [0] : [-dx, dx]) o.push(sx, dy);
+    }
+  return Int32Array.from(o);
+})();
 
 class City {
   constructor(seed, size = 80) {
@@ -1249,6 +1298,22 @@ class City {
        overwhelmingly common case), while still guaranteeing that the LAST
        airport's scar is cleared on the very next pass. */
     this._noiseAny = false;
+    /* GP3a: the job-access field. jobAccess[i] = total zone jobs the street
+       network serving tile i can reach (0 off-grid). FULLY DERIVED — rebuilt
+       by recomputeJobAccess() on the traffic cadence and NEVER serialized
+       (landmarkCov/railCov policy: reverts on rebuild). The sim NEVER reads
+       it: only the query panel / HUD / advisory table do. _jaComp/_jaStack are
+       the flood-fill scratch (the _railStack idiom — preallocated, never
+       serialized, never shared with any other pass); the small per-component
+       buffers (_jaUF/_jaLive/_jaNetComp/_jaJobs) are grown-only caches
+       allocated inside the pass. commutePct is the citywide ephemeral scalar
+       (-1 = "no residents", UI prints an em-dash); commuteJobsMean is the
+       pop-weighted mean jobs-reachable (one decimal, legend/query use). */
+    this.jobAccess = new Int32Array(n);
+    this._jaComp = new Int32Array(n);
+    this._jaStack = new Int32Array(n);
+    this.commutePct = -1;
+    this.commuteJobsMean = 0;
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
     // M19: build year of the power plant anchored at each tile (0 = no plant
     // here). Only meaningful at anchor tiles; drives the aging capacity curve.
@@ -1281,9 +1346,11 @@ class City {
     // M30: the monthly history ring-buffer. pop/funds are the original two
     // traces; net/tax copy lastBudget each month; poll/crime/landv are the
     // diffuse-map citywide aggregates (cityIndex over recomputeMaps' fields).
-    // All seven are pushed together and trimmed in lockstep in collectBudget()
-    // so they stay index-aligned to the same month. Serialized wholesale.
-    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [] };
+    // GP3a (save v13): commute samples commutePct — appended LAST so the seven
+    // v12 keys stay a stable JSON prefix. All eight are pushed together and
+    // trimmed in lockstep in collectBudget() so they stay index-aligned to the
+    // same month. Serialized wholesale.
+    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
@@ -1947,18 +2014,19 @@ class City {
 
   // ---------- traffic ----------
   // nearest road tile within manhattan distance 3 (matches access BFS reach)
+  // GP3a PERF: the probe ring is precomputed ONCE (module scope, below the
+  // class) in the EXACT order the original nested loops walked it — r=1..3,
+  // dy=-r..r, then -dx before +dx — so the returned tile (and therefore every
+  // byte of the traffic walk) is identical, while the per-call [-dx, dx]
+  // array allocations are gone. Load-bearing since recomputeJobAccess probes
+  // every tile on the traffic cadence (~16k calls/pass at 128x128).
   nearestRoad(i) {
-    const x = i % MAP, y = (i / MAP) | 0;
-    for (let r = 1; r <= 3; r++) {
-      for (let dy = -r; dy <= r; dy++) {
-        const dx = r - Math.abs(dy);
-        for (const sx of dx === 0 ? [0] : [-dx, dx]) {
-          const X = x + sx, Y = y + dy;
-          if (!this.inMap(X, Y)) continue;
-          const j = Y * MAP + X;
-          if (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) return j; // M26: crossing counts as road
-        }
-      }
+    const x = i % MAP, y = (i / MAP) | 0, ov = this.over;
+    for (let k = 0; k < NEAR_ROAD_OFF.length; k += 2) {
+      const X = x + NEAR_ROAD_OFF[k], Y = y + NEAR_ROAD_OFF[k + 1];
+      if (X < 0 || Y < 0 || X >= MAP || Y >= MAP) continue;
+      const j = Y * MAP + X;
+      if (ov[j] === OV.ROAD || ov[j] === OV.WIREROAD) return j; // M26: crossing counts as road
     }
     return -1;
   }
@@ -2068,6 +2136,145 @@ class City {
         ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i] * wearMul) * seasonMul * 0.5)
         : 0;
     }
+  }
+
+  /* ---------- job-access field (GP3a) ----------
+     A REBUILD pass in the recomputePorts house style: a pure function of
+     serialized state (over[]/lvl[]/rail[] + the powered[]-derived stationLive/
+     railNet recomputeRail already rebuilt this tick), ZERO RNG (no cursor
+     draws, no rngHash), ascending-index iteration only, never reads cam.r.
+     It writes ONLY jobAccess, the _ja* scratch and commutePct/commuteJobsMean
+     — no plane the sim reads — so the tick byte-stream is untouched (S3).
+     Algorithm (this exact spec is the harness oracle):
+       1. road components: one O(n) ascending-scan 4-connectivity flood fill
+          over ROAD/WIREROAD tiles (recomputeRail step 1, on the over[] plane,
+          explicit Int32 stack) -> _jaComp[i] (component id, -1 elsewhere);
+       2. rail fusion: deterministic union-find over road-component ids
+          (path-halving, union-by-LOWER-id so the result is order-independent).
+          For each rail component with >= 2 LIVE stations, union every road
+          component 4-adjacent to any of its live stations (stations scanned in
+          ascending index) — two shores linked only by an open metro line
+          become ONE commute-shed. Reads only the derived rail fields, up to
+          ~10 ticks stale after a rail edit (the power cadence) — deterministic
+          and NEVER "fixed" by calling recomputeRail here (that emits the Metro
+          ticker and re-runs coverage: sim writes);
+       3. job mass per union root: for each developed ZC/ZI tile, its
+          COM_JOB/IND_JOB (deliberately ZONE jobs only — the same tables
+          computeDemandParts sums; port/arco jobs are excluded) is credited to
+          the root of the component its nearestRoad() (the existing radius-3
+          probe, matching the access BFS reach) belongs to;
+       4. per-tile assignment jobAccess[i] = rootJobs[root of nearestRoad(i)]
+          (0 off-grid), plus the citywide stat in the same pass: commutePct =
+          % of RES_POP on developed ZR tiles whose jobAccess clears
+          jaHealthy(this), or -1 with no residents (jobs is last
+          recomputeDemand's census — over[]/lvl[] haven't moved since).
+     Integer job sums only, so a rebuild is byte-stable across engines.
+     Cost: two O(n) scans + one O(n) * nearestRoad(<=24 probes) pass — the
+     order of one recomputeTraffic. Runs ONLY on the traffic cadence (tick %5)
+     and in the load cascade: never per-frame, never from the UI (bakes are
+     cached; staleness is bounded at 5 ticks). */
+  recomputeJobAccess() {
+    const n = MAP * MAP;
+    const comp = this._jaComp, stack = this._jaStack;
+    comp.fill(-1);
+    // 1. road-component flood fill (ascending scan, explicit stack). The four
+    //    neighbour probes are unrolled (recomputeRail's [dx,dy] tuple loop
+    //    allocates per node — fine on the rare rail cadence, not on this one).
+    const ov = this.over;
+    const isRd = (j) => ov[j] === OV.ROAD || ov[j] === OV.WIREROAD;
+    let cid = 0;
+    for (let s = 0; s < n; s++) {
+      if (!isRd(s) || comp[s] !== -1) continue;
+      let sp = 0;
+      stack[sp++] = s; comp[s] = cid;
+      while (sp > 0) {
+        const i = stack[--sp];
+        const x = i % MAP, y = (i / MAP) | 0;
+        let j;
+        if (x + 1 < MAP && isRd(j = i + 1) && comp[j] === -1) { comp[j] = cid; stack[sp++] = j; }
+        if (x > 0 && isRd(j = i - 1) && comp[j] === -1) { comp[j] = cid; stack[sp++] = j; }
+        if (y + 1 < MAP && isRd(j = i + MAP) && comp[j] === -1) { comp[j] = cid; stack[sp++] = j; }
+        if (y > 0 && isRd(j = i - MAP) && comp[j] === -1) { comp[j] = cid; stack[sp++] = j; }
+      }
+      cid++;
+    }
+    // union-find over road-component ids (grown-only cached buffer)
+    if (!this._jaUF || this._jaUF.length < cid) this._jaUF = new Int32Array(Math.max(cid, 16));
+    const uf = this._jaUF;
+    for (let k = 0; k < cid; k++) uf[k] = k;
+    const find = (x) => { while (uf[x] !== x) { uf[x] = uf[uf[x]]; x = uf[x]; } return x; };
+    const union = (a, b) => { a = find(a); b = find(b); if (a !== b) { if (a < b) uf[b] = a; else uf[a] = b; } };
+    // 2. rail fusion: live-station count per rail component, then union the
+    //    road components touching each qualifying component's live stations
+    let nNet = 0;
+    for (let i = 0; i < n; i++)
+      if (this.rail[i] === RL.STATION && this.railNet[i] >= nNet) nNet = this.railNet[i] + 1;
+    if (nNet > 0) {
+      if (!this._jaLive || this._jaLive.length < nNet) this._jaLive = new Int32Array(Math.max(nNet, 16));
+      if (!this._jaNetComp || this._jaNetComp.length < nNet) this._jaNetComp = new Int32Array(Math.max(nNet, 16));
+      const live = this._jaLive, netComp = this._jaNetComp;
+      live.fill(0, 0, nNet); netComp.fill(-1, 0, nNet);
+      for (let i = 0; i < n; i++) if (this.stationLive[i] === 1) live[this.railNet[i]]++;
+      for (let i = 0; i < n; i++) {
+        if (this.stationLive[i] !== 1) continue;
+        const net = this.railNet[i];
+        if (live[net] < 2) continue;
+        const x = i % MAP, y = (i / MAP) | 0;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const rc = comp[this.idx(X, Y)];
+          if (rc < 0) continue;
+          if (netComp[net] < 0) netComp[net] = rc;
+          else union(netComp[net], rc);
+        }
+      }
+    }
+    // 3. job mass per root (integer sums; zone jobs only — see block comment)
+    if (!this._jaJobs || this._jaJobs.length < cid) this._jaJobs = new Int32Array(Math.max(cid, 16));
+    const rootJobs = this._jaJobs;
+    rootJobs.fill(0, 0, cid);
+    for (let i = 0; i < n; i++) {
+      const t = this.over[i];
+      if ((t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0) continue;
+      const j = this.nearestRoad(i);
+      if (j < 0) continue;
+      rootJobs[find(comp[j])] += t === OV.ZC ? COM_JOB[this.lvl[i]] : IND_JOB[this.lvl[i]];
+    }
+    // 4. per-tile assignment + the citywide stat in the same pass. PERF: an
+    //    interior tile (3 tiles clear of every edge) probes the SAME ring as
+    //    nearestRoad via precomputed index deltas — identical offsets in the
+    //    identical order, so the first hit (the tie-break) cannot differ; only
+    //    border tiles pay the bounds-checked method. ~16k probes/pass stay
+    //    ~1 ms at 128x128, the C5 budget.
+    const off = NEAR_ROAD_OFF;
+    const didx = this._jaDidx || (this._jaDidx = new Int32Array(off.length >> 1));
+    for (let k = 0; k < off.length; k += 2) didx[k >> 1] = off[k + 1] * MAP + off[k];
+    const healthy = jaHealthy(this);
+    const over = this.over, lvl = this.lvl, out = this.jobAccess;
+    let totRes = 0, okRes = 0, wSum = 0;
+    for (let y = 0; y < MAP; y++) {
+      const yIn = y >= 3 && y < MAP - 3;
+      for (let x = 0; x < MAP; x++) {
+        const i = y * MAP + x;
+        let j = -1;
+        if (yIn && x >= 3 && x < MAP - 3) {
+          for (let k = 0; k < didx.length; k++) {
+            const q = i + didx[k], t = over[q];
+            if (t === OV.ROAD || t === OV.WIREROAD) { j = q; break; }
+          }
+        } else j = this.nearestRoad(i);
+        const ja = j >= 0 ? rootJobs[find(comp[j])] : 0;
+        out[i] = ja;
+        if (over[i] === OV.ZR && lvl[i] > 0) {
+          const p = RES_POP[lvl[i]];
+          totRes += p; wSum += p * ja;
+          if (ja >= healthy) okRes += p;
+        }
+      }
+    }
+    this.commutePct = totRes ? Math.round(100 * okRes / totRes) : -1;
+    this.commuteJobsMean = totRes ? Math.round(wSum * 10 / totRes) / 10 : 0;
   }
 
   /* ---- road wear (M23) ----
@@ -2850,15 +3057,33 @@ class City {
         text += ` Gridlock outweighs it: at ${gPct(gCong(this, i, k))}% congestion this lot has a ` +
           `~${gOdds(GRIDLOCK_P)}% chance of LOSING a level every check.`;
       }
-      return { code: row.code, severity, text, evidence: row.evid(this, i, k), gridlock };
+      return this._attachAdvisories(i,
+        { code: row.code, severity, text, evidence: row.evid(this, i, k), gridlock });
     }
     for (let g = 0; g < INFRA_GATES.length; g++) {
       const row = INFRA_GATES[g];
       if (!row.test(this, i)) continue;
-      return { code: row.code, severity: row.sev, text: row.text(this, i),
-               evidence: row.evid(this, i), gridlock: false };
+      return this._attachAdvisories(i,
+        { code: row.code, severity: row.sev, text: row.text(this, i),
+          evidence: row.evid(this, i), gridlock: false });
     }
     return null;
+  }
+
+  /* GP3a: walk ADVISORY_GATES (never GROWTH_GATES — see the table comment) and
+     attach any matching rows as v.advisories, LEAVING the primary verdict/row
+     selection untouched. Empty array omitted, so a tile with no advisory keeps
+     the exact pre-GP3a verdict shape. Pure read: no RNG, no writes. */
+  _attachAdvisories(i, v) {
+    let out = null;
+    for (let g = 0; g < ADVISORY_GATES.length; g++) {
+      const row = ADVISORY_GATES[g];
+      if (!row.test(this, i)) continue;
+      (out || (out = [])).push({ code: row.code, severity: row.sev,
+        text: row.text(this, i), evidence: row.evid(this, i) });
+    }
+    if (out) v.advisories = out;
+    return v;
   }
 
 
@@ -3343,10 +3568,16 @@ class City {
     this.history.poll.push(this.cityIndex(this.poll));
     this.history.crime.push(this.cityIndex(this.crime));
     this.history.landv.push(this.cityIndex(this.landv));
-    // trim all seven in lockstep under the one existing >240 guard so every
+    // GP3a (save v13): the commute series, pushed LAST (after landv) so the
+    // seven v12 keys keep their serialized order. commutePct was refreshed by
+    // recomputeJobAccess at most 4 ticks before this %24 rollover (5 and 24
+    // are coprime — max gap 4), well inside the field's 5-tick latency budget.
+    // -1 ("no residents") records as 0 so the series stays plottable.
+    this.history.commute.push(this.commutePct < 0 ? 0 : this.commutePct);
+    // trim all eight in lockstep under the one existing >240 guard so every
     // array stays the same length and month-aligned.
     if (this.history.pop.length > 240)
-      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv"])
+      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute"])
         this.history[k].shift();
   }
 
@@ -3508,7 +3739,14 @@ class City {
     }
     if (doPower || this.railDirty) { this.recomputeRail(); this.railDirty = false; }
     // GP1b: the ONE place trafficEpoch is ever assigned (same rule as above).
-    if (this.tickCount % 5 === 0) { this.trafficEpoch = this.tickCount; this.recomputeTraffic(); }
+    // GP3a: the job-access field rides the SAME cadence, APPENDED after the
+    // traffic pass so nothing upstream moves — it draws nothing and writes only
+    // jobAccess/_ja*/commutePct, so the tick byte-stream is untouched.
+    if (this.tickCount % 5 === 0) {
+      this.trafficEpoch = this.tickCount;
+      this.recomputeTraffic();
+      this.recomputeJobAccess();
+    }
     if (this.tickCount % 14 === 0) this.recomputeMaps();
     this.recomputeDemand();
 
@@ -3673,8 +3911,13 @@ class City {
 
   // ---------- save / load ----------
   serialize() {
+    /* GP3a (save v13): the v bump is the ONLY changed byte besides the new
+       history.commute key (appended LAST by normaliseHistory/ctor/push order,
+       so the v12 history keys stay a stable prefix). jobAccess/commutePct/
+       advisories are DERIVED and never saved. Backward compatibility rides the
+       existing defensive guards — no v===13 test anywhere in deserialize. */
     return JSON.stringify({
-      v: 12, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 13, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -3916,6 +4159,12 @@ class City {
     unpackU8(d.unpow, c.unpow);
     unpackU8(d.fire, c.fire);
     c.recomputeMaps(); c.recomputeDemand();
+    /* GP3a: warm the job-access field before the first frame. AFTER the
+       cascade (it reads the final stationLive/railNet/lvl and the census jobs
+       recomputeDemand just committed) and BEFORE the final restoreRngCursors —
+       which would rewind any accidental draw anyway (belt-and-braces; the pass
+       draws nothing by construction). */
+    c.recomputeJobAccess();
     // milestone state: restore, or (legacy v1 save) infer rank from population
     // so loading never fires a promotion newspaper
     c.tier = typeof d.tier === "number" ? d.tier : tierForPop(c.pop);

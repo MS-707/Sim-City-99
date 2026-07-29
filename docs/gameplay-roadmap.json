@@ -421,7 +421,9 @@
       "commit": "(this ship commit)",
       "save_version": 12,
       "certified_through": "GP2 (R2) — Phase 0 CLOSED; tree fully reconciled, no live-but-uncertified layers",
-      "live_but_uncertified": [],
+      "live_but_uncertified": [
+        "GP3a commute-surfaces implement pass (job-access field + commute stat + verdict rows; sim.js/ui.js/index.html/css) — checkpointed mid-verify, NOT shipped; carries a byte-identical-sim gate so certification either proves the tree unchanged behaviorally or the work is fixed/reverted."
+      ],
       "artifact_reflects": "this ship (bundle rebuilt at Phase 0 close)"
     }
   },

@@ -21,6 +21,10 @@ const UI = {
     poll:  { on: true, color: "#cc0000", key: "poll",  label: "Pollution", idx: true },
     crime: { on: true, color: "#9900cc", key: "crime", label: "Crime",     idx: true },
     landv: { on: true, color: "#00aaaa", key: "landv", label: "Land value", idx: true },
+    // GP3a: commute % of residents within reach of half the city's jobs.
+    // OFF by default so the shipped default render is pixel-unchanged; idx
+    // gives the raw-number legend + the 100yr monthly-tail fallback.
+    commute: { on: false, color: "#4477aa", key: "commute", label: "Commute %", idx: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
   // GP1a: the open Tile Info target ({x, y, at}) — null whenever the dialog is
@@ -1623,11 +1627,18 @@ function renderVerdict(i) {
   const head = { crit: "⛔", warn: "⚠️", ok: "✅" }[v.severity] || "";
   const chips = v.evidence.map(e =>
     `<span class="qv-chip">${htmlEsc(e[0])} <b>${htmlEsc(e[1])}</b></span>`).join("");
+  // GP3a: advisory boxes AFTER the primary verdict — one amber .qv-advis per
+  // entry, nothing at all on a tile with no advisories (the field is omitted).
+  const advis = (v.advisories || []).map(a =>
+    `<div class="qv-advis"><div class="qv-head">⚠ ${htmlEsc(GATE_LABEL[a.code] || a.code)}</div>` +
+    `<div class="qv-text">${htmlEsc(a.text)}</div>` +
+    `<div class="qv-chips">${a.evidence.map(e =>
+      `<span class="qv-chip">${htmlEsc(e[0])} <b>${htmlEsc(e[1])}</b></span>`).join("")}</div></div>`).join("");
   box.className = v.severity;
   box.innerHTML =
     `<div class="qv-head">${head} ${htmlEsc(GATE_LABEL[v.code] || v.code)}</div>` +
     `<div class="qv-text">${htmlEsc(v.text)}</div>` +
-    `<div class="qv-chips">${chips}</div>`;
+    `<div class="qv-chips">${chips}</div>` + advis;
 }
 
 function renderQuery() {
@@ -1730,6 +1741,7 @@ function renderQuery() {
     ${transitAccessRow}
     <tr><td>Water</td><td>${city.watered[i] ? "💧 yes" : "no"}</td></tr>
     <tr><td>Road access</td><td>${city.access[i] ? "yes" : "no"}</td></tr>
+    <tr><td>Job access</td><td>${city.nearestRoad(i) >= 0 ? city.jobAccess[i] + " of " + city.jobs + " jobs" : "—"}</td></tr>
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
     <tr><td>Traffic</td><td>${(city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) ? city.traffic[i] : "—"}</td></tr>
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
@@ -1945,6 +1957,10 @@ function refreshHUD() {
   const approval = Math.max(5, Math.min(98,
     70 - city.taxRate * 2.4 + (city.demand.r > 0 ? 10 : -8) | 0));
   document.getElementById("v-approval").textContent = city.pop ? approval + "%" : "—";
+  // GP3a: commute stat — the cached recomputeJobAccess scalar, READ only
+  // (never triggers a recompute; -1 = no residents prints an em-dash).
+  document.getElementById("v-commute").textContent =
+    city.commutePct < 0 ? "—" : city.commutePct + "%";
   document.getElementById("city-title").textContent =
     `SimCity 99 — ${city.cityName} [${TIERS[city.tier].name}], ${MONTHS[city.month]} ${city.year}`;
 
@@ -1994,7 +2010,10 @@ function hoverReadout() {
   const lvl = city.lvl[i] ? ` L${city.lvl[i]}` : "";
   const v = city.diagnoseTile(i);
   const mark = v ? ({ crit: "⛔", warn: "⚠️", ok: "✅" }[v.severity] || "") + " " + (GATE_LABEL[v.code] || v.code) : "";
-  const text = `(${h.x}, ${h.y}) ${what}${lvl}${mark ? " — " + mark : ""}`;
+  // GP3a: the advisory rides the SAME memoized per-(tile, tickCount) verdict —
+  // zero extra diagnoseTile calls.
+  const advis = v && v.advisories && v.advisories.length ? " ⚠ Few jobs in reach" : "";
+  const text = `(${h.x}, ${h.y}) ${what}${lvl}${mark ? " — " + mark : ""}${advis}`;
   hoverMemo = { key, text, city };
   return text;
 }

@@ -107,6 +107,7 @@
             <tr><td>Jobs</td><td id="v-jobs">0</td></tr>
             <tr><td>Power</td><td id="v-power">0/0</td></tr>
             <tr><td>Water</td><td id="v-water">0/0</td></tr>
+            <tr><td>Commute</td><td id="v-commute">—</td></tr><!-- GP3a: % residents in healthy job reach -->
             <tr><td>Approval</td><td id="v-approval">—</td></tr>
           </table>
         </fieldset>
@@ -232,6 +233,8 @@
         <label><input type="checkbox" class="graph-series" data-series="poll" checked><span style="color:#cc0000">■</span> Pollution</label>
         <label><input type="checkbox" class="graph-series" data-series="crime" checked><span style="color:#9900cc">■</span> Crime</label>
         <label><input type="checkbox" class="graph-series" data-series="landv" checked><span style="color:#00aaaa">■</span> Land value</label>
+        <!-- GP3a: off by default so the shipped default render is unchanged -->
+        <label><input type="checkbox" class="graph-series" data-series="commute"><span style="color:#4477aa">■</span> Commute %</label>
       </div>
       <div class="graph-range-strip" id="graph-range-strip">
         <label><input type="radio" name="graph-range" class="graph-range" value="1yr"> 1&nbsp;yr</label>

@@ -286,8 +286,20 @@ input[type=range]::-moz-range-thumb {
 #query-verdict.crit .qv-head { color: #a00000; }
 #query-verdict.warn { background: #f2ead0; }
 #query-verdict.warn .qv-head { color: #7a5300; }
+/* GP3a: advisory box — the .warn verdict look, stacked under the primary
+   verdict. No reserved prose height: an advisory only exists when it has
+   something to say, so it sizes to its text. */
+#query-verdict .qv-advis {
+  border: 1px solid; border-color: #808080 #fff #fff #808080;
+  background: #f2ead0; padding: 4px 6px; margin-top: 6px;
+}
+#query-verdict .qv-advis .qv-head { color: #7a5300; }
+#query-verdict .qv-advis .qv-text { min-height: 0; }
 #query-verdict.ok { background: #d8ecd8; }
 #query-verdict.ok .qv-head { color: #006000; }
+/* the advisory keeps its own amber head even inside a crit/ok primary box */
+#query-verdict.crit .qv-advis .qv-head,
+#query-verdict.ok .qv-advis .qv-head { color: #7a5300; }
 
 #rci { cursor: pointer; }
 #dlg-rci .dlg-body { max-height: 80vh; overflow-y: auto; }

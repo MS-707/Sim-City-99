@@ -10,9 +10,7 @@ Queue policy: keep at least 5 open improvements at all times.
   carries two live-but-uncertified layers above the last certified ship
   (GP1a): the GP1b seeded substrate (save v12, 7/9 gates, blocked on two
   mis-drafted gates) and GP2's port wiring (5/10 gates, 3 high fidelity
-  defects). **R1** resolves GP1b (user decision — certify with amended gates,
-  recommended, or revert); **R2** re-runs GP2 fix-forward against the true
-  baseline. No new milestone launches until Phase 0 closes. Full plan,
+  defects). **R1 is DONE** (GP1b certified & shipped; v12 is the official baseline). **R2** — the GP2 fix-forward — is running. No new milestone launches until Phase 0 closes. Full plan,
   baseline ledger and the eight scaffolding rules (S1–S8) live in
   `docs/gameplay-roadmap.json`.
 
@@ -93,6 +91,20 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP1b — Seeded Simulation Substrate** *(gameplay roadmap 2/11, certified
+  via R1 with user-approved amended gates)*: determinism is finally **real** —
+  every tick-path draw runs through named seeded cursor streams or stateless
+  `(seed, epoch, index)` hash domains, with zero global `Math.random` calls
+  (proven over 700 stress ticks including all seven disasters). Same seed +
+  same moves = the same city, **unstubbed**, 10/10 byte-identical runs; a save
+  resumed at tick 300 reproduces tick 600 byte-identically. v11 saves load
+  clean at v12 (+3.4% payload); the re-pin landed at 0.349% vs a 5% bar; the
+  build is never worse than baseline on any scenario (once better). The
+  lingering portless save/reload divergence was reproduced and **proven** to
+  be the diffusion-map cadence artifact, not a state hole. Two gates were
+  amended to be measurable (comparative scenarios; both-sides map convergence)
+  with original text, rationale and user approval preserved in the roadmap.
 
 
 - [x] **GP1a — Growth Verdicts: the Gate Table & Tile Diagnosis** *(gameplay

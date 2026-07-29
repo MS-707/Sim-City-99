@@ -137,7 +137,14 @@
       "status": "todo",
       "implementation_note": "2026-07-27 IMPLEMENT phase (js/sim.js + js/ui.js only; no render/sprites/css, no new OV id, no save change). SHAPE: isPort() is a NEW predicate that adds nothing to and removes nothing from AIRPORT/SEAPORT's existing memberships (they still conduct, still count as powered consumers, stay brownout/Y2K/fire eligible, stay outside isPlant/isWaterOv/isMega). ONE PURE RECORD portRecord(a) (zero RNG, zero writes) is the single definition of a port and is consumed by recomputePorts, portsBudget, the three new INFRA_GATES rows and the query panel alike, so the panel cannot desync from the economy. recomputePorts() is a REBUILD pass filling the DERIVED, NEVER-SERIALIZED ports/portWork/portDemI/portDemC/portsRev/portsCost (plus noiseCov from stampAirportNoise and portDep from the traffic deposit); anchor discovery is FUSED into computeDemandParts' existing full-map loop, so GP2 adds no new O(n) per-tick scan. Demand folds as an APPENDED '+ this.portDemC' / '+ this.portDemI' term (never a re-association) and demandBreakdown gained the matching named part in the same source order. Traffic deposits through a deterministic bounded BFS (spreadPortTrips) over ROAD/WIREROAD from the gate tiles - never the reservoir walk, whose TRAFFIC hash domain would have made the zero-RNG gate vacuous. Pollution (seaport smog), the world-fixed east-west noise cone and the traffic deposit all gate on the SAME per-tile portWork flag. serialize()/deserialize()/normaliseHistory untouched: save stays v12 with the identical key set. MEASURED AT IMPLEMENT TIME (node harness over js/sim.js, 80x80 fixture, Math.random unstubbed): (1) IDENTITY - this file's own pinned build_script (docs/gp1-baseline.json) re-run for ALL 20 corpus seeds at 600 ticks reproduces all 7 array hashes plus saveLen and saveHash 20/20; an independent 5-seed 600-tick heavy fixture is byte-identical to HEAD across over/lvl/varnt/fire/traffic/unpow/powered/poll/landv/crime/roadWear/rail/watered, the _trafficLoad float bytes, pop/funds/jobs and a character-identical serialize(). (2) ZERO RNG - counters on RngStream.prototype.next, City.prototype.rngHash, City.prototype.rngHashAt and global Math.random all read 0 while exercising recomputePorts/portRecord/portsBudget/stampAirportNoise/spreadPortTrips/diagnoseTile on a 2-port city. (3) DEAD PORTS - unpowered and unconnected ports produce demand deltas of exactly 0.0, budget 0/0/0, and poll[]/landv[]/_trafficLoad[] hashes identical to their controls; verdict codes PORT_UNPOWERED / PORT_UNCONNECTED / PORT_WORKING all correct, with 'power' and 'road or rail' named in the respective texts. (4) TRAFFIC - mean load[] on road tiles within 5 of a working seaport is 2.03x / 2.14x / 2.03x the control on seeds 1/2/4, window delta sums within 2.6% of the port's own deposit ledger, and clearing portWork makes recomputeTraffic + recomputeMaps reproduce the HEAD engine BYTE-FOR-BYTE on the very same city state (poll/landv/crime/traffic/load all equal), which isolates the deposit as the only traffic difference. (5) AIRPORT - demand.c +0.1195 vs control at t+26; mean landv of ZR tiles under the approach falls 17.4 while off-approach ZR tiles at the same manhattan distances fall 0.00; tourism revenue is strictly monotone in catchment land value (60 -> 185 -> 238 at meanLv 19 / 59 / 76); noiseCov hashes identical at cam.r 0..3 and the sim contains no cam/rot4 reference. (6) PERF - 300-tick median +1.5% vs HEAD with no port; a 4-port city is within noise of the no-port build. THREE FINDINGS REPORTED, NOT PATCHED: (a) gate 5's 'save stays v11' is stale - HEAD already emits v:12 with the GP1b cursor substrate live, so GP2 was built on v12 and the gate is read as this roadmap's own wording, 'save version unchanged'. (b) gate 1 ('demand.i +>=0.10 vs control') measures a quantity the shipped demand model absorbs: portDemI is +0.212 at 254 catchment jobs and appears in full on the first recomputeDemand, but the very next growthPass converts it into about 52 new industrial jobs (-0.29 through the (pop*0.42 - iJobs)/180 term), so an A/B read 26 ticks later measures ~0 by construction - the bonus became industry, which is the intended coupling. Freight revenue posts as required (non-zero within one rollover; control exactly 0). Commercial demand is not absorbed on that horizon (+0.1195 at t+26), so gate 3's demand clause passes as written. (c) gate 6's 'byte-identical to a city that never had one' is bounded by two PRE-EXISTING behaviours, both reproduced at HEAD with no port involved: traffic[] is an integer EWMA whose truncation admits a BAND of fixed points (a +1 perturbation of traffic[] at HEAD still leaves 80 tiles differing after 15 passes; a razed port leaves 10 tiles differing by at most 1), and landv/poll/crime already differ across a save/load at HEAD (the cadence lag documented in docs/gp1-baseline.json), which is why the land-value-derived portsRev/portDemC reproduce to within a couple of § rather than exactly across a load. With a port placed and razed inside one tick, every derived plane (over/lvl/anc/poll/noiseCov/portWork/_trafficLoad/demand/ports/budget) reverts exactly and diagnoseTile over the ex-footprint returns null. BALANCE NOTE: at the pinned constants a seaport nets about +§390/mo at 254 catchment jobs, while an airport breaks even only near catchment mean land value 64 (§200 upkeep against 400*meanLv/128*(1+pride/255)) - deliberate as the 'site it where it pays' bet, but it does mean a mid-value city's airport runs at a loss until land value or landmark pride rises.",
       "fix_pass_note": "2026-07-27 FIX phase. THREE CODE CHANGES, each re-measured against a pinned-HEAD (a954946) worktree served alongside the branch. (1) PORT_SPREAD 6 -> 4. Gate 4 asks that the traffic increase inside manhattan 5 of the footprint be traceable to the port's own deposit ledger, but the BFS spread was 6 deep from gate tiles that already sit at manhattan 1, so ~4.3% of every deposit landed outside the audited window by construction. At depth 4 the deposit is provably contained (each BFS step adds at most 1 to manhattan distance). RE-MEASURED under clean isolation (deposit ON vs deposit SUPPRESSED on the identical serialized city state): window delta sum 1071.3276977539062 vs ledger 1071.327686 = +1.1e-6% (bar 1%), ZERO nonzero-delta tiles outside the gate-reachable BFS set, and with the deposit suppressed the _trafficLoad float-byte hash AND traffic[] hash reproduce the pinned HEAD build EXACTLY. Window mean load is still 1.60x the matched control (bar 1.25x). (2) THE APPROACH CONE IS NOW A FIELD, NOT A STENCIL. As shipped it had zero lateral falloff - the measured lateral profile at d=6 was [0,0,0,0,26 x8,0,0,0,0], a 26-point cliff between orthogonal neighbours - and it was inverted from physical sense, reading 0 on tiles orthogonally TOUCHING the footprint while reading 5 sixteen tiles off the runway end. Every other land-value input in this engine is diffused, and the nearest precedent (stampLandmarkPride) falls off smoothly. Added NOISE_FEATHER=1.5 (potency scaled by 1 - t^2, t = lateral offset / (half + NOISE_FEATHER), so the corridor fades to nothing 1.5 tiles outside its nominal half-width) and an apron ring NOISE_NEAR=3 / NOISE_NEAR_K=6 (isotropic manhattan ring around the footprint itself - taxiing and engine run-ups). NOISE_K 2.6 -> 3.2 compensates the lateral integral. MEASURED: lateral profile at d=6 is now [0,6,16,24,29,32,32,29,24,16,6,0]; axial ramp 47,44,41,38,35,32,29,25,22,19,16,13,10,6,3,0; apron tiles orthogonally touching the footprint on the perpendicular side read 18 instead of 0. Both shaping terms are confined to the corridor and to a 3-tile ring, so the gate-3 sample sets (which start at 4 tiles) are untouched by the ring and the off-approach set still falls EXACTLY 0.00: on-approach ZR land value falls 15.57 (bar 12.0), off-approach 0.00 (bar 3.0), control means 35.33 / 37.26 (both >= 25), 1 of 69 on-approach tiles clamps to 0. noiseCov hash identical at cam.r 0,1,2,3 - the cone is still world-fixed and the sim still contains no cam/rot4 reference. (3) TWO RENDER AFFORDANCES (js/render.js - the ONLY departure from the design's 'no render.js' scope, taken because gate 2's whole premise is that the player can see which prerequisite is missing). AIRPORT/SEAPORT were never in the blinking no-power bolt's predicate at js/render.js:958 - correct before GP2, when a terminal's power state was inert, and wrong after it: a dark seaport was pixel-identical to a working one while every neighbouring unpowered zone blinked. They are added now (measured: 67 blinking pixels in an 80x80 crop centred on a PORT_UNPOWERED seaport's anchor, against a 113-opaque-pixel zap sprite; zero change on a portless city). updateSmoke() likewise gained a SEAPORT branch gated on the same portWork flag the pollution loop reads - SEAPORT_SMOG x 9 tiles is the largest raw point smog source in the game and it drew no plume at all. Neither touches a bake, a cache key or a sprite canvas: all 635 SPR canvases hash IDENTICALLY to HEAD at 4 facings x 4 seasons, and 12 no-port scenes (summer noon / summer midnight / winter midnight x cam.r 0..3) are pixel-identical to HEAD under a seeded-render capture. ALSO: the two remaining PERF observations are closed. stampAirportNoise() no longer does an unconditional full-map over[] scan plus a noiseCov.fill(0) on a city with no working airport (it walks this.ports, which recomputePorts just rebuilt, and a one-bit _noiseAny memo still guarantees the LAST airport's scar clears in a single pass); the landv fold hoists that memo so a portless city pays no per-tile compare; and recomputeTraffic no longer allocates the portDep ledger object when there is nothing to deposit. MICRO ON A PORTLESS DEVELOPED CITY vs pinned HEAD: recomputeMaps +15.2% -> +2.1%, recomputeTraffic +5.5% -> +2.5%, recomputeDemand +4.5% (the fused anchor-discovery branch, 0.0013 ms). Whole-tick no-port +0.5% median / +1.0% min; a 4-terminal city +4.6%. STILL TRUE AFTER THE FIX PASS: 20/20 pinned corpus seeds byte-identical at 600 ticks with Math.random unstubbed, save v12 with an unchanged key set, s1===s2 round-trip, a genuine v11 payload loading and running 120 rollovers with no NaN, 0 oracle mismatches over 6,400 tiles x 4 port states, demandBreakdown reconstructing all three bars bit-for-bit with and without ports, zero RNG on the port path (all four draw surfaces), full rotation invariance on a fresh-deserialize-per-rotation two-terminal city, all four scenarios 10/10 with identical medals and finishes on both builds, and 0 console errors / pageerrors across every harness. NOT PATCHED, AND WHY: gate 1's 'demand.i +>=0.10 at t+26' and gate 3's demand.c clause are unattainable for ANY additive demand bonus in the shipped model - demand.i/c is a self-correcting pressure signal whose equilibrium is pinned by the growth threshold, so growthPass converts the whole bonus into industry/commerce within ~4 ticks (measured trajectory: delta +0.2017 at t=0 and t=1, +0.0683 at t=2, -0.0166 at t=4, while the industrial-jobs delta grows 0 -> 24 -> 52). The bonus applies in full and identically to portDemI/portDemC on the tick it is computed, and it becomes jobs, which is the intended coupling. Gate 2's poll[]/landv[] identity clause for the UNCONNECTED case fails only because a port is a powered CONSUMER at HEAD (+9 powerDemand) and coalSmog = 40+120*(powerDemand/powerSupply), so two coal tiles smoke one unit harder than in a control that has no building at all - reproduced byte-for-byte on the pinned HEAD build with zero GP2 code. Gate 6's 'traffic[] equals NEVER within <=9 passes' is unattainable for ANY perturbation of this integer EWMA - perturbing all 1,305 road tiles by +1 at HEAD leaves 296 tiles permanently differing, with identical counts on branch and HEAD.",
-      "attempt_1_result": "2026-07-27 ship_ready=false. 5 of 10 gates pass. The FIDELITY lens refuted with THREE HIGH defects that are real product problems, not criterion artifacts: (1) the airport approach cone is world-X-fixed while the airport SPRITE bakes its runway on a fixed SCREEN diagonal, so at cam.r 1 and 3 the noise cone runs perpendicular to the drawn runway — the fix pass DELIBERATELY declined to fix this; (2) the cone has zero lateral falloff, so it is a stencil rather than a field; (3) a dead port is visually identical to a working one (render.js blinking no-power bolt covers only ZR/ZC/ZI). Med: a working seaport becomes the largest raw point pollution source in the game yet draws no smoke. SEPARATELY, the fix pass argues C1/C3 demand gates are unmeasurable as written because demand.i/c is a self-correcting pressure signal whose equilibrium is pinned by the growth thresholds — an additive bonus is absorbed by growth rather than showing up as a standing demand delta. If true that is a genuinely useful finding about the game economy and means the right success measure is BUILT INDUSTRY, not standing demand. Not accepted unilaterally — put to the user."
+      "attempt_1_result": "2026-07-27 ship_ready=false. 5 of 10 gates pass. The FIDELITY lens refuted with THREE HIGH defects that are real product problems, not criterion artifacts: (1) the airport approach cone is world-X-fixed while the airport SPRITE bakes its runway on a fixed SCREEN diagonal, so at cam.r 1 and 3 the noise cone runs perpendicular to the drawn runway — the fix pass DELIBERATELY declined to fix this; (2) the cone has zero lateral falloff, so it is a stencil rather than a field; (3) a dead port is visually identical to a working one (render.js blinking no-power bolt covers only ZR/ZC/ZI). Med: a working seaport becomes the largest raw point pollution source in the game yet draws no smoke. SEPARATELY, the fix pass argues C1/C3 demand gates are unmeasurable as written because demand.i/c is a self-correcting pressure signal whose equilibrium is pinned by the growth thresholds — an additive bonus is absorbed by growth rather than showing up as a standing demand delta. If true that is a genuinely useful finding about the game economy and means the right success measure is BUILT INDUSTRY, not standing demand. Not accepted unilaterally — put to the user.",
+      "fix_forward_gates": [
+        "Airport noise cone aligns with the drawn runway at all 4 camera rotations (sim axis derived from sprite orientation, or runway re-baked to a world axis; verified per-rotation).",
+        "Noise is a field: monotonic lateral falloff measured across the cone half-width, not a uniform stencil.",
+        "Failure states are visible (S4): an unpowered or unconnected port renders a distinct indicator at all rotations; a working seaport emits smoke; screenshots prove a dead port and working port are pixel-distinguishable.",
+        "Outcome economy gates (S5): over 120 rollovers vs an identical control, the port city builds >= X% more industrial development (census IND jobs) and posts cumulative freight/tourism revenue; instantaneous demand deltas are reported as diagnostics, never gated.",
+        "All retained attempt-1 gates that passed (zero-RNG port path, reversibility, no-port identity vs pinned baseline, perf, save round-trip) re-verified."
+      ]
     },
     {
       "id": "GP3",
@@ -161,7 +168,8 @@
       "effort_1_5": 4,
       "priority_rank": 4,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "todo",
+      "pre_split": "Split at launch per S3: GP3a = job-access field + commute stat + gate-table verdict rows as READ-ONLY surfaces (byte-identical sim; the verdicts show what WILL bind before it does). GP3b = couple growth/demand to job access (the declared re-pin), measured by GP3a instrumentation + outcome gates per S5."
     },
     {
       "id": "GP4",
@@ -185,7 +193,8 @@
       "effort_1_5": 3,
       "priority_rank": 5,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "todo",
+      "launch_note": "Must follow GP3 (the expressway is the ANSWER to visible commute pressure). 4a = expressway class + ramps (sim+art together per S4). 4b = the moving train (presentation; joins the alivenessStats guard, closing its N/A slot)."
     },
     {
       "id": "GP5",
@@ -209,7 +218,8 @@
       "effort_1_5": 4,
       "priority_rank": 6,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "todo",
+      "pre_split": "Split at launch per S3: GP5a = visible coverage previews + strain meters (read-only, byte-identical). GP5b = strain scaling + the education payoff (behavior; outcome gates: after 20 sustained years of high education, industrial composition shifts to clean/high-tech, measured by census)."
     },
     {
       "id": "GP6",
@@ -257,7 +267,8 @@
       "effort_1_5": 4,
       "priority_rank": 8,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "todo",
+      "pre_split": "Split at launch per S3: GP7a = the assessed-value SHADOW ledger — show what taxes WOULD be under assessed valuation next to actual, read-only, byte-identical. GP7b = the cutover + debt ladder + stabilizer, measured against GP7a projections."
     },
     {
       "id": "GP8",
@@ -281,7 +292,8 @@
       "effort_1_5": 5,
       "priority_rank": 9,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "todo",
+      "pre_split": "Split at launch per S3: GP8a = the risk readout (per-tile hazard odds from coverage/pollution/plant age; read-only; its honesty gate = empirical disaster rates over a long soak match the displayed odds). GP8b = coupled hazard rates + the emergency-response allowance (behavior)."
     },
     {
       "id": "GP9",
@@ -305,7 +317,8 @@
       "effort_1_5": 4,
       "priority_rank": 10,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "todo",
+      "launch_note": "Waste chain per original M31 design; S4 applies — garbage must be visible (landfill fill states, truck traffic on load[])."
     },
     {
       "id": "GP10",
@@ -329,7 +342,8 @@
       "effort_1_5": 4,
       "priority_rank": 11,
       "touches_save_format": true,
-      "status": "todo"
+      "status": "todo",
+      "launch_note": "Last: consumes strain/blight substrates from GP5/GP6. S4: blight must be visible tile-by-tile, and the renewal campaign paints visibly back."
     }
   ],
   "reconcile_changelog": [
@@ -357,5 +371,62 @@
     "FIXED FACTUAL ERRORS: the commute perf gate cited 'a fully built 120x120 map' — MAP_SIZES is [64, 80, 128] (sim.js:7), now 128x128. Restated every 'byte-identical vs baseline' gate that followed a demand change as either a null-configuration identity (no port / disasters off / uncrowded), a bounded statistical re-pin, or an unstubbed same-seed reproducibility check, since growthPass short-circuits on demand tests BEFORE drawing (sim.js:1699/1701/1728) and any demand change shifts the stream citywide.",
     "RE-RATED effort across the set per the feasibility lens (1:2->3, 2:2->3, 5:3->4, 8:4->5, 9:3->4, 10:3->4) and lowered transport-networks from 5 to 4 (ports inert, no destination-seeking trips, no road class hierarchy, no train), moving the overall current score from 49 to 47."
   ],
-  "split_note": "2026-07-27: the original GP1 bundled three surgeries (core-loop refactor, RNG substrate migration, UI feature set) and was refuted by all three adversarial lenses on its first attempt — a violation of the roadmap’s own independently-shippable principle. Split into GP1a (pure read + UI, byte-identical sim) and GP1b (isolated RNG infrastructure). The bundled attempt is preserved at commit e5140a0; the working tree was restored to the pre-GP1 code state so GP1a starts clean."
+  "split_note": "2026-07-27: the original GP1 bundled three surgeries (core-loop refactor, RNG substrate migration, UI feature set) and was refuted by all three adversarial lenses on its first attempt — a violation of the roadmap’s own independently-shippable principle. Split into GP1a (pure read + UI, byte-identical sim) and GP1b (isolated RNG infrastructure). The bundled attempt is preserved at commit e5140a0; the working tree was restored to the pre-GP1 code state so GP1a starts clean.",
+  "plan_version": 2,
+  "plan_v2_note": "2026-07-27: holistic reorganization after two milestones exposed structural problems (docs drifting from the tree; bundled scopes failing whole; instantaneous-demand gates unmeasurable; sim state with no visual expression). The SC2K bar is unchanged: the benchmark is what actual SimCity 2000 delivers — coupled systems where every sim state has a visible expression and every failure is legible. Phase 0 reconciles the branch before any new feature lands.",
+  "baseline_ledger": {
+    "purpose": "Docs may NEVER disagree with the tree. Every ship AND every checkpoint that leaves code live must update this ledger in the same commit. This rule exists because GP1b was parked as blocked while its code stayed live, and the next milestone was briefed against a false baseline.",
+    "current": {
+      "commit": "75263af",
+      "save_version": 12,
+      "certified_through": "GP1a (5f9c2fc)",
+      "live_but_uncertified": [
+        "GP1b seeded-RNG substrate: v12 save, RngStream cursors + hash domains, zero global Math.random on the tick path — 7/9 gates pass, blocked on two mis-drafted gates (R1 decision)",
+        "GP2 port economy wiring: recomputePorts/portRecord/noise cone/traffic deposits — 5/10 gates, 3 high fidelity defects open (R2 fix-forward)"
+      ],
+      "artifact_reflects": "GP1a ship (bundle not rebuilt since; nothing uncertified is published)"
+    }
+  },
+  "process_scaffolding": [
+    "S1 BASELINE LEDGER: every commit that changes what is live in the tree updates baseline_ledger in the same commit. A workflow brief always quotes the ledger, never memory.",
+    "S2 TWO-STRIKE SPLIT: a milestone refuted twice is never attempted a third time whole — it is split (read-surfaces half vs behavior half) or blocked for a user decision. Splitting GP1 is what made GP1a byte-identical-provable.",
+    "S3 READ-FIRST SPLITS: instrumentation and player-facing readouts ship BEFORE the behavior they describe. The read half carries a byte-identical gate; the behavior half re-pins against it and is measured by the instrumentation the read half proved honest.",
+    "S4 SIM-ART COHERENCE (the SC2K bar): every new sim state must have a visible expression, consistent at all 4 rotations, and every failure state must be visually distinct from its working state. In actual SimCity 2000 nothing invisible ever bills the player. (Lesson: dead port identical to a working one; noise cone perpendicular to the drawn runway.)",
+    "S5 OUTCOME GATES FOR THE ECONOMY: never gate on instantaneous demand deltas — demand is a self-correcting pressure signal, so an additive bonus is absorbed into growth. Gate on OUTCOMES over a horizon vs a control city: built development, census jobs, realized revenue.",
+    "S6 INTEGRITY: implement-phase self-assessment never stands as certification (twice caught false); workers never amend a gate so work passes it — mis-specified gates are reported and decided by the user; agent-set statuses are reverted pending independent verification.",
+    "S7 LIVENESS: the driving loop checks transcript mtime + worker processes every firing; a stale-25-min workflow is resumed from cache, never waited on.",
+    "S8 INDEPENDENT SHIPPABILITY: stopping between any two items leaves a coherent, certified, published game."
+  ],
+  "phase0": [
+    {
+      "id": "R1",
+      "title": "Resolve GP1b — certify the seeded substrate (USER DECISION)",
+      "what": "The substrate demonstrably achieves its purpose (determinism real unstubbed 15/15; save/load byte-identical 10/10; 0 global draws; re-pin 0.206% vs a 5% bar; v11 loads clean) and is blocked only on two gates the orchestrator mis-drafted: C6 written as an absolute scenario-win bar where the honest test is comparative (the build EQUALS HEAD exactly on all four scenarios), and C3 clause 8 asking diffusion maps to converge after one recomputeMaps when they converge after both sides recompute. DECISION: (A, recommended) amend both gates with original text + reasoning preserved, run an independent certify-only pass (wf-certify.mjs), ship, and v12 becomes the OFFICIAL baseline; (B) revert the substrate and GP2 wiring to the GP1a baseline and re-queue both. Also to check during certification: GP2 verify noted a portless save/reload divergence at its HEAD — determine whether it is the C3-clause-8 diffusion artifact or a real hole.",
+      "status": "decision-pending"
+    },
+    {
+      "id": "R2",
+      "title": "GP2 fix-forward — Working Ports, second attempt",
+      "what": "Keep the economy wiring (its architecture passed: pure portRecord, rebuild-pass purity, zero RNG, reversibility, perf). Add the fidelity defects as explicit gates: (1) the airport noise cone must align with the drawn runway at ALL FOUR rotations — either derive the cone axis from the sprite runway orientation or re-bake the runway to a world axis; (2) the cone gets lateral falloff (a field, not a stencil); (3) a dead port is visually distinct (no-power bolt / no-connection badge extended beyond ZR/ZC/ZI) and a working seaport emits smoke like the point source it is; (4) demand gates rewritten per S5 to measure BUILT industry/commerce and realized revenue over a 10-year horizon vs control. Runs only after R1 resolves so it is briefed against a true baseline.",
+      "status": "queued-behind-R1"
+    }
+  ],
+  "execution_order": [
+    "R1",
+    "R2 (GP2)",
+    "GP3a",
+    "GP3b",
+    "GP4a",
+    "GP4b",
+    "GP5a",
+    "GP5b",
+    "GP6",
+    "GP7a",
+    "GP7b",
+    "GP8a",
+    "GP8b",
+    "GP9",
+    "GP10"
+  ],
+  "horizon_after_gameplay": "When the GP set caps the gameplay rubric (target: 47 -> ~75+/100 vs the SC2K bar): formal graphics re-score (est. ~78/100 after GQ1-11), then GQ-EPIC terrain elevation as the capstone that lifts both rubrics, then public release via the pending one-click GitHub Pages enablement."
 }

@@ -6,92 +6,15 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- [ ] **GP2 — Working Ports** *(gameplay roadmap 3/11)* — implemented, verify
-  pending. The airport and the seaport stop being ornaments: both now need
-  POWER **and** a road or rail tile touching the footprint, and a terminal
-  missing either produces exactly zero of everything and says which one it is
-  missing on its own line in the query panel. A working **seaport** adds
-  industrial demand scaled by the industrial jobs inside a 10-tile catchment,
-  earns freight §/mo per job served (×1.25 with a rail spur), and smokes. A
-  working **airport** adds commercial demand scaled by the land value it can
-  reach, earns tourism §/mo that is strictly monotone in that land value plus
-  landmark pride, and stamps a WORLD-FIXED east–west approach cone that
-  suppresses **residential** land value only — so it wants commerce near and
-  good neighbourhoods far. The cone is a FIELD, not a stencil: potency falls
-  off laterally to nothing 1.5 tiles outside the corridor half-width, and a
-  3-tile isotropic apron ring keeps the house that shares a fence with the
-  airport from reading quieter than one 16 tiles off the runway end. Both push
-  freight/passenger trips onto load[] at their gate tiles through a
-  deterministic bounded BFS (depth 4, so every deposited unit lands inside
-  manhattan 5 of the footprint and the whole increase is accountable there).
-  On the map a dark terminal now blinks the same no-power bolt a dark
-  schoolhouse does, and a working seaport smokes. New "Ports &
-  terminals" budget row, three new gate-table verdicts
-  (`PORT_UNPOWERED` / `PORT_UNCONNECTED` / `PORT_WORKING`), and query rows
-  for connection, jobs served or passengers, §/mo and approach.
-  **All port state is DERIVED** (`ports`, `portWork`, `noiseCov`,
-  `portDemI/portDemC`, `portsRev/portsCost`) and never serialized: the save
-  stays **v12** with an unchanged key set, and razing a port reverts every
-  effect on the next rebuild. Anchor discovery is fused into
-  `computeDemandParts`' existing loop, so no new O(n) per-tick scan; the port
-  path draws **zero RNG** (all four draw surfaces counted at 0). Re-measured
-  after the fix pass against a pinned-HEAD worktree: 20/20 pinned baseline
-  seeds byte-identical at 600 ticks; 12 no-port scenes (3 season/time × 4
-  rotations) and all 635 sprite canvases pixel-identical to HEAD; no-port tick
-  +0.5% median; ports 1.60× the control's road load in a 5-tile window with
-  the window delta sum matching the port's own deposit ledger to 1.1e-6% and
-  zero deposit outside the gate BFS; approach ZR land value −15.57 against
-  −0.00 off-approach; tourism strictly monotone (§57 → §108 → §221 at
-  catchment mean land value 18 / 34 / 71); `noiseCov` identical at all four
-  rotations; all four scenarios still 10/10 with identical medals. Two
-  gate-wording issues and one pre-existing-behaviour bound are recorded in
+- ⏸ **Phase 0 — reconcile the branch** (plan v2, 2026-07-27). The branch
+  carries two live-but-uncertified layers above the last certified ship
+  (GP1a): the GP1b seeded substrate (save v12, 7/9 gates, blocked on two
+  mis-drafted gates) and GP2's port wiring (5/10 gates, 3 high fidelity
+  defects). **R1** resolves GP1b (user decision — certify with amended gates,
+  recommended, or revert); **R2** re-runs GP2 fix-forward against the true
+  baseline. No new milestone launches until Phase 0 closes. Full plan,
+  baseline ledger and the eight scaffolding rules (S1–S8) live in
   `docs/gameplay-roadmap.json`.
-
-- [ ] **GP1b — Seeded Simulation Substrate** *(gameplay roadmap 2/11)* —
-  running via the milestone workflow; verify + panel are DONE, the fix pass is
-  DONE, ship still pending. An implement-phase agent prematurely marked this
-  done and self-certified "all 9 gates pass" before either ran; that claim was
-  withdrawn and is preserved in `docs/gameplay-roadmap.json` for comparison
-  against the independent result.
-  **Fix pass (2026-07-27), four real defects closed, all measured:**
-  (1) the v12 accumulator encoding was **+10.83%** of the payload on the
-  milestone's own pinned reference city — a breach of its own `<= +5%` save
-  gate that the first measurement missed because it only timed the sparser
-  stress city. `packU8`/`unpackU8` now emit one base64 BYTE pack per plane with
-  four modes (raw / RLE / packbits / sparse bitmask, shortest wins): **+3.38%**
-  on the pinned city, **+1.11%** on the stress city, and a malformed or
-  truncated pack is now REJECTED with the target untouched instead of silently
-  zero-filled. (2) The tick really was **+10.6% slower** under a
-  workload-controlled comparison, because the "hash is 1.6x cheaper than
-  `Math.random`" microbenchmark does not reproduce; `rngHash32` is now split
-  into `rngHashKey(a,b)` + `rngHashFrom(h,c)` so the two rebuild passes hoist
-  the loop-invariant `(domain, epoch)` rounds out of their inner loops —
-  bit-identical output, verified over 400k random triples and by re-running the
-  whole determinism corpus to identical hashes — and the controlled delta is
-  now **-2.8% median / -3.4% min**. (3) The pinned `build_script` placed its
-  watertower, pipe run, school and hospital AFTER the zoning sweep, where
-  `place()` refuses an occupied tile: all four were silent no-ops, so the
-  reference city had `waterSupply` 0 and a level histogram of `{0:1316,
-  1:1100}` — a baseline for GP2..GP10 that never rendered the level-2 or
-  level-3 building art. Corrected; it now measures `{0:1211, 1:892, 2:37}` at
-  tick 600 and reaches level 3 by 1200. (4) The scenario reference solution won
-  only 1 of 4 scenarios — a defect in the SCRIPT (it laid isolated pipe tiles
-  the water flood never reaches, so `WATER_CAP` pinned both growth scenarios at
-  level 1, and it built on the Blackout scrapyard without bulldozing the
-  rubble). Rewritten: **40/40 playthroughs won, all gold, 0 console errors.**
-  **Still open and declared, not fixed:** `landv`/`crime`/`poll` (and the
-  coverage stamps) carry a pre-existing `recomputeMaps` cadence lag across a
-  load — quantified, including its visible Val/Cri minimap footprint, in
-  `docs/gp1-baseline.json`. Closing it costs either **+9.55%** more save payload
-  or a **+123%** tick, both against shipped gates.
-
-_(Nothing under verification. The block that used to sit here was the
-implementation log of the ABANDONED GP1 attempt at commit e5140a0 — it
-described an `accessDirty` flag and "five cursors" that are not in the tree,
-and it survived the restore at 7c2f2f7. It is superseded by GP1b's in-progress
-entry under **Done**, for the same reason the stale GP1 baseline artifact was
-regenerated: a log that describes code which no longer exists is worse than no
-log at all.)_
 
 ## Open
 

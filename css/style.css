@@ -455,6 +455,25 @@ input[type=range]::-moz-range-thumb {
 #traffic-table td:last-child { text-align: center; }
 .traffic-lead { font-size: 12px; font-weight: bold; }
 .traffic-note { font-size: 10px; color: #444; margin-top: 6px; text-align: center; }
+/* GP6: the City Survey — reuses the shipped .budget-table / .btn95.tiny chrome */
+.vital-click { cursor: pointer; text-decoration: underline dotted; }
+#dlg-survey { min-width: 360px; }
+#dlg-survey .dlg-body { max-width: 420px; }
+.survey-num { font-size: 18px; font-weight: bold; }
+.survey-mood { font-size: 12px; font-weight: normal; color: #303030; }
+.survey-note { font-size: 10px; color: #444; margin-top: 2px; }
+#survey-table td { vertical-align: top; }
+#survey-table td:last-child { text-align: right; font-family: Tahoma, sans-serif; }
+#survey-table tr + tr td { border-top: 1px solid #b0b0b0; padding-top: 5px; }
+.survey-rank { font-weight: bold; width: 12px; }
+.survey-bar {
+  display: block; width: 140px; height: 8px; margin: 2px 0;
+  background: #1e283c; border: 1px solid #404040;
+}
+.survey-bar > i { display: block; height: 100%; background: #d06a2a; }
+.survey-pct { font-size: 10px; color: #404040; }
+.survey-blurb { font-size: 11px; color: #202020; margin-top: 2px; }
+.survey-foot { font-size: 10px; color: #444; margin-top: 6px; text-align: center; }
 /* municipal bonds panel (M13) */
 .bondbox { margin-top: 10px; }
 .bondbox .dlg-buttons { margin-top: 6px; }

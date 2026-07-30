@@ -474,7 +474,9 @@
       "commit": "(this ship commit \u2014 GP5b)",
       "save_version": 16,
       "certified_through": "GP5b (service strain & the education payoff \u2014 the GP5 pair complete) \u2014 tree fully reconciled, no live-but-uncertified layers",
-      "live_but_uncertified": [],
+      "live_but_uncertified": [
+        "GP6 citizen-opinion-poll implement pass (composite approval + smoothing carry, City Survey dialog with ranked problems + Show-me jumps, Megalopolis tier rung, save v17; sim.js/ui.js/index.html/css) \u2014 checkpointed mid-workflow, NOT shipped; certified or fixed/reverted by running workflow wf_5f681c5f-da0."
+      ],
       "artifact_reflects": "this ship (bundle rebuilt at GP5b close)"
     }
   },

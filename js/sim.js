@@ -20,10 +20,15 @@ function setMapSize(n) { MAP = n; }
 // (records forward from the first post-load rollover — the M30 idiom).
 // GP3b (save v14): "avgcom" appended AFTER "commute" under the same ladder
 // rule — a v13 save loads with avgcom=[] and records forward.
+// GP6 (save v17): "approv" appended LAST, after "avgcom". SECOND LIST WARNING:
+// the identical key list is repeated by the >240 trim loop at the end of
+// collectBudget() — the two MUST be extended together or the series drifts out
+// of month-alignment with the other nine. (That loop carries the mirror of this
+// comment.) A v16 save loads with approv=[] and records forward (the M30 idiom).
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
-  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom"])
+  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv"])
     out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
   return out;
 }
@@ -534,14 +539,32 @@ const COST = {
   xway: 40, ramp: 25,
 };
 
+/* ---- GP6: the Megalopolis gate — the one rung population alone cannot buy ----
+   MEGA_POP        the size floor (the ladder's own pop column for tier 5)
+   MEGA_APPROVAL   the approval line the city must HOLD (not touch)
+   MEGA_MONTHS     consecutive rollovers at-or-above that line (two sim years)
+   MEGA_COMMUTE    the alternative "governed well" proof: average commute hops
+   MEGA_POLL       ...or a clean-air city (cityIndex(poll)) — either satisfies
+   The pair is an OR because a dense transit city and a low-density clean city
+   are both legitimately well-run; a city that is neither has grown, not governed.
+   Evaluated ONCE per month rollover into the cached boolean city.megaOk, so the
+   per-tick promotion test stays O(1) (no census ever leaks into the tick path). */
+const MEGA_POP = 12000, MEGA_APPROVAL = 65, MEGA_MONTHS = 24;
+const MEGA_COMMUTE = 12, MEGA_POLL = 55;
+
 // ---- city milestones (M2) ----
 // rank ladder; a city is TIERS[k] once pop >= TIERS[k].pop (monotonic ratchet)
+// GP6: a row may carry `gate` — a NON-population condition the city must also
+// meet. tierForPop() SKIPS every gated row (so the pop-only ladder is
+// byte-identical for tiers 0..4 and can never award a gated rung by zoning
+// alone); tick() adds the gated promotion explicitly from the cached megaOk.
 const TIERS = [
   { name: "Settlement", pop: 0 },
   { name: "Village",    pop: 100 },
   { name: "Town",       pop: 400 },
   { name: "City",       pop: 1500 },
   { name: "Metropolis", pop: 5000 },
+  { name: "Megalopolis", pop: MEGA_POP, gate: "mega" }, // GP6: earned, not grown
 ];
 
 // reward tools gated behind a minimum tier (index into TIERS)
@@ -609,9 +632,12 @@ function identityOrdMods() {
   return { pollMul: 1, trafficMul: 1, crimeCut: 0, fireBurn: 0, demR: 0, demC: 0, demI: 0 };
 }
 
+// GP6: the `!TIERS[t].gate` guard is the ONE change here — a gated rung is
+// never awarded by population alone, so tierForPop() returns exactly what it
+// returned before GP6 for every pop (tierForPop(999999) === 4).
 function tierForPop(pop) {
   let k = 0;
-  for (let t = 1; t < TIERS.length; t++) if (pop >= TIERS[t].pop) k = t;
+  for (let t = 1; t < TIERS.length; t++) if (!TIERS[t].gate && pop >= TIERS[t].pop) k = t;
   return k;
 }
 
@@ -1423,6 +1449,217 @@ const CLEAN_TAX_RATE = 0.09;
 // JSON round-trip is exact (the avgCommute/strandedShare precedent).
 const round4 = (v) => Math.round(v * 10000) / 10000;
 
+/* ============================================================================
+   GP6 — CITIZEN OPINION POLL: the approval registry
+   ============================================================================
+   ONE frozen table read by the sim (approvalTick), the City Survey dialog and
+   every test, so no surface can disagree about what the mood is made of.
+   15 rows; the weights sum to EXACTLY 100, which is what makes
+       target = 100 - Σ (w_i * p_i)
+   an exact percentage with no normalisation fudge (every p is clamped to [0,1]).
+
+   Each row declares:
+     id     stable key (also the click key the survey dialog dispatches on)
+     label  the plain-language name the citizen uses
+     w      weight in points of approval this grievance can take off
+     pen    (c, cen) -> 0..1 severity. PURE: reads city scalars and the ONE
+            census below, never RNG, never cam.r, never a second recomputation
+            of anything the sim already publishes (crime/pollution come from
+            the shipped cityIndex; strain is READ from city.svcStrain).
+     mode   minimap mode the "Show me" button switches to (spatial rows), or null
+     dlg    dialog a "Show me" opens instead (aspatial rows — a tax RATE has no
+            argmax tile), or null
+     focus  (c, cen) -> {x,y}|null — the worst place, for the camera jump
+     blurb  (c, cen) -> string — plain language carrying the proving number
+   Adding a 16th row is a one-row change everywhere, provided Σw stays 100.
+
+   FOCUS RULES (both pure, deterministic, RNG-free and rotation-invariant):
+     • CONTINUOUS rows (pollution / crime / congestion): the severity field IS
+       the shipped plane; focus is its plain argmax, lowest-index tie-break.
+     • INDICATOR rows: the severity field is the 5x5 WINDOW SUM of the
+       indicator; the window with the greatest sum wins (lowest-index
+       tie-break) and the focus is the lowest-index ELIGIBLE tile inside it —
+       so the camera lands on a worst CLUSTER, not on an isolated pixel. */
+
+// The "adequately covered" line for the four coverage services. Deliberately
+// far above SVC_LOW=40 (which marks a block as plainly THIN) and consistent
+// with advisors.js's 48/64 citywide report thresholds: a city at SVC_OK reads
+// "covered" to every surface at once.
+const SVC_OK = 96;
+// Monthly EMA rate pulling the published mood toward the month's computed
+// target. 1/4 is a ~4-month time constant: one bad month dents the number,
+// a sustained policy moves it. The carry is PATH-DEPENDENT by construction
+// (that is the point of a mood) — which is exactly why it serializes.
+const APPROVAL_RATE = 1 / 4;
+// The recall episode: approval under RECALL_T for RECALL_MONTHS consecutive
+// rollovers files the petition, once per city (the recallDone latch).
+const RECALL_T = 25, RECALL_MONTHS = 6;
+
+// GP6: argmax of a plane, lowest-index tie-break, optionally restricted to an
+// eligible set. Returns null when nothing eligible carries a positive value.
+function apxArgmax(a, ok) {
+  let m = 0, bi = -1;
+  for (let i = 0; i < a.length; i++) {
+    if (ok && !ok(i)) continue;
+    if (a[i] > m) { m = a[i]; bi = i; }
+  }
+  return bi < 0 ? null : { x: bi % MAP, y: (bi / MAP) | 0 };
+}
+
+// GP6: the documented 5x5-window severity field for indicator rows. `mark(i)`
+// returns this tile's contribution (0 = not eligible). Ascending iteration in
+// both passes, so every tie resolves to the lowest index. O(25n), paid only on
+// a "Show me" click — never per frame, never per tick.
+function apxWin5(mark) {
+  const n = MAP * MAP, f = new Float64Array(n);
+  for (let i = 0; i < n; i++) f[i] = mark(i);
+  let best = 0, bi = -1;
+  for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+    let s = 0;
+    for (let dy = -2; dy <= 2; dy++) {
+      const Y = y + dy; if (Y < 0 || Y >= MAP) continue;
+      for (let dx = -2; dx <= 2; dx++) {
+        const X = x + dx; if (X < 0 || X >= MAP) continue;
+        s += f[Y * MAP + X];
+      }
+    }
+    if (s > best) { best = s; bi = y * MAP + x; }
+  }
+  if (bi < 0) return null;
+  const cx = bi % MAP, cy = (bi / MAP) | 0;
+  for (let dy = -2; dy <= 2; dy++) {
+    const Y = cy + dy; if (Y < 0 || Y >= MAP) continue;
+    for (let dx = -2; dx <= 2; dx++) {
+      const X = cx + dx; if (X < 0 || X >= MAP) continue;
+      const i = Y * MAP + X;
+      if (f[i] > 0) return { x: X, y: Y }; // ascending order == lowest index
+    }
+  }
+  return null;
+}
+
+// GP6: is this a developed zone tile (the census population every coverage /
+// power / water term is measured over)?
+const apxDevZone = (c, i) => (c.over[i] === OV.ZR || c.over[i] === OV.ZC ||
+  c.over[i] === OV.ZI) && c.lvl[i] > 0;
+// GP6: the traffic CARRIER set — verified as the only tiles recomputeTraffic
+// ever writes a nonzero traffic[] to (the two folds at the ROAD/WIREROAD and
+// XWAY/RAMP arms). Everything else is assigned exactly 0, so averaging over
+// carriers is the only honest "mean road traffic".
+const apxCarrier = (c, i) => { const t = c.over[i];
+  return t === OV.ROAD || t === OV.WIREROAD || t === OV.XWAY || t === OV.RAMP; };
+// GP6: shared shape of the four coverage penalties — 0.75 of the weight rides
+// the COVERAGE GAP and 0.25 the department's strain. That split is load-bearing:
+// deptStrain() reports strain === 1 (no strain) whenever cap === 0, i.e. a city
+// with NO stations or 0% funding reports none at all, so the gap component must
+// dominate or "bulldoze every fire station" would read as a healthy city.
+const apxCovPen = (cov, strain) =>
+  0.75 * Math.min(1, Math.max(0, (SVC_OK - cov) / SVC_OK)) + 0.25 * (1 - strain);
+const apxPct = (v) => Math.round(v * 100);
+
+const APPROVAL_TERMS = Object.freeze([
+  { id: "pollution", label: "The air is filthy", w: 12,
+    pen: (c, cen) => Math.min(1, cen.pollIdx / 100), mode: "poll", dlg: null,
+    focus: (c) => apxArgmax(c.poll),
+    blurb: (c, cen) => `The citywide smog index reads ${cen.pollIdx}. Industry, ` +
+      `traffic and power plants all smoke — parks and clean generation cut it.` },
+
+  { id: "power", label: "The lights keep going out", w: 12,
+    pen: (c, cen) => Math.min(1, cen.unpowShare / 0.25), mode: "power", dlg: null,
+    focus: (c) => apxWin5((i) => (apxDevZone(c, i) && !c.powered[i]) ? 1 : 0),
+    blurb: (c, cen) => `${cen.devUnpow} of ${cen.devZ} developed blocks ` +
+      `(${apxPct(cen.unpowShare)}%) are dark. Run wire to them, or build capacity.` },
+
+  { id: "congestion", label: "The traffic is unbearable", w: 12,
+    pen: (c, cen) => Math.min(1, Math.max(0, cen.meanTraffic - 30) / 70),
+    mode: "traffic", dlg: null,
+    focus: (c) => apxArgmax(c.traffic, (i) => apxCarrier(c, i)),
+    blurb: (c, cen) => `Average congestion across your ${cen.roadTiles} road tiles ` +
+      `is ${Math.round(cen.meanTraffic)} of 255. Rail, expressways and carpooling relieve it.` },
+
+  { id: "tax", label: "Taxes are too high", w: 10,
+    pen: (c) => Math.min(1, Math.max(0, c.taxRate - 7) / 8),
+    mode: null, dlg: "dlg-budget", focus: () => null,
+    blurb: (c) => `You tax at ${c.taxRate}%. Citizens grumble above 7% and ` +
+      `openly revolt at 15%.` },
+
+  { id: "covPolice", label: "Police never come", w: 9,
+    pen: (c, cen) => apxCovPen(cen.covPol, c.svcStrain.police), mode: "pol", dlg: null,
+    focus: (c) => apxWin5((i) => apxDevZone(c, i) ? Math.max(0, SVC_OK - c.polCov[i]) : 0),
+    blurb: (c, cen) => `Police coverage over your developed blocks averages ` +
+      `${Math.round(cen.covPol)} against a healthy ${SVC_OK}, at ${c.funding.police}% funding.` },
+
+  { id: "covFire", label: "The fire service can't reach us", w: 9,
+    pen: (c, cen) => apxCovPen(cen.covFire, c.svcStrain.fire), mode: "fire", dlg: null,
+    focus: (c) => apxWin5((i) => apxDevZone(c, i) ? Math.max(0, SVC_OK - c.fireCov[i]) : 0),
+    blurb: (c, cen) => `Fire coverage over your developed blocks averages ` +
+      `${Math.round(cen.covFire)} against a healthy ${SVC_OK}, at ${c.funding.fire}% funding.` },
+
+  { id: "unemployment", label: "There is no work", w: 8,
+    pen: (c) => { const need = c.pop * 0.62;
+      return Math.min(1, Math.max(0, need - c.jobs) / Math.max(1, need) / 0.25); },
+    mode: "commute", dlg: null,
+    focus: (c) => { const h = jaHealthy(c);
+      return apxWin5((i) => (c.over[i] === OV.ZR && c.lvl[i] > 0 && c.jobAccess[i] < h)
+        ? RES_POP[c.lvl[i]] : 0); },
+    blurb: (c) => `${c.pop.toLocaleString()} residents are chasing ` +
+      `${c.jobs.toLocaleString()} jobs — about ${Math.round(c.pop * 0.62).toLocaleString()} ` +
+      `of them want one. Zone commerce and industry they can actually reach.` },
+
+  { id: "crime", label: "Crime is out of control", w: 8,
+    pen: (c, cen) => Math.min(1, cen.crimeIdx / 100), mode: "crime", dlg: null,
+    focus: (c) => apxArgmax(c.crime),
+    blurb: (c, cen) => `The citywide crime index reads ${cen.crimeIdx}. Patrols, ` +
+      `land value and jobs all push it down.` },
+
+  { id: "commute", label: "The commute is brutal", w: 5,
+    pen: (c) => Math.min(1, Math.max(0, c.avgCommute - CMT_FIT_LO) / (MAX_COMMUTE - CMT_FIT_LO)),
+    mode: "commute", dlg: null,
+    focus: (c) => apxWin5((i) => (c.over[i] === OV.ZR && c.lvl[i] > 0 && c.jobAccess[i] === 0) ? 1 : 0),
+    blurb: (c) => `The average trip to work runs ${c.avgCommute} hops; ` +
+      `${CMT_FIT_LO} is comfortable and ${MAX_COMMUTE} is the point people give up.` },
+
+  { id: "water", label: "The taps run dry", w: 4,
+    pen: (c, cen) => Math.min(1, cen.unwatShare / 0.35), mode: "water", dlg: null,
+    focus: (c) => apxWin5((i) => (apxDevZone(c, i) && !c.watered[i]) ? 1 : 0),
+    blurb: (c, cen) => `${cen.devUnwat} of ${cen.devZ} developed blocks ` +
+      `(${apxPct(cen.unwatShare)}%) have no water. Lay pipe from a tower or pump.` },
+
+  { id: "covEdu", label: "The schools are failing", w: 3,
+    pen: (c, cen) => apxCovPen(cen.covEdu, c.svcStrain.edu), mode: "svc", dlg: null,
+    focus: (c) => apxWin5((i) => (c.over[i] === OV.ZR && c.lvl[i] > 0)
+      ? Math.max(0, SVC_OK - c.eduCov[i]) : 0),
+    blurb: (c, cen) => `School coverage over your neighborhoods averages ` +
+      `${Math.round(cen.covEdu)} against a healthy ${SVC_OK}, at ${c.funding.edu}% funding.` },
+
+  { id: "covHealth", label: "Nobody can see a doctor", w: 3,
+    pen: (c, cen) => apxCovPen(cen.covMed, c.svcStrain.health), mode: "svc", dlg: null,
+    focus: (c) => apxWin5((i) => (c.over[i] === OV.ZR && c.lvl[i] > 0)
+      ? Math.max(0, SVC_OK - c.medCov[i]) : 0),
+    blurb: (c, cen) => `Hospital coverage over your neighborhoods averages ` +
+      `${Math.round(cen.covMed)} against a healthy ${SVC_OK}, at ${c.funding.health}% funding.` },
+
+  { id: "rubble", label: "Nobody clears the rubble", w: 2,
+    pen: (c, cen) => Math.min(1, cen.rubble / Math.max(1, cen.devZ) / 0.05),
+    mode: "all", dlg: null,
+    focus: (c) => apxWin5((i) => c.over[i] === OV.RUBBLE ? 1 : 0),
+    blurb: (c, cen) => `${cen.rubble} tiles of burnt-out rubble are still standing ` +
+      `against ${cen.devZ} developed blocks. Bulldoze them.` },
+
+  { id: "disaster", label: "The city is under siege", w: 2,
+    pen: (c) => c.disaster ? 1 : 0, mode: "all", dlg: null,
+    focus: (c) => c.disaster ? { x: c.disaster.x, y: c.disaster.y } : null,
+    blurb: (c) => c.disaster
+      ? `A ${c.disaster.kind} is loose in the city right now. Everything else can wait.`
+      : `No disaster is in progress.` },
+
+  { id: "treasury", label: "City hall is broke", w: 1,
+    pen: (c) => c.funds < 0 ? 1 : c.funds < 2000 ? 0.6 : c.lastBudget.net < 0 ? 0.3 : 0,
+    mode: null, dlg: "dlg-budget", focus: () => null,
+    blurb: (c) => `The treasury holds §${Math.round(c.funds).toLocaleString()} ` +
+      `and last month closed at §${Math.round(c.lastBudget.net).toLocaleString()}.` },
+]);
+
 /* GP3a: ADVISORY verdicts — a SEPARATE table walked ONLY by diagnoseTile
    (the gridlock-escalation precedent: a panel annotation, never a growth row).
    CRITICAL DISCIPLINE: these rows must NEVER join GROWTH_GATES — firstGate is
@@ -1642,6 +1879,24 @@ class City {
        a tax premium, and the i1c/i2c/i3c sprite families. Rounded 4 dp so a
        serialize round-trip is exact. */
     this.eduLevel = 0;
+    /* GP6 (save v17): the citizen-approval state. `approval` is the PUBLISHED
+       mood, an EMA (rate APPROVAL_RATE) of the month's computed target — it is
+       PATH-DEPENDENT, not a pure function of the serialized world, which is
+       precisely why it and its two streaks serialize. -1 is the UNSEEDED
+       sentinel: the first approvalTick (or a legacy load) adopts the computed
+       target outright instead of easing up from zero.
+         approvalStreak  consecutive rollovers at/above MEGA_APPROVAL (the
+                         Megalopolis clock)
+         recallStreak    consecutive rollovers under RECALL_T
+         recallDone      once-per-city latch for the recall-petition edition
+         megaOk          DERIVED cache (never serialized) — recomputed at every
+                         rollover and at load from restored inputs, so the
+                         per-tick promotion test costs nothing. */
+    this.approval = -1;
+    this.approvalStreak = 0;
+    this.recallStreak = 0;
+    this.recallDone = false;
+    this.megaOk = false;
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
     // M19: build year of the power plant anchored at each tile (0 = no plant
     // here). Only meaningful at anchor tiles; drives the aging capacity curve.
@@ -1680,7 +1935,7 @@ class City {
     // same month. Serialized wholesale.
     // GP3b (save v14): avgcom samples the rounded avgCommute, appended AFTER
     // commute under the same ladder rule (v13 prefix stays stable).
-    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [] };
+    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [], approv: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       cleanTax: 0, // GP5b: the high-tech premium folded into taxes this month
@@ -4707,6 +4962,117 @@ class City {
     }
   }
 
+  /* ---------- citizen approval (GP6) ----------
+     approvalCensus(): ONE O(MAP*MAP) scan producing every aggregate the
+     APPROVAL_TERMS penalties need. PURE read — writes nothing, draws nothing,
+     never reads cam.r. Run at month rollover and at survey-dialog open ONLY
+     (the openTrafficReport precedent); refreshHUD must never call it.
+     ONE-SOURCE DISCIPLINE: the pollution and crime means come from the shipped
+     cityIndex() over the same planes the graphs and advisors read, and the
+     department strain figures are READ from this.svcStrain (which recomputeMaps
+     derives from the GP5a/GP5b deptStrain census) — nothing here recomputes a
+     figure the sim already publishes.
+       devZ / devUnpow / devUnwat  developed zone tiles, and how many of them
+                                   sit dark / dry
+       zrDev                       developed residential tiles (the population
+                                   eduAttain is measured over, so the school and
+                                   clinic means match it)
+       covPol/covFire              mean police/fire coverage over DEVELOPED zones
+       covEdu/covMed               mean school/hospital coverage over developed ZR
+       roadTiles / trafficSum      the traffic CARRIER set (see apxCarrier)
+       rubble                      burnt-out tiles still standing
+     With nothing developed the four coverage means read SVC_OK ("nothing to
+     cover is not a coverage failure") and every share reads 0, so an empty map
+     scores no grievances rather than all of them. */
+  approvalCensus() {
+    let devZ = 0, devUnpow = 0, devUnwat = 0, zrDev = 0;
+    let sPol = 0, sFire = 0, sEdu = 0, sMed = 0;
+    let roadTiles = 0, trafficSum = 0, rubble = 0;
+    for (let i = 0; i < this.over.length; i++) {
+      const t = this.over[i];
+      if (t === OV.NONE) continue;
+      if (t === OV.RUBBLE) { rubble++; continue; }
+      if (t === OV.ROAD || t === OV.WIREROAD || t === OV.XWAY || t === OV.RAMP) {
+        roadTiles++; trafficSum += this.traffic[i]; continue;
+      }
+      if (t === OV.ZR || t === OV.ZC || t === OV.ZI) {
+        if (!this.lvl[i]) continue; // a painted lot is not yet anybody's home
+        devZ++;
+        if (!this.powered[i]) devUnpow++;
+        if (!this.watered[i]) devUnwat++;
+        sPol += this.polCov[i]; sFire += this.fireCov[i];
+        if (t === OV.ZR) { zrDev++; sEdu += this.eduCov[i]; sMed += this.medCov[i]; }
+      }
+    }
+    return {
+      devZ, devUnpow, devUnwat, zrDev, roadTiles, trafficSum, rubble,
+      covPol: devZ ? sPol / devZ : SVC_OK, covFire: devZ ? sFire / devZ : SVC_OK,
+      covEdu: zrDev ? sEdu / zrDev : SVC_OK, covMed: zrDev ? sMed / zrDev : SVC_OK,
+      unpowShare: devZ ? devUnpow / devZ : 0,
+      unwatShare: devZ ? devUnwat / devZ : 0,
+      meanTraffic: roadTiles ? trafficSum / roadTiles : 0,
+      pollIdx: this.cityIndex(this.poll), crimeIdx: this.cityIndex(this.crime),
+    };
+  }
+
+  /* approvalReport(): the whole poll, PURE — no writes, no RNG, no cam.r.
+     Calls approvalCensus() exactly once, walks APPROVAL_TERMS and returns
+       { target, census, rows: [{id,label,w,p,s,naming,mode,dlg,focus,blurb}] }
+     with s_i = w_i * p_i and target = clamp(0,100, 100 - Σ s_i) — exact,
+     because Σw is 100 and every p is clamped to [0,1]. `naming` is the share of
+     the total grievance this row carries, as a whole percent ("how many
+     citizens name this"), 0 for rows that took nothing off. Rows come back
+     sorted by s descending, id ascending on ties — the order the dialog prints.
+     Called once per month by approvalTick and once per open by the survey
+     dialog. NEVER per frame. */
+  approvalReport() {
+    const cen = this.approvalCensus();
+    const rows = [];
+    let sum = 0;
+    for (const t of APPROVAL_TERMS) {
+      const p = Math.max(0, Math.min(1, t.pen(this, cen)));
+      const s = t.w * p;
+      sum += s;
+      rows.push({ id: t.id, label: t.label, w: t.w, p, s, naming: 0,
+        mode: t.mode, dlg: t.dlg, focus: t.focus, blurb: t.blurb(this, cen) });
+    }
+    for (const r of rows) r.naming = (r.s > 0 && sum > 0) ? Math.round(100 * r.s / sum) : 0;
+    rows.sort((a, b) => (b.s - a.s) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return { target: Math.max(0, Math.min(100, 100 - sum)), census: cen, rows };
+  }
+
+  /* approvalTick(): rollover only, ZERO RNG. Runs in tick()'s %24 block
+     between eduTick() and collectBudget(), so the month's history push carries
+     the value computed THIS month, and the treasury term reads last month's
+     closed books (lastBudget) plus live funds — deterministic and documented.
+     The published number is an EMA of the month's target: a mood, deliberately
+     path-dependent, which is why approval/approvalStreak/recallStreak/
+     recallDone all serialize. megaOk is the one safe derivation (recomputed
+     here and at load from serialized inputs). Approval feeds NOTHING in the
+     sim — no gate, no demand term, no growth fit (GP8 owns that coupling). */
+  approvalTick() {
+    const r = this.approvalReport();
+    this.approval = (this.approval < 0) ? round4(r.target)
+      : round4(this.approval + (r.target - this.approval) * APPROVAL_RATE);
+    this.approvalStreak = (this.approval >= MEGA_APPROVAL) ? this.approvalStreak + 1 : 0;
+    this.recallStreak = (this.approval < RECALL_T) ? this.recallStreak + 1 : 0;
+    if (!this.recallDone && this.recallStreak >= RECALL_MONTHS) {
+      this.recallDone = true;
+      const worst = r.rows[0];
+      this.newsQueue.push({
+        headline: "RECALL PETITION FILED AT CITY HALL",
+        sub: `Clipboards on every corner: approval has sat under ${RECALL_T}% for ` +
+          `${RECALL_MONTHS} straight months`,
+        body: `Organizers say they have the signatures. Asked what finally did it, ` +
+          `the first name on the petition answered without hesitating: "${worst.label}." ` +
+          `${worst.blurb} City hall promises a review. The petition is filed once — ` +
+          `what happens next is up to you, Mayor.`,
+      });
+    }
+    this.megaOk = this.pop >= MEGA_POP && this.approvalStreak >= MEGA_MONTHS &&
+      (this.avgCommute <= MEGA_COMMUTE || this.cityIndex(this.poll) <= MEGA_POLL);
+  }
+
   // ---------- budget (monthly) ----------
   collectBudget() {
     const dc = this.deptCosts(); // per-department charges (M23) — formula above
@@ -4792,10 +5158,18 @@ class City {
     // GP3b (save v14): the average-commute series, pushed AFTER commute so the
     // v13 keys keep their serialized order. Rounded to whole hops for the plot.
     this.history.avgcom.push(Math.round(this.avgCommute));
-    // trim all nine in lockstep under the one existing >240 guard so every
+    // GP6 (save v17): the approval series, pushed LAST (after avgcom) so the
+    // v16 keys keep their serialized order. approvalTick ran earlier in this
+    // same %24 block, so this is THIS month's mood. The unseeded sentinel (-1)
+    // records as 0 so the series stays plottable.
+    this.history.approv.push(Math.round(this.approval < 0 ? 0 : this.approval));
+    // trim all ten in lockstep under the one existing >240 guard so every
     // array stays the same length and month-aligned.
+    // SECOND LIST WARNING: this key list is the mirror of normaliseHistory()'s
+    // (js/sim.js, top of file) — extend BOTH or the new series is silently
+    // dropped on load / drifts out of month-alignment with the others.
     if (this.history.pop.length > 240)
-      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom"])
+      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv"])
         this.history[k].shift();
   }
 
@@ -4968,8 +5342,14 @@ class City {
     if (this.tickCount % 14 === 0) this.recomputeMaps();
     this.recomputeDemand();
 
-    // milestone check — promote to the highest qualifying rank, exactly once
-    const nt = tierForPop(this.pop);
+    // milestone check — promote to the highest qualifying rank, exactly once.
+    // GP6: tierForPop() covers the pop-only rungs 0..4 exactly as before; the
+    // gated Megalopolis rung is added here from the CACHED megaOk boolean
+    // (recomputed once per rollover by approvalTick — no O(n) work per tick).
+    // The `nt > this.tier` ratchet below is untouched, so the rung is monotonic
+    // and never regresses even once megaOk goes false again.
+    let nt = tierForPop(this.pop);
+    if (nt >= 4 && this.megaOk) nt = 5;
     if (nt > this.tier) {
       this.tier = nt;
       // M22: a tier rise can unlock a tier-gated ordinance — refresh the effect
@@ -5014,6 +5394,7 @@ class City {
       this.roadWearTick();    // road wear & crumble (M23) — rollover only
       this.plantAgingTick();  // power plant aging notices (M19) — rollover only
       this.eduTick();         // GP5b: education slow-stock EWMA — rollover only, zero RNG
+      this.approvalTick();    // GP6: citizen approval EMA + streaks — rollover only, zero RNG
       this.collectBudget();
       this.updateRecords();   // City Hall records (M17) — rollover only
       this.scanComplaints();  // citizen complaints (M17) — rollover only
@@ -5154,9 +5535,19 @@ class City {
        never serialized (the landv/poll policy — rebuilt from current state);
        NO new history series (normaliseHistory untouched) and no v===16 test
        anywhere in deserialize — a v15 save seeds eduLevel deterministically
-       from its restored coverage (see deserialize). */
+       from its restored coverage (see deserialize).
+       GP6 (save v17): FOUR scalars — approval, approvalStreak, recallStreak,
+       recallDone — appended AFTER eduLevel (ladder rule: the v16 prefix stays
+       character-stable), plus the "approv" history series (normaliseHistory AND
+       collectBudget's trim list both extended — see the warnings there). They
+       MUST persist: approval is an EMA carry, and the two streaks plus the
+       latch are episode state, so a load that dropped them would silently
+       re-roll the mood, restart the Megalopolis clock and re-publish the
+       recall edition. megaOk is DERIVED and NOT serialized (recomputed at load
+       from restored pop/streak/avgCommute/poll — the powered[]/svcStrain
+       policy). No v===17 test anywhere in deserialize. */
     return JSON.stringify({
-      v: 16, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 17, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -5246,6 +5637,10 @@ class City {
       /* ---- GP5b (save v16) ---- appended AFTER strandedShare (ladder rule).
          round4-stored, so serialize→deserialize→serialize is byte-stable. */
       eduLevel: this.eduLevel,
+      /* ---- GP6 (save v17) ---- appended AFTER eduLevel (ladder rule).
+         round4-stored, so serialize→deserialize→serialize is byte-stable. */
+      approval: round4(this.approval), approvalStreak: this.approvalStreak,
+      recallStreak: this.recallStreak, recallDone: this.recallDone,
     });
   }
 
@@ -5366,6 +5761,15 @@ class City {
        source. Defensive typeof guard, no v===16 test — a v15-or-older save
        lacks the field and is seeded deterministically AFTER the cascade. */
     if (typeof d.eduLevel === "number") c.eduLevel = d.eduLevel;
+    /* GP6 (save v17): the approval carry, the two streaks and the recall latch.
+       Pure data, restored early; the -1 sentinel means "no saved mood" (a v16
+       or older save) and is seeded from a computed target AFTER the cascade,
+       once the planes the census reads are final. Defensive typeof guards only,
+       no v===17 test — the whole ladder rule. */
+    c.approval = typeof d.approval === "number" ? d.approval : -1;
+    c.approvalStreak = typeof d.approvalStreak === "number" ? d.approvalStreak | 0 : 0;
+    c.recallStreak = typeof d.recallStreak === "number" ? d.recallStreak | 0 : 0;
+    c.recallDone = !!d.recallDone;
     restoreRngCursors(c, d);
     c.recomputeOrdinances();
     c.recomputePower(); c.recomputeAccess();
@@ -5459,6 +5863,20 @@ class City {
     // M29: restore an in-progress disaster, or null (legacy v10 saves and every
     // no-disaster save simply lack the field → loads identical to pre-M29).
     c.disaster = d.disaster || null;
+    /* GP6: seed an unseeded mood and rebuild the derived Megalopolis gate.
+       Placed here — after the WHOLE recompute cascade (so approvalCensus reads
+       the final planes and svcStrain) and after the disaster restore (a term
+       reads c.disaster) — so a v16-or-older save adopts exactly the target its
+       restored state computes, with history.approv = [] recording forward (the
+       M30 idiom), and a v17 save round-trips idempotently (the guard is
+       `< 0`, so a saved mood is never overwritten). approvalReport draws ZERO
+       randomness, so this cannot perturb the restored cursors — and the
+       restoreRngCursors below re-pins them regardless. megaOk uses the exact
+       expression approvalTick uses; there is only one copy of the rule per
+       call site and they are asserted equal by the milestone's gates. */
+    if (c.approval < 0) c.approval = round4(c.approvalReport().target);
+    c.megaOk = c.pop >= MEGA_POP && c.approvalStreak >= MEGA_MONTHS &&
+      (c.avgCommute <= MEGA_COMMUTE || c.cityIndex(c.poll) <= MEGA_POLL);
     /* GP1b, LAST: re-pin the cursors after the whole cascade (belt-and-braces —
        see restoreRngCursors) and restore the pending-recompute flag. recompute
        Power() clears powerDirty at its end, so this assignment must come after

@@ -108,7 +108,8 @@
             <tr><td>Power</td><td id="v-power">0/0</td></tr>
             <tr><td>Water</td><td id="v-water">0/0</td></tr>
             <tr><td>Commute</td><td id="v-commute">—</td></tr><!-- GP3a: % residents in healthy job reach -->
-            <tr><td>Approval</td><td id="v-approval">—</td></tr>
+            <!-- GP6: the approval cell is the entry point into the City Survey -->
+            <tr><td>Approval</td><td id="v-approval" class="vital-click" title="Open the City Survey">—</td></tr>
           </table>
         </fieldset>
       </div>
@@ -237,6 +238,8 @@
         <label><input type="checkbox" class="graph-series" data-series="commute"><span style="color:#4477aa">■</span> Commute %</label>
         <!-- GP3b: average commute hops, off by default (same policy) -->
         <label><input type="checkbox" class="graph-series" data-series="avgcom"><span style="color:#b06030">■</span> Avg commute</label>
+        <!-- GP6: citizen approval %, off by default (same policy) -->
+        <label><input type="checkbox" class="graph-series" data-series="approv"><span style="color:#a0208a">■</span> Approval %</label>
       </div>
       <div class="graph-range-strip" id="graph-range-strip">
         <label><input type="radio" name="graph-range" class="graph-range" value="1yr"> 1&nbsp;yr</label>
@@ -370,6 +373,20 @@
       <table id="traffic-table" class="budget-table"></table>
       <div class="traffic-note">Congestion certified by Chip's dashboard fuzzy dice.<br>Jump buttons swing the camera straight to the gridlock.</div>
       <div class="dlg-buttons"><button class="btn95 dlg-close">Back to you in the studio</button></div>
+    </div>
+  </div>
+
+  <!-- GP6: the City Survey — the approval number's ranked, clickable ledger.
+       Rows are rebuilt live on every open (that full scan runs at open time
+       only, never in the frame loop), each carrying a Show-me button that
+       switches minimap mode and swings the camera onto the worst block. -->
+  <div id="dlg-survey" class="win95 dlg hidden">
+    <div class="titlebar"><span>🗳️ City Survey — Llama Polling Group</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <div id="survey-head"></div>
+      <table id="survey-table" class="budget-table"></table>
+      <div class="survey-foot">Sample: 400 residents reached on a landline between dinner and Wheel of Fortune.<br>Show-me buttons switch the map and swing the camera to the worst block.</div>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">Thank you for your time</button></div>
     </div>
   </div>
 

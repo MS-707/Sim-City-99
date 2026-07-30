@@ -27,6 +27,10 @@ const UI = {
     commute: { on: false, color: "#4477aa", key: "commute", label: "Commute %", idx: true },
     // GP3b: citywide average commute (hops). OFF by default, same policy.
     avgcom: { on: false, color: "#b06030", key: "avgcom", label: "Avg commute", idx: true },
+    // GP6: citizen approval %, the monthly published mood. OFF by default so
+    // the shipped default render is pixel-unchanged; idx gives the raw-number
+    // legend + the 100yr monthly-tail fallback (there is no annual record).
+    approv: { on: false, color: "#a0208a", key: "approv", label: "Approval %", idx: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
   // GP1a: the open Tile Info target ({x, y, at}) — null whenever the dialog is
@@ -191,6 +195,7 @@ function uiInit() {
   bindTicker();
   pickerInit();
   bindRCI();
+  bindApproval(); // GP6: the Vitals approval cell opens the City Survey
   setTool("road");
 }
 
@@ -796,13 +801,19 @@ function updateMapLegend(mode) {
   el.classList.remove("hidden");
 }
 
+/* GP6: the ONE code path that switches minimap mode — extracted verbatim from
+   bindMinimap's inline click handler so a "Show me" button and a human click
+   can never disagree about UI.mapMode, the .active chip and the legend. A
+   behaviour-neutral refactor: the handler below now just calls this. */
+function setMapMode(mode) {
+  UI.mapMode = mode;
+  document.querySelectorAll(".mm").forEach(x => x.classList.toggle("active", x.dataset.mode === mode));
+  updateMapLegend(mode);
+}
+
 function bindMinimap() {
   document.querySelectorAll(".mm").forEach(b => {
-    b.addEventListener("click", () => {
-      UI.mapMode = b.dataset.mode;
-      document.querySelectorAll(".mm").forEach(x => x.classList.toggle("active", x === b));
-      updateMapLegend(b.dataset.mode);
-    });
+    b.addEventListener("click", () => setMapMode(b.dataset.mode));
   });
   // M32a: HUD rotate buttons
   const rccw = document.getElementById("rot-ccw");
@@ -1909,12 +1920,90 @@ function openTrafficReport() {
   showDlg("dlg-traffic");
 }
 
+/* ================= GP6: the City Survey =================
+   The approval number in Vitals is a button into this dialog: the ranked
+   ledger of what the city is actually angry about, with a "Show me" button per
+   row that switches to the documented minimap mode and swings the camera onto
+   that grievance's worst block (the openTrafficReport Jump pattern, generalized).
+   The full O(MAP*MAP) scan runs at OPEN time only — never in the frame loop.
+   Rows, weights, penalties, focus rules and blurbs all come from ONE table,
+   sim.js's APPROVAL_TERMS, so the dialog can never disagree with the sim. */
+const SURVEY_ROWS = 5; // rows printed, at most
+
+// Mood bands over the published (smoothed) approval number.
+function surveyMood(a) {
+  return a >= 85 ? "Adored"
+    : a >= 70 ? "Popular"
+    : a >= 55 ? "Getting by"
+    : a >= 40 ? "Restless"
+    : a >= 25 ? "Angry"
+    : "Ready to march on City Hall";
+}
+
+function openSurvey() {
+  const rep = city.approvalReport();          // one scan, at open time only
+  const a = city.approval < 0 ? rep.target : city.approval;
+  const head = document.getElementById("survey-head");
+  head.innerHTML =
+    `<div class="survey-num">${Math.round(a)}% <span class="survey-mood">${surveyMood(a)}</span></div>` +
+    `<div class="survey-note">The headline is the mood, smoothed over the last few months. ` +
+    `The list below is <b>this month's ledger</b> — what the city is angry about right now.</div>`;
+
+  const shown = rep.rows.filter((r) => r.s > 0).slice(0, SURVEY_ROWS);
+  const tbl = document.getElementById("survey-table");
+  tbl.innerHTML = shown.length
+    ? shown.map((r, k) => {
+        const bar = Math.max(2, Math.round(100 * r.p));
+        return `<tr><td class="survey-rank">${k + 1}</td>` +
+          `<td><b>${r.label}</b>` +
+          `<div class="survey-bar"><i style="width:${bar}%"></i></div>` +
+          `<div class="survey-pct">${r.naming}% of citizens name this ` +
+          `(costs you ${r.s.toFixed(1)} of ${r.w} points)</div>` +
+          `<div class="survey-blurb">${r.blurb}</div></td>` +
+          `<td><button class="btn95 tiny survey-show" data-id="${r.id}">Show me</button></td></tr>`;
+      }).join("")
+    : `<tr><td>Nobody has a bad word to say. Enjoy it, Mayor.</td></tr>`;
+
+  tbl.querySelectorAll(".survey-show").forEach((b) =>
+    b.addEventListener("click", () => {
+      Snd.click();
+      const row = rep.rows.find((r) => r.id === b.dataset.id);
+      if (!row) return;
+      if (row.dlg) { // aspatial: a tax RATE has no argmax tile — open its dialog
+        hideDlg("dlg-survey");
+        if (row.dlg === "dlg-budget") openBudget(); else showDlg(row.dlg);
+        setStatus(`🗳️ ${row.label} — the pollsters point you at the budget.`);
+        return;
+      }
+      setMapMode(row.mode); // ONE code path, shared with a human minimap click
+      const f = row.focus(city, rep.census);
+      if (f) {
+        zoomAnim.active = false; // a survey jump cancels a pending cursor-zoom
+        cam.x = worldX(f.x, f.y); cam.y = worldY(f.x, f.y);
+        clampCam();
+        setStatus(`🗳️ ${row.label} — worst around ${streetNameFor(f.x, f.y)}.`);
+      } else {
+        setStatus(`🗳️ ${row.label} — citywide, with no single worst block.`);
+      }
+    }));
+  showDlg("dlg-survey");
+}
+
+// GP6: the Vitals approval cell is the entry point into the survey.
+function bindApproval() {
+  const el = document.getElementById("v-approval");
+  if (!el) return;
+  el.addEventListener("click", () => { Snd.click(); openSurvey(); });
+}
+
 /* ================= milestone newspaper ================= */
 const NP_SUBHEADS = [
   null, null,
   "Mayor's mansion approved; hedge budget triples overnight",
   "Council greenlights stadium; scalpers already outside",
   "Skyline visible from THREE counties, claims tourism board",
+  // GP6: the gated rung — the only promotion that is not about size
+  "Governed, not just grown: approval held above the line for two straight years",
 ];
 
 function showNewspaper(k) {
@@ -1929,12 +2018,24 @@ function showNewspaper(k) {
   document.getElementById("np-sub").textContent = unlocks.length
     ? `City hall unlocks: ${unlocks.join(", ")} — check your toolbar, Mayor!`
     : (NP_SUBHEADS[k] || "Experts stunned; property values 'through the roof'");
-  document.getElementById("np-body").textContent =
-    `Sources at city hall confirm that as of ${MONTHS[city.month]} ${city.year}, ` +
-    `${city.cityName} officially ranks as a ${t.name} (${TIERS[k].pop.toLocaleString()}+ residents). ` +
-    `Locals celebrated by waiting for a dial tone. "We always believed," said one ` +
-    `resident, clutching a Tamagotchi. The mayor's office promises this changes nothing, ` +
-    `except everything.`;
+  // GP6: a GATED rung is not a size story — the front page states the three
+  // conditions the city actually met, rather than quoting a population floor
+  // as if zoning alone had bought it.
+  document.getElementById("np-body").textContent = t.gate
+    ? `Sources at city hall confirm that as of ${MONTHS[city.month]} ${city.year}, ` +
+      `${city.cityName} officially ranks as a ${t.name} — a title no amount of zoning can buy. ` +
+      `The clerk read out the three conditions on the certificate: ` +
+      `${TIERS[k].pop.toLocaleString()}+ residents (${city.pop.toLocaleString()} counted), ` +
+      `approval held at or above ${MEGA_APPROVAL}% for ${MEGA_MONTHS} straight months ` +
+      `(${city.approvalStreak} and counting), and a city that either moves ` +
+      `(average commute ${city.avgCommute} hops, ${MEGA_COMMUTE} or under qualifies) or breathes ` +
+      `(smog index ${city.cityIndex(city.poll)}, ${MEGA_POLL} or under qualifies). ` +
+      `"They didn't just build it," said one resident, clutching a Tamagotchi. "They ran it."`
+    : `Sources at city hall confirm that as of ${MONTHS[city.month]} ${city.year}, ` +
+      `${city.cityName} officially ranks as a ${t.name} (${TIERS[k].pop.toLocaleString()}+ residents). ` +
+      `Locals celebrated by waiting for a dial tone. "We always believed," said one ` +
+      `resident, clutching a Tamagotchi. The mayor's office promises this changes nothing, ` +
+      `except everything.`;
   showDlg("dlg-news");
   Snd.fanfare();
 }
@@ -2032,9 +2133,12 @@ function refreshHUD() {
     `${city.powerDemand}/${city.powerSupply}`;
   document.getElementById("v-water").textContent =
     `${city.waterSupply}/${city.waterDemand}`; // M24: supply/demand tiles
-  const approval = Math.max(5, Math.min(98,
-    70 - city.taxRate * 2.4 + (city.demand.r > 0 ? 10 : -8) | 0));
-  document.getElementById("v-approval").textContent = city.pop ? approval + "%" : "—";
+  // GP6: a pure READ of the serialized scalar the sim publishes once a month.
+  // refreshHUD runs every rAF and must NEVER compute a census — approvalTick
+  // (rollover) and openSurvey (dialog open) are the only callers of the
+  // O(MAP*MAP) approvalCensus/approvalReport pair. -1 is the unseeded sentinel.
+  document.getElementById("v-approval").textContent =
+    (city.pop && city.approval >= 0) ? Math.round(city.approval) + "%" : "—";
   // GP3a: commute stat — the cached recomputeJobAccess scalar, READ only
   // (never triggers a recompute; -1 = no residents prints an em-dash).
   document.getElementById("v-commute").textContent =

@@ -953,8 +953,8 @@ function computeNeighbors(seed) {
        SHARE one applyUpgrade — a row names the GATE a tile sits at, not the
        die's outcome, and the original spends exactly ONE draw across each pair.
    Order traps that are load-bearing: WATER_CAP fires at ANY lvl 1..2 and so
-   PRE-EMPTS all three level-2 caps (JOB_REACH — GP3b —, SVC_CAP,
-   PRESSURE_CAP); DECLINE precedes MAXED (a lvl-3 lot with
+   PRE-EMPTS the level-2 caps (JOB_REACH — GP3b —, HEALTH_CAP/EDU_CAP —
+   GP5b's split of the old SVC_CAP —, PRESSURE_CAP); DECLINE precedes MAXED (a lvl-3 lot with
    dem < -0.25 really does draw and really does decline); the caps
    precede UPG_NO_ROAD (the original never tested road once a cap hit).
    Gridlock is deliberately NOT a row: it is a PHASE that can co-occur with an
@@ -1063,8 +1063,11 @@ function gFit(c, i, k) {
   if (k.ov === OV.ZR) fit *= 1 - Math.min(1, Math.max(0, (c.avgCommute - CMT_FIT_LO) / (MAX_COMMUTE - CMT_FIT_LO))) * CMT_FIT_W;
   if (k.ov === OV.ZR) fit *= 1 - c.strandedShare * CMT_FIT_STR_W;
   fit *= 1 - cong * 0.75;                     // nobody moves up on a gridlocked block
-  const svc = (c.eduCov[i] + c.medCov[i]) / 510; // 0..1
-  fit *= 0.7 + svc * 1.1;
+  // GP5b (declared re-pin): the two coverage planes weighted SEPARATELY —
+  // health dominates where people live; education matters but less. The weight
+  // sum (1.1) preserves the old summed ceiling, so a balanced city's fit lands
+  // near the pre-split value (envelope-friendly, C6).
+  fit *= 0.7 + (c.medCov[i] / 255) * GFIT_MED_W + (c.eduCov[i] / 255) * GFIT_EDU_W;
   fit *= 0.55 + 0.45 * c.waterPressure;       // M24: water gates DENSITY
   return (k.fit = fit);
 }
@@ -1152,7 +1155,7 @@ const GROWTH_GATES = Object.freeze([
      the upgrade draw on gated tiles: THE declared RNG re-pin of this
      milestone, deliberately fenced to lvl-2 ZR tiles in cities past the
      JA_MIN_CITY_JOBS floor so ZC/ZI, young-city and low-density draws never
-     move. Sits with the other caps, ABOVE SVC_CAP: a job-cut-off block that
+     move. Sits with the other caps, ABOVE HEALTH_CAP/EDU_CAP: a job-cut-off block that
      also lacks services reports the job problem first (linking the district
      is the fix that unlocks anything at all), and since every cap row is
      apply:null the order among them cannot move a draw. Reads ONLY
@@ -1174,10 +1177,20 @@ const GROWTH_GATES = Object.freeze([
     evid: (c, i) => [["Jobs reachable", c.jobAccess[i]], ["Needed", jrUpgMin(c)],
                      ["Citywide", c.jobs]] },
 
-  { code: "SVC_CAP", sel: "up", sev: "warn", label: "No services", apply: null,
-    test: (c, i, k) => gUp(k) && k.lvl === 2 && c.eduCov[i] < 8 && c.medCov[i] < 8,
-    text: (c, i) => `No school or hospital in reach — towers need service coverage (education ${c.eduCov[i]}, health ${c.medCov[i]}; either must reach 8).`,
-    evid: (c, i) => [["Education", c.eduCov[i]], ["Health", c.medCov[i]]] },
+  /* GP5b: the old SVC_CAP OR-row ("either must reach 8") split into two
+     mechanically distinct caps IN THE SAME SLOT — health gates where people
+     live and shop, education gates where they work. Both stay apply:null like
+     every cap row, so the split cannot move a growth draw (the GP3b JOB_REACH
+     precedent); position among the caps preserves short-circuit order. */
+  { code: "HEALTH_CAP", sel: "up", sev: "warn", label: "No health cover", apply: null,
+    test: (c, i, k) => (k.ov === OV.ZR || k.ov === OV.ZC) && gUp(k) && k.lvl === 2 && c.medCov[i] < 8,
+    text: (c, i) => `No clinic in reach — towers need health coverage 8 (health here reads ${c.medCov[i]}).`,
+    evid: (c, i) => [["Health", c.medCov[i]], ["Needed", 8]] },
+
+  { code: "EDU_CAP", sel: "up", sev: "warn", label: "No skilled workforce", apply: null,
+    test: (c, i, k) => k.ov === OV.ZI && gUp(k) && k.lvl === 2 && c.eduCov[i] < 8,
+    text: (c, i) => `No skilled workforce — big plants need education coverage 8 (education here reads ${c.eduCov[i]}).`,
+    evid: (c, i) => [["Education", c.eduCov[i]], ["Needed", 8]] },
 
   { code: "PRESSURE_CAP", sel: "up", sev: "warn", label: "Low pressure", apply: null,
     test: (c, i, k) => gUp(k) && k.lvl === 2 && c.waterPressure < 0.9,
@@ -1382,6 +1395,34 @@ const covR = (radius, f) => Math.round(radius * (0.4 + 0.6 * f));
 const SVC_LINEAR = new Set([OV.ROAD, OV.WIREROAD, OV.XWAY, OV.RAMP,
   OV.WIRE, OV.PIPE, OV.RUBBLE]);
 
+/* GP5b: strain coupling + the education/health split — calibration knobs (S6:
+   tune these constants, never the gate bars).
+   GFIT_MED_W/GFIT_EDU_W  residential-fit weights for the two coverage planes;
+                          health-dominant (people live where the clinic is),
+                          sum 1.1 preserves the old (edu+med)/510*1.1 ceiling
+                          so a balanced city lands near the old fit value.
+   EDU_COV_MIN            eduCov a developed ZR tile must read to count as
+                          "schooled" in the attainment census (eduAttain).
+   EDU_RATE               monthly EWMA rate for the eduLevel slow stock —
+                          1/120 is a ~10-sim-year time constant: sustained 0.8
+                          attainment crosses EDU_T from 0 in ~9.8 years, and a
+                          lapsed system decays back below it in ~3.2 years.
+   EDU_T                  eduLevel threshold gating the clean-industry flip.
+   IND_CLEAN_POLL         clean high-tech industry emits this fraction of the
+                          dirty ZI smog source (the dirty path is untouched).
+   CLEAN_TAX_RATE         the high-tech premium on industrial jobs — a 50%
+                          markup on the 0.18 jobs rate, charged only while
+                          isCleanInd(); +0 keeps dirty budgets integer-identical. */
+const GFIT_MED_W = 0.75, GFIT_EDU_W = 0.35;
+const EDU_COV_MIN = 48;
+const EDU_RATE = 1 / 120;
+const EDU_T = 0.5;
+const IND_CLEAN_POLL = 0.45;
+const CLEAN_TAX_RATE = 0.09;
+// 4-dp round shared by the eduLevel stock and its load-time seeding, so the
+// JSON round-trip is exact (the avgCommute/strandedShare precedent).
+const round4 = (v) => Math.round(v * 10000) / 10000;
+
 /* GP3a: ADVISORY verdicts — a SEPARATE table walked ONLY by diagnoseTile
    (the gridlock-escalation precedent: a panel annotation, never a growth row).
    CRITICAL DISCIPLINE: these rows must NEVER join GROWTH_GATES — firstGate is
@@ -1494,6 +1535,14 @@ class City {
     this.fireCov = new Uint8Array(n);   // fire dept coverage
     this.eduCov  = new Uint8Array(n);   // school (education) coverage
     this.medCov  = new Uint8Array(n);   // hospital (health) coverage
+    /* GP5b: per-department strain multipliers in (0,1] — DERIVED from ONE
+       deptStrain() census at the top of every recomputeMaps and NEVER
+       serialized (the landv/poll/crime policy: rebuilt from current state on
+       load). mult = cap/load when an overloaded dept (load > cap > 0), else
+       exactly 1 — i.e. min(1, 1/displayedStrain), so the budget meter's crit
+       flip at STRAIN_CRIT (1.0) is the identical threshold at which the
+       coverage stamp starts shrinking: one census, one function, one line. */
+    this.svcStrain = { police: 1, fire: 1, edu: 1, health: 1 };
     // M28: wonder-landmark civic-pride land-value stamp. DERIVED — rebuilt from
     // over[] by stampLandmarkPride() every recomputeMaps and NEVER serialized
     // (same policy as polCov/watered/railCov), so bulldozing a landmark fully
@@ -1586,6 +1635,13 @@ class City {
     this.avgCommute = 0;
     this.strandedShare = 0;
     this.commuteDamp = 0;
+    /* GP5b (save v16): the education slow stock, 0..1 — a monthly EWMA of
+       eduAttain() (RES_POP-weighted share of developed ZR tiles with eduCov >=
+       EDU_COV_MIN) at rate EDU_RATE. Crossing EDU_T flips the city's
+       industrial mix to clean high-tech (isCleanInd) — lower ZI pollution,
+       a tax premium, and the i1c/i2c/i3c sprite families. Rounded 4 dp so a
+       serialize round-trip is exact. */
+    this.eduLevel = 0;
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
     // M19: build year of the power plant anchored at each tile (0 = no plant
     // here). Only meaningful at anchor tiles; drives the aging capacity curve.
@@ -1627,6 +1683,7 @@ class City {
     this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
+      cleanTax: 0, // GP5b: the high-tech premium folded into taxes this month
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
       ports: 0, portsRev: 0, portsCost: 0, // GP2: ports & terminals line
       dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0, water: 0, transit: 0 } }; // M24 water / M25 transit upkeep
@@ -3245,6 +3302,23 @@ class City {
   // ---------- pollution / land value / crime / coverage ----------
   recomputeMaps() {
     const n = MAP * MAP;
+    /* GP5b: refresh the DERIVED strain multipliers FIRST, from ONE call to the
+       GP5a-certified deptStrain() census, so the four stampCoverage calls
+       below (and serviceGhost, which reads the same cache) all see the same
+       numbers the budget meters display. mult = cap/load only when genuinely
+       overloaded (load > cap > 0) — exactly min(1, 1/strain), so the meter's
+       crit band and the potency scaling share one threshold. Zero RNG; one
+       O(n) scan per recomputeMaps (every 14 ticks), never per frame. */
+    {
+      const ds = this.deptStrain();
+      for (const k in ds) {
+        const s = ds[k];
+        this.svcStrain[k] = (s.cap > 0 && s.load > s.cap) ? s.cap / s.load : 1;
+      }
+    }
+    // GP5b: the clean-industry flag, hoisted ONCE — the dirty path below keeps
+    // the untouched original expression (byte-identical planes, C5).
+    const clean = this.isCleanInd();
     const src = new Float32Array(n);
     // M19: fossil-plant smog scales with the grid LOAD FACTOR — how hard the
     // plants are actually being driven — not a flat constant. A coal plant
@@ -3262,7 +3336,10 @@ class City {
     const pm = this.ordMods.pollMul;
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
-      if (t === OV.ZI) src[i] += (30 + this.lvl[i] * 35) * pm;
+      // GP5b: clean high-tech industry emits IND_CLEAN_POLL of the dirty smog.
+      // The dirty arithmetic is the untouched original expression — the
+      // conditional multiply runs only while isCleanInd() (byte-identity, C5).
+      if (t === OV.ZI) { let z = (30 + this.lvl[i] * 35) * pm; if (clean) z *= IND_CLEAN_POLL; src[i] += z; }
       if (t === OV.COAL) src[i] += coalSmog;
       if (t === OV.GAS) src[i] += gasSmog;   // gas smokes; solar & wind stay clean
       if (t === OV.ROAD || t === OV.WIREROAD) src[i] += 8 * pm; // M26: crossing pollutes like a road
@@ -3299,10 +3376,14 @@ class City {
     // police / fire / education / health coverage — each department's stamp
     // is scaled by its OWN funding level only (M23), so cutting one budget
     // never perturbs the other three coverage arrays
-    this.stampCoverage(OV.POLICE, this.polCov, 12, this.funding.police / 100);
-    this.stampCoverage(OV.FIRESTA, this.fireCov, 12, this.funding.fire / 100);
-    this.stampCoverage(OV.SCHOOL, this.eduCov, 14, this.funding.edu / 100);
-    this.stampCoverage(OV.HOSPITAL, this.medCov, 14, this.funding.health / 100);
+    // GP5b: each stamp now also carries its department's strain multiplier
+    // (computed above from the same census the meters display) — an overloaded
+    // department's stations serve their radius at reduced potency until the
+    // player adds stations or funding. s === 1 is a byte-identical fast path.
+    this.stampCoverage(OV.POLICE, this.polCov, 12, this.funding.police / 100, this.svcStrain.police);
+    this.stampCoverage(OV.FIRESTA, this.fireCov, 12, this.funding.fire / 100, this.svcStrain.fire);
+    this.stampCoverage(OV.SCHOOL, this.eduCov, 14, this.funding.edu / 100, this.svcStrain.edu);
+    this.stampCoverage(OV.HOSPITAL, this.medCov, 14, this.funding.health / 100, this.svcStrain.health);
     // M28: wonder-landmark civic pride — a wide-radius land-value stamp rebuilt
     // fresh from over[] every pass, so removal fully reverts on the next call.
     this.stampLandmarkPride();
@@ -3370,8 +3451,14 @@ class City {
      over the full radii 12/12/14/14 — so default play is unchanged. Potency
      scales linearly with f, so coverage is strictly monotone in funding
      (100% > 50% > 25% wherever any station reaches). Documented floor at 0%:
-     f = 0 stamps nothing at all — the coverage array is all zeros. */
-  stampCoverage(type, out, radius, f = 1) {
+     f = 0 stamps nothing at all — the coverage array is all zeros.
+     GP5b: `s` is the department's strain multiplier (svcStrain, in (0,1]) —
+     it scales the POTENCY term only, deliberately never the radius: an
+     overloaded department still answers calls across its whole beat, just
+     thinner everywhere. FAST PATH: s === 1 leaves x*1 === x in IEEE754, so
+     the Math.round argument — and therefore the whole stamp — is
+     byte-identical to the pre-GP5b baseline (asserted, C5). */
+  stampCoverage(type, out, radius, f = 1, s = 1) {
     out.fill(0);
     if (f <= 0) return; // 0% funding: the documented floor — zero coverage
     const R = covR(radius, f); // GP5a: hoisted formula, identical arithmetic
@@ -3385,7 +3472,7 @@ class City {
         const d = Math.abs(dx) + Math.abs(dy);
         if (d > R) continue;
         const j = this.idx(X, Y);
-        out[j] = Math.max(out[j], Math.min(255, Math.round((R - d) * 18 * f)));
+        out[j] = Math.max(out[j], Math.min(255, Math.round((R - d) * 18 * f * s)));
       }
     }
   }
@@ -3405,6 +3492,10 @@ class City {
     if (!def) return [];
     const f = this.funding[def.dept] / 100;
     if (f <= 0) return []; // the documented 0%-funding floor: stamps nothing
+    // GP5b: read the SAME cached strain multiplier the stamp applies —
+    // refreshed by the same recomputeMaps the UI already triggers — so the
+    // ghost stays the exact { j : stamp value > 0 } set under strain too.
+    const s = this.svcStrain[def.dept];
     const R = covR(def.radius, f);
     const out = [];
     for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
@@ -3412,7 +3503,7 @@ class City {
       if (!this.inMap(X, Y)) continue;
       const d = Math.abs(dx) + Math.abs(dy);
       if (d > R) continue;
-      if (Math.round((R - d) * 18 * f) <= 0) continue; // the zero-potency rim
+      if (Math.round((R - d) * 18 * f * s) <= 0) continue; // the zero-potency rim
       out.push(this.idx(X, Y));
     }
     return out;
@@ -3750,8 +3841,13 @@ class City {
     const jobs = cJobs + iJobs;                       // === the committed this.jobs
     const taxMod = (7 - this.taxRate) * 0.05;         // low taxes juice demand
     const stadMod = Math.min(2, stadiums) * 0.06;     // a stadium makes people move in
-    // good schools & hospitals attract families (and the workers follow)
-    const svcMod = Math.min(3, schools) * 0.05 + Math.min(3, hospitals) * 0.05;
+    // GP5b: the old summed svcMod split into its two named halves — health is
+    // the population-growth/mortality lever, education the workforce lever.
+    // Each keeps the original 0.05-per-anchor unit and min-3 cap, so equal
+    // school+hospital counts reproduce the old totals through the weight pairs
+    // in recomputeDemand (a bounded re-pin).
+    const eduMod = Math.min(3, schools) * 0.05;
+    const healthMod = Math.min(3, hospitals) * 0.05;
     // time-capsule event modifiers shift demand additively while active (M7)
     let evR = 0, evC = 0, evI = 0;
     for (const m of this.activeMods) {
@@ -3765,7 +3861,8 @@ class City {
     // identically through clampD [-1,1]. All zero when nothing is enacted.
     out.pop = pop; out.jobs = jobs; out.cJobs = cJobs; out.iJobs = iJobs;
     out.stadiums = stadiums; out.schools = schools; out.hospitals = hospitals;
-    out.resTiles = resTiles; out.taxMod = taxMod; out.stadMod = stadMod; out.svcMod = svcMod;
+    out.resTiles = resTiles; out.taxMod = taxMod; out.stadMod = stadMod;
+    out.eduMod = eduMod; out.healthMod = healthMod;
     out.evR = evR; out.evC = evC; out.evI = evI; out.jobsAvail = jobsAvail;
     out.om = this.ordMods;
     return out;
@@ -3774,7 +3871,7 @@ class City {
   recomputeDemand() {
     const p = this.computeDemandParts(this._dparts || (this._dparts = {}));
     const pop = p.pop, cJobs = p.cJobs, iJobs = p.iJobs;
-    const taxMod = p.taxMod, stadMod = p.stadMod, svcMod = p.svcMod;
+    const taxMod = p.taxMod, stadMod = p.stadMod, eduMod = p.eduMod, healthMod = p.healthMod;
     const evR = p.evR, evC = p.evC, evI = p.evI, jobsAvail = p.jobsAvail, om = p.om;
     this.pop = pop; this.jobs = p.jobs;
     // M22: cache the live counts the ordinance §-functions read (nostalgiaTax
@@ -3796,9 +3893,15 @@ class City {
        IEEE754, so its demand — and every dem comparison feeding the RNG
        stream — is bit-identical to pre-GP3b. */
     this.commuteDamp = Math.min(CMT_DEM_CAP, Math.max(0, (this.avgCommute - CMT_DEM_LO) * CMT_DEM_AVG_W) + this.strandedShare * CMT_DEM_STR_W);
-    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR - this.commuteDamp);
-    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC + this.portDemC);
-    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI + this.portDemI);
+    /* GP5b: the summed svcMod term replaced IN PLACE by weighted health/edu
+       pairs. Each pair sums to the old coefficient (r: 1.4+0.6 = the old 2
+       halves of svcMod; c/i: 0.7+0.3 and 0.6+0.4 = the old 0.5+0.5 of one
+       0.05-unit), so equal school+hospital counts reproduce the old totals —
+       a bounded re-pin. Health pulls residents (mortality/growth), education
+       pulls employers. */
+    this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + healthMod * 1.4 + eduMod * 0.6 + evR + om.demR - this.commuteDamp);
+    this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + eduMod * 0.7 + healthMod * 0.3 + evC + om.demC + this.portDemC);
+    this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + eduMod * 0.6 + healthMod * 0.4 + evI + om.demI + this.portDemI);
   }
 
   /* GP1a: the UI-facing decomposition of the RCI bars — NAMED SIGNED
@@ -3824,7 +3927,10 @@ class City {
         ["Jobs available", p.jobsAvail / 220],
         ["Tax rate", p.taxMod],
         ["Stadiums", p.stadMod],
-        ["Schools & hospitals", p.svcMod],
+        // GP5b: the split rows, in the EXACT source order of the expression
+        // (health then edu for R) — preserving parts-sum-reproduces-raw
+        ["Hospitals", p.healthMod * 1.4],
+        ["Schools", p.eduMod * 0.6],
         ["Events", p.evR],
         ["Ordinances", p.om.demR],
         // GP3b: the commute term, in the SAME source order as the expression —
@@ -3834,7 +3940,8 @@ class City {
       mk("c", "Commercial", this.demand.c, [
         ["Shoppers vs jobs", (p.pop * 0.28 - p.cJobs) / 160],
         ["Tax rate", p.taxMod * 0.6],
-        ["Schools & hospitals", p.svcMod * 0.5],
+        ["Schools", p.eduMod * 0.7],   // GP5b: source order — edu then health for C
+        ["Hospitals", p.healthMod * 0.3],
         ["Events", p.evC],
         ["Ordinances", p.om.demC],
         // GP2: the airport term, in the SAME source order as the expression —
@@ -3846,7 +3953,8 @@ class City {
         ["Workers vs jobs", (p.pop * 0.42 - p.iJobs) / 180],
         ["Export base", 0.28],
         ["Tax rate", p.taxMod * 0.4],
-        ["Schools & hospitals", p.svcMod * 0.5],
+        ["Schools", p.eduMod * 0.6],   // GP5b: source order — edu then health for I
+        ["Hospitals", p.healthMod * 0.4],
         ["Events", p.evI],
         ["Ordinances", p.om.demI],
         ["Ports & terminals", this.portDemI], // GP2: the seaport term (see above)
@@ -4521,7 +4629,10 @@ class City {
              edu    = popLoad             health = popLoad
        cap  = round(poweredAnchors * SVC_DEF cap * funding / 100)
        strain = load / cap, or null when cap is 0 (never NaN/Infinity).
-     DISPLAY-ONLY in GP5a: nothing in the sim reads the result. */
+     GP5b: no longer display-only — recomputeMaps derives svcStrain (the
+     coverage-potency multipliers) from ONE call to this same census, so the
+     meters and the sim can never disagree. Still a pure read: it is called
+     from recomputeMaps (every 14 ticks) and UI fills, never per frame. */
   deptStrain() {
     let popLoad = 0, jobLoad = 0, structures = 0;
     const anchors = { police: 0, fire: 0, edu: 0, health: 0 };
@@ -4558,10 +4669,54 @@ class City {
     return out;
   }
 
+  /* ---------- education slow stock (GP5b) ----------
+     eduAttain(): PURE read — the RES_POP-weighted share of developed ZR tiles
+     whose eduCov reads at least EDU_COV_MIN. Rounded 4 dp (round4) so the
+     load-time seeding of a pre-v16 save is an exact, reproducible function of
+     the restored coverage. Zero-resident cities read 0. */
+  eduAttain() {
+    let popT = 0, schooled = 0;
+    for (let i = 0; i < this.over.length; i++) {
+      if (this.over[i] !== OV.ZR || this.lvl[i] === 0) continue;
+      const p = RES_POP[this.lvl[i]];
+      popT += p;
+      if (this.eduCov[i] >= EDU_COV_MIN) schooled += p;
+    }
+    return popT > 0 ? round4(schooled / popT) : 0;
+  }
+
+  // The clean-industry gate — ONE definition read by recomputeMaps (pollution),
+  // collectBudget (tax premium), spriteFor (the i1c/i2c/i3c families) and
+  // updateSmoke (plume gate), so no surface can disagree about the mix.
+  isCleanInd() { return this.eduLevel >= EDU_T; }
+
+  /* Monthly EWMA of attainment into the eduLevel stock — rollover only, from
+     tick()'s % 24 branch (after plantAgingTick, before collectBudget so the
+     month's taxes reflect the month's mix). EDU_RATE = 1/120 gives a ~10-year
+     time constant: sustained 0.8 attainment crosses EDU_T in ~9.8 sim-years;
+     a lapsed system decays back below it in ~3.2. The flip ticker is COMPUTED
+     from the before/after threshold test (never a stored latch), so it fires
+     exactly once per transition and is deterministic across save/load. */
+  eduTick() {
+    const was = this.isCleanInd();
+    this.eduLevel = round4(this.eduLevel + (this.eduAttain() - this.eduLevel) * EDU_RATE);
+    if (this.isCleanInd() !== was) {
+      this.pushMsg(this.isCleanInd()
+        ? "🎓 A generation of graduates! High-tech firms are re-tooling the smokestack district — industry runs clean."
+        : "🏭 The skilled workforce has thinned — industry is slipping back to smokestacks.");
+    }
+  }
+
   // ---------- budget (monthly) ----------
   collectBudget() {
     const dc = this.deptCosts(); // per-department charges (M23) — formula above
-    const taxes = Math.round(this.pop * this.taxRate * 0.28 + this.jobs * this.taxRate * 0.18);
+    // GP5b: clean high-tech industry assesses higher per job — a CLEAN_TAX_RATE
+    // premium on the industrial jobs the census committed this tick. Exactly
+    // the integer 0 while dirty (x + 0 keeps every pre-GP5b budget
+    // integer-identical); recorded on lastBudget for the UI line.
+    const cleanTax = this.isCleanInd()
+      ? Math.round((this._dparts ? this._dparts.iJobs : 0) * this.taxRate * CLEAN_TAX_RATE) : 0;
+    const taxes = Math.round(this.pop * this.taxRate * 0.28 + this.jobs * this.taxRate * 0.18) + cleanTax;
     const roadCost = dc.roads;
     const serviceCost = dc.police + dc.fire + dc.edu + dc.health;
     const plantCost = dc.plants;
@@ -4608,6 +4763,7 @@ class City {
     this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost,
       water: waterCost, transit: transitCost, debt, net, // M24 water / M25 transit upkeep lines
       trade, // M27: regional power-trade line
+      cleanTax, // GP5b: the high-tech premium already folded into `taxes`
       // M22: the ordinance line (net = revenue - cost) charged this month
       ord: ob.net, ordCost: ob.cost, ordRev: ob.rev,
       // GP2: the ports & terminals line (same ord/ordCost/ordRev shape)
@@ -4857,6 +5013,7 @@ class City {
       this.eventsTick();
       this.roadWearTick();    // road wear & crumble (M23) — rollover only
       this.plantAgingTick();  // power plant aging notices (M19) — rollover only
+      this.eduTick();         // GP5b: education slow-stock EWMA — rollover only, zero RNG
       this.collectBudget();
       this.updateRecords();   // City Hall records (M17) — rollover only
       this.scanComplaints();  // citizen complaints (M17) — rollover only
@@ -4990,9 +5147,16 @@ class City {
        packU8 planes, which cover only traffic/unpow/fire); avgCommute/
        strandedShare are already serialized; NO new keys, NO new history
        series (so normaliseHistory is untouched), and no v===15 test anywhere
-       in deserialize — a v14 save simply loads with no xp tiles. */
+       in deserialize — a v14 save simply loads with no xp tiles.
+       GP5b (save v16): ONE new key — eduLevel, appended AFTER strandedShare
+       (ladder rule: the v15 prefix stays character-stable). Already rounded
+       4 dp (round4) so the JSON round-trip is exact. svcStrain is DERIVED and
+       never serialized (the landv/poll policy — rebuilt from current state);
+       NO new history series (normaliseHistory untouched) and no v===16 test
+       anywhere in deserialize — a v15 save seeds eduLevel deterministically
+       from its restored coverage (see deserialize). */
     return JSON.stringify({
-      v: 15, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 16, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -5079,6 +5243,9 @@ class City {
          are already rounded (1 dp / 3 dp) by recomputeTraffic, so the JSON
          round-trip is exact. */
       avgCommute: this.avgCommute, strandedShare: this.strandedShare,
+      /* ---- GP5b (save v16) ---- appended AFTER strandedShare (ladder rule).
+         round4-stored, so serialize→deserialize→serialize is byte-stable. */
+      eduLevel: this.eduLevel,
     });
   }
 
@@ -5194,6 +5361,11 @@ class City {
     if (typeof d.trafficEpoch === "number") c.trafficEpoch = d.trafficEpoch | 0;
     else c.trafficEpoch = c.tickCount;
     if (typeof d.sinceComplaint === "number") c.sinceComplaint = d.sinceComplaint | 0;
+    /* GP5b (save v16): restore the education stock BEFORE the cascade, so the
+       recomputeMaps below reads the right isCleanInd() for the ZI pollution
+       source. Defensive typeof guard, no v===16 test — a v15-or-older save
+       lacks the field and is seeded deterministically AFTER the cascade. */
+    if (typeof d.eduLevel === "number") c.eduLevel = d.eduLevel;
     restoreRngCursors(c, d);
     c.recomputeOrdinances();
     c.recomputePower(); c.recomputeAccess();
@@ -5247,6 +5419,16 @@ class City {
     if (typeof d.avgCommute === "number") c.avgCommute = d.avgCommute;
     if (typeof d.strandedShare === "number") c.strandedShare = d.strandedShare;
     c.recomputeMaps(); c.recomputeDemand();
+    /* GP5b: a pre-v16 save carries no eduLevel — seed it from eduAttain(), a
+       PURE deterministic function of the coverage the cascade just rebuilt
+       (already round4). Iff the seed lands clean, one extra recomputeMaps —
+       an idempotent rebuild pass — so poll reflects the seeded mix. Runs
+       AFTER the cascade (eduAttain reads the fresh eduCov) and never on a
+       v16 save (typeof guard, no v===16 test). */
+    if (typeof d.eduLevel !== "number") {
+      c.eduLevel = c.eduAttain();
+      if (c.isCleanInd()) c.recomputeMaps();
+    }
     /* GP3a: warm the job-access field before the first frame. AFTER the
        cascade (it reads the final stationLive/railNet/lvl and the census jobs
        recomputeDemand just committed) and BEFORE the final restoreRngCursors —

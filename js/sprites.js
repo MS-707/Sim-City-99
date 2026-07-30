@@ -3422,6 +3422,81 @@ function buildSprites() {
     ART_RNG = prevRng;
   }
 
+  /* ---- GP5b: clean high-tech industry families (i1c / i2c / i3c) ----
+     The sprite half of the eduLevel payoff: when city.isCleanInd() flips,
+     spriteFor swaps the whole ZI ladder to these families. APPENDED AFTER
+     every existing bake and drawn ONLY under a forked mulberry32 seed swapped
+     in/out of ART_RNG (the i2/gasRng idiom above), so every shipped sprite —
+     all facings, all seasons, night/pool layers — stays byte-identical (C5).
+     Palette: cool glass/white campus, hue ~190-205 (12deg+ clear of every
+     zone family), lightness DECLINING by density (MN3 non-hue cue); rooftop
+     AC/antennas instead of rust stacks. Built from the same prism/windows/
+     withNight/withJitter helpers, so night sets, winter snow caps, per-facing
+     lazy bakes and click-picking come free. */
+  const i1c = [], i2c = [], i3c = [];
+  {
+    const cleanRng = mulberry32((0xC1EA12 ^ (BR * 0x9E3779B1)) >>> 0);
+    const prevRng = ART_RNG; ART_RNG = cleanRng;
+    const Rc = () => cleanRng();
+    const i1cBase = ["#a9c6ce", "#a4c3d0", "#aecad2", "#9fbfc9", "#abc8d5"];
+    const i2cBase = ["#8bb0bd", "#85acbe", "#90b4c1", "#7fa7b8", "#88afc4"];
+    const i3cBase = ["#6d95a8", "#67909f", "#7299ae", "#628ba0", "#6b93ab"];
+    const IC_ROOF = ["#e8eef2", "#e4ebf0", "#eceff4", "#e0e8ee", "#e6edf3"];
+    const IC_LIT = "#d8f2fa", IC_DARK = "#1e2a32";
+    for (let v = 0; v < NV; v++) {
+      // i1c: low white lab shed — glass entry band, one roof AC + whip antenna
+      const i1cHT = 16;
+      i1c.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
+        const base = i1cBase[v];
+        const cn = prism(g, ox, oy, 1, 1, i1cHT, base, zoneFaces(base, IC_ROOF[v]));
+        windows(g, up(cn.W, 0), up(cn.S, 0), i1cHT, 1, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
+        windows(g, up(cn.S, 0), up(cn.E, 0), i1cHT, 1, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
+        const rx = ox, ry = cn.N[1] - i1cHT + 4;
+        g.fillStyle = "#b8c4cc"; g.fillRect(rx - 6, ry - 2, 8, 5);   // roof AC
+        g.fillStyle = "#d4dde3"; g.fillRect(rx - 6, ry - 3, 8, 2);
+        g.strokeStyle = "#5a6a74"; g.lineWidth = 1;                  // whip antenna
+        g.beginPath(); g.moveTo(rx + 8, ry + 2); g.lineTo(rx + 8, ry - 10); g.stroke();
+      })));
+      // i2c: mid glass block — cool curtain-wall panes, roof AC pair + mast
+      const i2cHT = 26;
+      i2c.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
+        const base = i2cBase[v];
+        const { W, S, E, N } = prism(g, ox, oy, 1, 1, i2cHT, base, zoneFaces(base, IC_ROOF[v]));
+        windows(g, up(W, 0), up(S, 0), i2cHT, 2, 3, 0.55, IC_LIT, IC_DARK, GLOW_COOL);
+        windows(g, up(S, 0), up(E, 0), i2cHT, 2, 3, 0.55, IC_LIT, IC_DARK, GLOW_COOL);
+        const [cx2, cy2] = roofDeck(g, ox, oy, 1, 1, i2cHT, shade(base, 1.25), "rgba(20,26,32,.7)");
+        g.fillStyle = "#b8c4cc"; g.fillRect(cx2 - 8, cy2 - 1, 8, 5);  // AC pair, no stacks
+        g.fillStyle = "#d4dde3"; g.fillRect(cx2 - 8, cy2 - 2, 8, 2);
+        g.fillStyle = "#b8c4cc"; g.fillRect(cx2 + 3, cy2 + 3, 7, 4);
+        g.strokeStyle = "#4a5a64"; g.lineWidth = 1.4;                 // comms mast
+        g.beginPath(); g.moveTo(cx2, cy2 - 2); g.lineTo(cx2, cy2 - 16); g.stroke();
+        groundPool(ox + 8, oy + 4, 15, 6, GLOW_COOL); // campus forecourt light
+        if (GLOWG) { GLOWG.fillStyle = "#8ae0f0"; GLOWG.fillRect(cx2 - 1, cy2 - 18, 3, 3); }
+      }), { BR, fam: 20, v, cx: HW, cy: 44, spread: 8 }));
+      // i3c: dense hi-tech tower — full glass, dish + lattice mast, zero stacks
+      i3c.push(withJitter(withNight(1, 1, 74, (g, ox, oy) => {
+        const base = i3cBase[v];
+        const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, zoneFaces(base, IC_ROOF[v]));
+        windows(g, up(W, 0), up(S, 0), 38, 3, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
+        windows(g, up(S, 0), up(E, 0), 38, 3, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
+        const ry = N[1] - 38;
+        roofClutter(g, ox - 2, ry + 8, 2, Rc);                       // AC/vents (seeded, forked)
+        g.fillStyle = "#dfe6ea";                                     // satellite dish
+        g.beginPath(); g.ellipse(ox + 12, ry + 6, 5, 3, -0.5, 0, 7); g.fill();
+        g.strokeStyle = "#9aa6ae"; g.beginPath(); g.moveTo(ox + 12, ry + 6); g.lineTo(ox + 15, ry + 2); g.stroke();
+        g.strokeStyle = "#3c4854"; g.lineWidth = 1.6;                // lattice mast
+        g.beginPath(); g.moveTo(ox - 10, ry + 4); g.lineTo(ox - 10, ry - 14); g.stroke();
+        g.strokeStyle = "#6a7680"; g.lineWidth = 1;
+        for (let k = 0; k < 3; k++) {
+          g.beginPath(); g.moveTo(ox - 13, ry - 2 - k * 4); g.lineTo(ox - 7, ry - 2 - k * 4); g.stroke();
+        }
+        groundPool(ox - 2, oy + 6, 17, 7, GLOW_COOL); // forecourt, cool not sodium
+        if (GLOWG) { GLOWG.fillStyle = "#8ae0f0"; GLOWG.fillRect(ox - 11, ry - 16, 3, 3); }
+      })));
+    }
+    ART_RNG = prevRng;
+  }
+
   /* ---- seasonal building lookup (G14) ----
      spriteFor picks a building set by season. summer & spring reuse the bake
      above (byte-identical to HEAD). winter derives a snow-capped, cool-graded
@@ -3445,6 +3520,8 @@ function buildSprites() {
     statue: statue, eiffel: eiffel, pyramid: pyramid,
     // GQ10: appended at the literal END so existing evaluation order holds
     nuke: nuke, airport: airport, seaport: seaport,
+    // GP5b: clean-industry families, appended after everything (forked-seed bakes)
+    i1c: i1c, i2c: i2c, i3c: i3c,
   };
   const winterSet = {
     r1: seasonR1("winter"),
@@ -3465,6 +3542,8 @@ function buildSprites() {
     // GQ10: appended at the literal END (makeWinter is a pure per-pixel
     // recolor — RNG-free — so no side-stream wrap is needed here)
     nuke: makeWinter(nuke), airport: makeWinter(airport), seaport: makeWinter(seaport),
+    // GP5b: snow-capped clean industry (winArr/makeWinter are RNG-free)
+    i1c: winArr(i1c), i2c: winArr(i2c), i3c: winArr(i3c),
   };
   const autumnSet = Object.assign({}, summerSet, {
     r1: seasonR1("autumn"), park: mkSprite(1, 1, 22, parkDraw("autumn")),
@@ -3783,7 +3862,9 @@ function spriteFor(city, i) {
     case OV.RUBBLE: return SPR.rubble;
     case OV.ZR:    return zone([B.r1, B.r2, B.r3], SPR.zoneR);
     case OV.ZC:    return zone([B.c1, B.c2, B.c3], SPR.zoneC);
-    case OV.ZI:    return zone([B.i1, B.i2, B.i3], SPR.zoneI);
+    // GP5b: the clean-industry flip — one handle swap keyed on the same
+    // isCleanInd() the sim reads, so art and behavior can never disagree.
+    case OV.ZI:    return zone(city.isCleanInd() ? [B.i1c, B.i2c, B.i3c] : [B.i1, B.i2, B.i3], SPR.zoneI);
     case OV.POLICE:  return B.police;
     case OV.FIRESTA: return B.firesta;
     case OV.COAL:    return B.coal;

@@ -1562,7 +1562,10 @@ function updateSmoke(city) {
         // silent. Live-pool Math.random, never a bake (the COAL/NUKE pattern).
         const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
         pushPlume(worldX(b.x, b.y) - 16, worldY(b.x, b.y) + HH - 56, Math.random() * 0.4 - 0.1);
-      } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && Math.random() < 0.28) {
+      // GP5b: clean high-tech industry stops smoking — spawn-gated in map
+      // space (never reads cam.r), so the drop is visible at every rotation
+      // and the pool drains naturally as the last dirty plumes age out.
+      } else if (t === OV.ZI && city.lvl[i] === 3 && city.powered[i] && !city.isCleanInd() && Math.random() < 0.28) {
         const x = i % MAP, y = (i / MAP) | 0; // ZI is 1x1 — its own tile at every r
         pushPlume(worldX(x, y) - 12, worldY(x, y) - 68, Math.random() * 0.3);
       }

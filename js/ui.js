@@ -951,6 +951,13 @@ function bindDialogs() {
       // M25: transit funding scales the ridership catchment, so rebuild rail (and
       // traffic) live — the served-zone relief reacts even while paused.
       if (s.dataset.dept === "transit" && city) { city.railDirty = true; city.recomputeRail(true); city.railDirty = false; city.recomputeTraffic(); }
+      // GP5b: a coverage-department funding commit refreshes the maps live —
+      // stamps read funding AND svcStrain (whose cap is funding-scaled), so
+      // the meters, the minimap and the ghost react to the slider without
+      // waiting for the %14 tick cadence. recomputeMaps draws zero RNG.
+      if (city && (s.dataset.dept === "police" || s.dataset.dept === "fire" ||
+                   s.dataset.dept === "edu" || s.dataset.dept === "health"))
+        city.recomputeMaps();
       fillBudgetTable();
     });
   });
@@ -1093,12 +1100,20 @@ function fillBudgetTable() {
     return ` <small class="strain ${cls}">${s.anchors} stn &middot; ` +
       `${s.load.toLocaleString()} / ${s.cap.toLocaleString()}</small>`;
   };
+  // GP5b: the education slow stock + clean-industry tag on the Education row
+  // (reuses the .strain ok chip), and a "High-tech premium" info line under
+  // Tax revenue whenever last month's taxes carried the clean surcharge.
+  const eduTag = ` <small class="strain ${city.isCleanInd() ? "ok" : ""}">edu level ` +
+    `${Math.round(city.eduLevel * 100)}%${city.isCleanInd() ? " &middot; clean industry" : ""}</small>`;
+  const cleanRow = (b.cleanTax || 0) > 0
+    ? `<tr><td>&nbsp;&nbsp;incl. High-tech premium</td><td>${f(b.cleanTax)}</td></tr>` : "";
   document.getElementById("budget-table").innerHTML = `
     <tr><td>Tax revenue</td><td>${f(b.taxes)}</td></tr>
+    ${cleanRow}
     <tr><td>Roads &amp; wires (${fd.roads}%)</td><td>${f(-dc.roads)}</td></tr>
     <tr><td>Police (${fd.police}%)${meter("police")}</td><td>${f(-dc.police)}</td></tr>
     <tr><td>Fire (${fd.fire}%)${meter("fire")}</td><td>${f(-dc.fire)}</td></tr>
-    <tr><td>Education (${fd.edu}%)${meter("edu")}</td><td>${f(-dc.edu)}</td></tr>
+    <tr><td>Education (${fd.edu}%)${meter("edu")}${eduTag}</td><td>${f(-dc.edu)}</td></tr>
     <tr><td>Health (${fd.health}%)${meter("health")}</td><td>${f(-dc.health)}</td></tr>
     <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
     <tr><td>Water system</td><td>${f(-dc.water)}</td></tr>
@@ -1784,10 +1799,15 @@ function renderQuery() {
   const jobsCommuteCell = qnr >= 0
     ? `${city.jobAccess[i]} of ${city.jobs} jobs · ${qjd === 255 ? "no route" : qjd + " hops"}`
     : "—";
+  // GP5b: on a ZI tile, name the citywide industrial mix — the same
+  // isCleanInd() the pollution source, the tax premium and spriteFor read.
+  const industryRow = city.over[i] === OV.ZI
+    ? `<tr><td>Industry</td><td>${city.isCleanInd() ? "High-tech (clean)" : "Conventional"}</td></tr>` : "";
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
     <tr><td>Zone/Building</td><td>${ovName}${city.lvl[i] ? " (level " + city.lvl[i] + ")" : ""}</td></tr>
+    ${industryRow}
     ${plantRow}
     ${waterProvRow}
     ${megaRow}

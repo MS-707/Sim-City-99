@@ -215,29 +215,49 @@
       "certified": "2026-07-30 certified & shipped (wf_9818f8a1, resumed once after an Anthropic-outage API kill of the verify agent; implement checkpointed at ba81eb2 first). THE DECLARED RE-PIN of the phase. Residential trips now walk DOWN a jobDist BFS field (multi-source over road + live-rail from every job-serving road tile) within MAX_COMMUTE=32, spreading across all descending neighbours via the HZ.COMMUTE hash domain; stranded/unrouted trips fall back to a legacy-magnitude local stroll. city.avgCommute/strandedShare feed gFit, a demand.r damper (appended LAST \u2014 zero-ZR cities bit-identical), and the JOB_REACH binding GROWTH_GATES row (lvl2->3 tower cap, verdict ships via diagnoseTile with exact evidence numbers). Save v14 (avgCommute/strandedShare persisted \u2014 sim inputs; history.avgcom via normaliseHistory), commute minimap overlay + legend, graphs series, almanac + advisor copy. First verify FAILED C1 (corridor deposits saturated the 255 clamp; dev outcome inverted) and C3 (envelope breach: JOB_REACH as a lvl-1 cap cost ~28% pop) \u2014 the fix pass re-scoped both channels WITHOUT amending any gate bar (deviations from design text disclosed in the workflow record with rationale) and re-verified ALL NINE gates green: C1 3/3 seeds (devB/devA 1.220-1.232 vs >=1.10 bar; second crossing drains corridor-1 to 0.823-0.843 vs <=0.85; load shares 0.54/0.46); C2 JOB_REACH verdict exact (Needed===ceil(0.25*jobs)); C3 median pop ratio 0.982 across 20 seeds (bar 0.90-1.10), scenario winnability superset holds on all 20 pairs; C4 determinism UNSTUBBED (two-boot byte-identical, save-resume S1200===S1200, cursors unchanged); C5 zero-ZR city deep-equal to abe5a70 modulo the four declared keys, traffic[] 0 mismatches; C6 v13 forward-load; C7 overlay + legend at all rotations; C8 perf 0.917x tick / 0.857x traffic (a 1.71x mid-fix regression was fixed by bit-identical loop unroll); C9 UI smoke zero errors. Panel: fidelity lens caught a legend clip at 1280/1024 (fixed: flex-wrap) and the S5 corridor-visibility defect (fixed: corridor-2 pixels now light up 0->103). Independent post-workflow smoke: organic growth pop 248/jobs 148, commutePct 100 surviving City.deserialize, v14 round-trip, zero errors. Thin-margin note (disclosed, not amended): C1 drain on seed 9001 measures 0.843 vs the <=0.85 bar \u2014 deterministic and reproducible, but close."
     },
     {
-      "id": "GP4",
-      "title": "Expressways, Ramps & the First Moving Train",
+      "id": "GP4a",
+      "title": "Expressways & Ramps \u2014 the Answer to the Red Bridge",
       "dimensions": [
         "transport-networks",
         "simulation-depth",
         "feedback-legibility"
       ],
-      "scope": "NEW \u2014 the biggest omission in the draft. GP3 creates the bottleneck problem and the draft's own scope deferred the tool ('leaves clean headroom for a later highway/ramp class'), leaving the player one answer: more of the same road. Across ten milestones the draft added exactly two buildable things (a landfill and an incinerator) against four new friction systems; late-game boredom is 'nothing new to build or draw', not 'too easy to maintain'. This milestone is the toy. ROAD CLASS HIERARCHY: an EXPRESSWAY class with several times a plain road's capacity in GP3's commute walk, built in straight runs at a multiple of road cost, that exchanges traffic with the local grid ONLY through explicit RAMP tiles \u2014 an expressway through a neighbourhood with no ramp serves nobody \u2014 and stamps a land-value and noise penalty on adjacent tiles. Capacity vs the neighbourhood you cut through IS the SC2K layout dilemma, and it is the direct answer to the red bridge GP3 creates. New OV ids appended after SEAPORT=31 carry a MANDATORY anti-crosstalk audit: any id >= OV.ZR automatically joins recomputePower's conducts (sim.js:905), brownout (924) and y2k (939) idioms plus the fire-candidate scan (1803), which is exactly why the codebase already carries isWaterOv (M24) and isMega (M28) escape hatches documented at sim.js:106-114. Add the predicate at every site and extend the index-keyed ovName array (ui.js:1523). THE TRAIN: the graphics aliveness guard records the train slot as 'N/A until a train ships', and rail with no train reads as fake in the first ten seconds. Trains run the rail plane between stations on a deterministic phase-driven path with zero per-frame Math.random \u2014 the same idiom the shipped flame animation already uses (MILESTONES.md:754) \u2014 with speed and frequency scaled by the line's ridership. Save takes the next ladder integer for the expressway/ramp state.",
-      "player_facing_win": "The red bridge finally has an answer that is a decision and not just more asphalt \u2014 a high-capacity route you must pay for, route around good neighbourhoods, and deliberately plug into the grid \u2014 and the rail line you built years ago finally has a train running on it.",
+      "scope": "SPLIT FROM GP4 at launch per its launch_note (sim+art together per S4; the train is GP4b). ROAD CLASS HIERARCHY: an EXPRESSWAY overlay class with several times a plain road's capacity in GP3b's commute walk, built in straight runs at a multiple of road cost, that exchanges traffic with the local grid ONLY through explicit RAMP tiles \u2014 an expressway through a neighbourhood with no ramp serves nobody \u2014 and stamps a land-value and noise penalty on adjacent tiles. Capacity vs the neighbourhood you cut through IS the SC2K layout dilemma, and it is the direct answer to the red bridge GP3 creates. New OV ids appended after the current tail carry a MANDATORY anti-crosstalk audit: any id >= OV.ZR automatically joins recomputePower's conducts, brownout and y2k idioms plus the fire-candidate scan \u2014 the codebase already carries isWaterOv (M24) and isMega (M28) escape hatches for exactly this; add the predicate at every documented site and extend the index-keyed ovName array in ui.js. S4 SIM-ART COHERENCE: the expressway and ramps need real sprites (procedural bakes, distinct from plain road at a glance, correct at all 4 rotations, painter-order safe), the no-ramp failure state must be visually legible (query verdict naming the missing ramp; the expressway carrying zero trips should read as empty on the traffic overlay), and land-value/noise penalties surface in existing overlays. Integration points (from GP3b, certified): recomputeJobDist BFS treats expressway tiles as traversable ONLY via ramps (ramp = the graph edge between grids); the commute walk's deposit/capacity logic must give the expressway class its multiple capacity (load[] normalization or a per-class divisor \u2014 design decides, measured by the C1-style gate); jobDist/jobAccess stay derived and pure. Save takes v15 for the expressway/ramp state (over[] ids serialize for free via packU8 \u2014 verify the packer's id range). GP4b (the moving train) is OUT OF SCOPE.",
+      "player_facing_win": "The red bridge finally has an answer that is a decision and not just more asphalt \u2014 a high-capacity route you must pay for, route around good neighbourhoods, and deliberately plug into the grid.",
       "quality_gates": [
         "Capacity is real: replacing a congested arterial with an expressway plus 2 ramps cuts peak load on the parallel local streets >=40% and avgCommute >=15%, vs a control that adds the same number of plain road tiles.",
         "Ramps gate access: an expressway with zero ramps carries zero trips and contributes nothing to jobDist reach; adding a single ramp makes it carry trips and shorten reach within one traffic pass.",
         "Siting tradeoff bites: mean landv of residential tiles within 2 of an expressway falls >=15 vs control, so the cheapest route is measurably not the best route.",
-        "Anti-crosstalk audit passes: the new ids conduct no power, register no power demand, are not brownout/y2k/fire candidates, and resolve to a name in ovName \u2014 asserted individually at each of the documented >= OV.ZR sites (sim.js:905, 924, 939, 1803).",
-        "Train aliveness and purity: with >=2 stations on a line a train is visible and moves; over 600 ticks the train code draws zero RNG (call counter = 0) and two same-seed runs produce pixel-identical fixed-camera frame captures; frame time within 10% of the GP3 baseline.",
-        "No-regression/save-compat: a city with no expressway, no ramp and no rail is byte-identical to the GP3 baseline over 600 ticks; older saves load with the new state empty; the new version round-trips idempotently; all 5 scenarios remain winnable in >=8 of 10 seeded reference playthroughs."
+        "Anti-crosstalk audit passes: the new ids conduct no power, register no power demand, are not brownout/y2k/fire candidates, and resolve to a name in ovName \u2014 asserted individually at each documented >= OV.ZR site.",
+        "S4 coherence: expressway/ramp sprites are distinct from plain road and correct at all 4 rotations; a no-ramp expressway's failure state is legible (query verdict + empty traffic overlay); zero console errors.",
+        "No-regression/save-compat: a city with no expressway and no ramp is byte-identical to the GP3b baseline over 600 ticks (Math.random UNSTUBBED); older saves load with the new state empty; v15 round-trips idempotently; comparative scenario winnability >= baseline on every scenario (R1 protocol)."
       ],
       "impact_1_5": 5,
       "effort_1_5": 3,
       "priority_rank": 6,
       "touches_save_format": true,
       "status": "todo",
-      "launch_note": "Must follow GP3 (the expressway is the ANSWER to visible commute pressure). 4a = expressway class + ramps (sim+art together per S4). 4b = the moving train (presentation; joins the alivenessStats guard, closing its N/A slot)."
+      "split_of": "GP4 (sim half; train presentation is GP4b)"
+    },
+    {
+      "id": "GP4b",
+      "title": "The First Moving Train",
+      "dimensions": [
+        "feedback-legibility"
+      ],
+      "scope": "SPLIT FROM GP4 at launch (presentation half). THE TRAIN: the graphics aliveness guard records the train slot as 'N/A until a train ships', and rail with no train reads as fake in the first ten seconds. Trains run the rail plane between live stations on a deterministic phase-driven path with zero per-frame Math.random \u2014 the same idiom the shipped flame animation already uses \u2014 with speed and frequency scaled by the line's ridership. Pure presentation: the sim must remain byte-identical (trains read stationLive/railNet/railCov, never write sim state, never draw sim RNG).",
+      "player_facing_win": "The rail line you built years ago finally has a train running on it.",
+      "quality_gates": [
+        "Train aliveness and purity: with >=2 live stations on a line a train is visible and moves along the track; over 600 ticks the train code draws zero RNG (call counter = 0) and two same-seed runs produce pixel-identical fixed-camera frame captures.",
+        "BYTE-IDENTICAL SIM: 20 seeds x 600 ticks vs the GP4a baseline with Math.random UNSTUBBED \u2014 0 differing bytes; no save change.",
+        "Correct at all 4 rotations; painter-order safe (train never draws through buildings); frame time within 10% of baseline; the alivenessStats guard's train slot flips from N/A to live; zero console errors."
+      ],
+      "impact_1_5": 3,
+      "effort_1_5": 2,
+      "priority_rank": 7,
+      "touches_save_format": false,
+      "status": "todo",
+      "split_of": "GP4 (presentation half)"
     },
     {
       "id": "GP5",
@@ -259,7 +279,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 7,
+      "priority_rank": 8,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP5a = visible coverage previews + strain meters (read-only, byte-identical). GP5b = strain scaling + the education payoff (behavior; outcome gates: after 20 sustained years of high education, industrial composition shifts to clean/high-tech, measured by census)."
@@ -284,7 +304,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 3,
-      "priority_rank": 8,
+      "priority_rank": 9,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -308,7 +328,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 9,
+      "priority_rank": 10,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP7a = the assessed-value SHADOW ledger \u2014 show what taxes WOULD be under assessed valuation next to actual, read-only, byte-identical. GP7b = the cutover + debt ladder + stabilizer, measured against GP7a projections."
@@ -333,7 +353,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 5,
-      "priority_rank": 10,
+      "priority_rank": 11,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP8a = the risk readout (per-tile hazard odds from coverage/pollution/plant age; read-only; its honesty gate = empirical disaster rates over a long soak match the displayed odds). GP8b = coupled hazard rates + the emergency-response allowance (behavior)."
@@ -358,7 +378,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 11,
+      "priority_rank": 12,
       "touches_save_format": true,
       "status": "todo",
       "launch_note": "Waste chain per original M31 design; S4 applies \u2014 garbage must be visible (landfill fill states, truck traffic on load[])."
@@ -383,7 +403,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 12,
+      "priority_rank": 13,
       "touches_save_format": true,
       "status": "todo",
       "launch_note": "Last: consumes strain/blight substrates from GP5/GP6. S4: blight must be visible tile-by-tile, and the renewal campaign paints visibly back."
@@ -468,5 +488,6 @@
     "GP9",
     "GP10"
   ],
-  "horizon_after_gameplay": "When the GP set caps the gameplay rubric (target: 47 -> ~75+/100 vs the SC2K bar): formal graphics re-score (est. ~78/100 after GQ1-11), then GQ-EPIC terrain elevation as the capstone that lifts both rubrics, then public release via the pending one-click GitHub Pages enablement."
+  "horizon_after_gameplay": "When the GP set caps the gameplay rubric (target: 47 -> ~75+/100 vs the SC2K bar): formal graphics re-score (est. ~78/100 after GQ1-11), then GQ-EPIC terrain elevation as the capstone that lifts both rubrics, then public release via the pending one-click GitHub Pages enablement.",
+  "split_note_gp4": "2026-07-30: GP4 split at launch per its launch_note and S3/S8 \u2014 GP4a (expressway class + ramps, sim+art per S4, save v15) and GP4b (the moving train, pure presentation, byte-identical gate)."
 }

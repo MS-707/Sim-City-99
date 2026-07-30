@@ -283,8 +283,9 @@
       "effort_1_5": 3,
       "priority_rank": 8,
       "touches_save_format": false,
-      "status": "todo",
-      "split_of": "GP5 (read half; strain scaling + education payoff is GP5b)"
+      "status": "done",
+      "split_of": "GP5 (read half; strain scaling + education payoff is GP5b)",
+      "certified": "2026-07-30 certified & shipped (wf_c5a36822). Pure read + UI: SVC_DEF declarative service table, City.serviceGhost (replays stampCoverage's exact loop, >0-potency tiles only), City.deptStrain (one O(n) on-demand census), POLICE_THIN/FIRE_THIN advisory rows, Pol/Fire minimap modes with deutan-safe monotone ramps (dL* 74.2/75.3), placement ghost with anchor dimming + pre-composited overlay layer, 13-mode two-row minimap strip with legend names, budget strain rows. Save v15 UNCHANGED. Verify 8/10 first pass: C1 byte-identical 20/20 seeds UNSTUBBED, C2 zero writes/zero RNG (write-trap + S1==S0), C3 ghost honesty 80/80 randomized placements exact + 4/4 zero-funding empty, C4 meter honesty exact vs independent census across 5 cities, C5 ramps monotone + deutan dE min 24, C7 advisory predicate 0/6400 mismatches, C8 rotation-invariant byte-identical minimaps, C10 zero errors. C6 FAILED (Chromium fieldset min-inline-size blew the 160px sidebar to 256px, pushing buttons off-screen) and C9c FAILED (ghost re-rasterized ~300 alpha diamonds per frame, 1.44-1.76x) \u2014 both FIXED (min-inline-size:0 + hard width; ghost pre-composited once per memo-miss into an offscreen layer, now 1.04-1.09x, draw cost 0.34-0.47ms) and the FULL suite re-verified green. Disclosed floor: hospital-tool hover (R=14) measures 1.11-1.13x under headless SwiftShader \u2014 the software-rasterizer floor for a ~430k-px overlay, negligible on real GPUs. Independent post-workflow smoke: v15 unchanged, growth normal, zero errors."
     },
     {
       "id": "GP5b",
@@ -467,13 +468,11 @@
   "baseline_ledger": {
     "purpose": "Docs may NEVER disagree with the tree. Every ship AND every checkpoint that leaves code live must update this ledger in the same commit. This rule exists because GP1b was parked as blocked while its code stayed live, and the next milestone was briefed against a false baseline.",
     "current": {
-      "commit": "(GP5a checkpoint \u2014 certified baseline remains 544dd23)",
+      "commit": "(this ship commit \u2014 GP5a)",
       "save_version": 15,
-      "certified_through": "GP4b (moving train) \u2014 certified baseline 544dd23; GP5a implement pass is live in the tree, uncertified",
-      "live_but_uncertified": [
-        "GP5a coverage-previews + strain-meters implement pass (Pol/Fire minimap modes, placement ghost, per-department strain meters as pure reads; sim.js/ui.js/render.js/index.html/css) \u2014 checkpointed mid-verify, NOT shipped; workflow wf_c5a36822-f80 is verifying against 544dd23; ship or revert follows its verdict."
-      ],
-      "artifact_reflects": "GP4b ship (bundle rebuilt at GP4b close; nothing uncertified is published)"
+      "certified_through": "GP5a (coverage previews & strain meters, read-only) \u2014 tree fully reconciled, no live-but-uncertified layers",
+      "live_but_uncertified": [],
+      "artifact_reflects": "this ship (bundle rebuilt at GP5a close)"
     }
   },
   "process_scaffolding": [

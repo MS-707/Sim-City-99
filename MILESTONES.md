@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- **GP5a — Coverage Previews & Strain Meters** (read-only half of GP5 per
-  S3): see police/fire/school/hospital coverage and per-service strain
-  before it binds; byte-identical sim.
+- **GP5b — Service Strain & the Education Payoff** (behavior half of GP5):
+  the strain the meters display starts scaling coverage; education splits
+  from health and becomes the eduLevel slow stock gating clean industry.
 
 ## Open
 
@@ -81,6 +81,22 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP5a — Coverage Previews & Strain Meters** *(gameplay roadmap 8/13,
+  certified 2026-07-30)*: the two services you sited **blind** for the whole
+  project — police and fire — get minimap modes with deutan-safe ramps, and
+  every station tool now shows a live **placement ghost**: the exact coverage
+  diamond the station will stamp (proven equal on 80/80 randomized
+  placements, honestly empty at zero funding), with existing same-type
+  stations dimmed. Budget rows grow per-service strain meters (load /
+  capacity per powered anchor, reproduced exactly by an independent census)
+  and the query panel warns on genuinely thin coverage — all as pure reads:
+  20/20 seeds byte-identical unstubbed, zero writes and zero RNG on the
+  path, save v15 unchanged. The panel caught a Chromium fieldset quirk
+  blowing the 160px sidebar to 256px (buttons pushed off-screen) and the
+  ghost re-rasterizing every frame (1.7×) — both fixed (pre-composited
+  overlay, 1.04–1.09×) and the full suite re-verified. These meters are the
+  trusted ruler GP5b's strain coupling will be measured with.
 
 - [x] **GP4b — The First Moving Train** *(gameplay roadmap 7/11, certified
   2026-07-30 — the GP4 pair complete)*: the rail line finally **carries a

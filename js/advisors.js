@@ -340,8 +340,8 @@ function adviseTransport() {
   // (avgCommute / strandedShare / commutePct), no RNG, no writes.
   if (city.strandedShare >= 0.01)
     out.push(Math.round(city.strandedShare * 100) + "% of commuters are STRANDED — " +
-      "their street reaches zero jobs. Build another crossing to the job side, " +
-      "Mayor, or they'll stay home watching Jerry Springer.");
+      "the only route to a job blows the commute budget. Build another crossing " +
+      "to the job side, Mayor, or they'll stay home watching Jerry Springer.");
   else if (city.avgCommute > 16)
     out.push("The average commute runs " + city.avgCommute + " hops — folks finish " +
       "a whole Alanis album before they clock in. Bring jobs closer or open a " +

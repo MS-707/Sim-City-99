@@ -210,8 +210,9 @@
       "effort_1_5": 4,
       "priority_rank": 5,
       "touches_save_format": true,
-      "status": "todo",
-      "split_of": "GP3 (behavior half; read half is GP3a)"
+      "status": "done",
+      "split_of": "GP3 (behavior half; read half is GP3a)",
+      "certified": "2026-07-30 certified & shipped (wf_9818f8a1, resumed once after an Anthropic-outage API kill of the verify agent; implement checkpointed at ba81eb2 first). THE DECLARED RE-PIN of the phase. Residential trips now walk DOWN a jobDist BFS field (multi-source over road + live-rail from every job-serving road tile) within MAX_COMMUTE=32, spreading across all descending neighbours via the HZ.COMMUTE hash domain; stranded/unrouted trips fall back to a legacy-magnitude local stroll. city.avgCommute/strandedShare feed gFit, a demand.r damper (appended LAST \u2014 zero-ZR cities bit-identical), and the JOB_REACH binding GROWTH_GATES row (lvl2->3 tower cap, verdict ships via diagnoseTile with exact evidence numbers). Save v14 (avgCommute/strandedShare persisted \u2014 sim inputs; history.avgcom via normaliseHistory), commute minimap overlay + legend, graphs series, almanac + advisor copy. First verify FAILED C1 (corridor deposits saturated the 255 clamp; dev outcome inverted) and C3 (envelope breach: JOB_REACH as a lvl-1 cap cost ~28% pop) \u2014 the fix pass re-scoped both channels WITHOUT amending any gate bar (deviations from design text disclosed in the workflow record with rationale) and re-verified ALL NINE gates green: C1 3/3 seeds (devB/devA 1.220-1.232 vs >=1.10 bar; second crossing drains corridor-1 to 0.823-0.843 vs <=0.85; load shares 0.54/0.46); C2 JOB_REACH verdict exact (Needed===ceil(0.25*jobs)); C3 median pop ratio 0.982 across 20 seeds (bar 0.90-1.10), scenario winnability superset holds on all 20 pairs; C4 determinism UNSTUBBED (two-boot byte-identical, save-resume S1200===S1200, cursors unchanged); C5 zero-ZR city deep-equal to abe5a70 modulo the four declared keys, traffic[] 0 mismatches; C6 v13 forward-load; C7 overlay + legend at all rotations; C8 perf 0.917x tick / 0.857x traffic (a 1.71x mid-fix regression was fixed by bit-identical loop unroll); C9 UI smoke zero errors. Panel: fidelity lens caught a legend clip at 1280/1024 (fixed: flex-wrap) and the S5 corridor-visibility defect (fixed: corridor-2 pixels now light up 0->103). Independent post-workflow smoke: organic growth pop 248/jobs 148, commutePct 100 surviving City.deserialize, v14 round-trip, zero errors. Thin-margin note (disclosed, not amended): C1 drain on seed 9001 measures 0.843 vs the <=0.85 bar \u2014 deterministic and reproducible, but close."
     },
     {
       "id": "GP4",
@@ -419,13 +420,11 @@
   "baseline_ledger": {
     "purpose": "Docs may NEVER disagree with the tree. Every ship AND every checkpoint that leaves code live must update this ledger in the same commit. This rule exists because GP1b was parked as blocked while its code stayed live, and the next milestone was briefed against a false baseline.",
     "current": {
-      "commit": "(GP3b checkpoint \u2014 certified baseline remains abe5a70)",
-      "save_version": 13,
-      "certified_through": "GP3a (commute surfaces, read-only) \u2014 tree fully reconciled, no live-but-uncertified layers",
-      "live_but_uncertified": [
-        "GP3b commute-coupling implement pass (residential trips walk down the job-access gradient; avgCommute/strandedShare; growth-gate table row; minimap overlay; advisors/almanac lines; sim.js/ui.js/render.js/advisors.js/index.html) \u2014 checkpointed mid-verify, NOT shipped; the declared re-pin is certified or the work is fixed/reverted by the running workflow wf_9818f8a1-694."
-      ],
-      "artifact_reflects": "this ship (bundle rebuilt at GP3a close)"
+      "commit": "(this ship commit \u2014 GP3b)",
+      "save_version": 14,
+      "certified_through": "GP3b (commute coupling \u2014 the GP3 pair complete) \u2014 tree fully reconciled, no live-but-uncertified layers",
+      "live_but_uncertified": [],
+      "artifact_reflects": "this ship (bundle rebuilt at GP3b close)"
     }
   },
   "process_scaffolding": [

@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- **GP3b — Commute Coupling** (behavior half of the GP3 split): growth and
-  demand couple to the job-access field GP3a proved honest. Declared re-pin
-  per S3; outcome gates per S5 measured BY the GP3a instrumentation.
+- **GP4a — Expressways & Ramps** (sim+art together per S4): the answer to
+  the commute pressure GP3 made real and visible — a high-capacity route you
+  pay for, route around neighbourhoods, and deliberately plug into the grid.
 
 ## Open
 
@@ -32,10 +32,9 @@ Queue policy: keep at least 5 open improvements at all times.
 > hardcoded list in `normaliseHistory` — unknown keys are silently dropped.
 
 
-- [ ] **GP3b — Commute Coupling** *(I5/E4, behavior half of GP3)*: growth and
-  demand finally couple to job access — the far-shore block with no route to
-  work stalls, and a second bridge measurably revives it. Declared re-pin;
-  measured by GP3a's certified instrumentation + S5 outcome gates.
+- [ ] **GP4b — The First Moving Train** *(presentation half of GP4)*: the
+  rail line you built years ago finally carries a visible train; joins the
+  alivenessStats guard, closing its N/A slot.
 
 - [ ] **GP4 — Expressways, Ramps & the First Moving Train** *(I5/E3, save+)*: The red bridge finally has an answer that is a decision and not just more asphalt — a high-capacity route you must pay for, route around good neighbourhoods, and deliberately plug into the grid — and the rail line you built years 
   **Gates:** Capacity is real: replacing a congested arterial with an expressway pl · Ramps gate access: an expressway with zero ramps carries zero trips an · Siting tradeoff bites: mean landv of residential tiles within 2 of an  …
@@ -86,6 +85,25 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP3b — Commute Coupling** *(gameplay roadmap 5/11, certified
+  2026-07-30 — the GP3 pair complete, THE declared re-pin of the phase)*:
+  where you put housing relative to jobs finally **matters**. Residential
+  trips walk down a real jobs-distance field (multi-source BFS over roads +
+  live rail) within a 32-hop commute budget, spreading across parallel
+  streets via a seeded hash domain; trips that can't reach work are
+  **stranded** and drag demand and growth. A far-shore district with one
+  bridge builds 22–23% less than the same district with two crossings, and
+  the second crossing measurably drains the first (corridor load 0.82–0.84×,
+  visible on the traffic overlay). New: `JOB_REACH` binding growth gate with
+  a truthful tile verdict, avgCommute/strandedShare on the HUD/graphs/
+  almanac/advisors, a Commute minimap overlay, save v14. Determinism
+  unstubbed preserved (two-boot byte-identical; save-resume reproduces the
+  future); a zero-residential city stays deep-equal to the GP3a baseline;
+  perf ended *faster* than baseline (0.92× tick) after the panel caught a
+  1.71× traffic regression mid-fix. First verify legitimately failed two
+  outcome gates; the fix re-scoped the load model without amending any gate
+  bar and re-verified all nine green.
 
 - [x] **GP3a — Commute Surfaces** *(gameplay roadmap 4/11, certified
   2026-07-29)*: the read-only half of the commute model. Every tile now

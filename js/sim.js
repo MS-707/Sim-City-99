@@ -913,8 +913,9 @@ function computeNeighbors(seed) {
        SHARE one applyUpgrade — a row names the GATE a tile sits at, not the
        die's outcome, and the original spends exactly ONE draw across each pair.
    Order traps that are load-bearing: WATER_CAP fires at ANY lvl 1..2 and so
-   PRE-EMPTS both level-2 caps; DECLINE precedes MAXED (a lvl-3 lot with
-   dem < -0.25 really does draw and really does decline); the three caps
+   PRE-EMPTS all three level-2 caps (JOB_REACH — GP3b —, SVC_CAP,
+   PRESSURE_CAP); DECLINE precedes MAXED (a lvl-3 lot with
+   dem < -0.25 really does draw and really does decline); the caps
    precede UPG_NO_ROAD (the original never tested road once a cap hit).
    Gridlock is deliberately NOT a row: it is a PHASE that can co-occur with an
    upgrade in the same visit. */
@@ -931,19 +932,41 @@ const JA_LOW_SHARE = 0.5;      // healthy = reach >= ceil(0.5 * citywide jobs)
 const JA_MIN_CITY_JOBS = 50;   // advisory floor: below this the city is too young to judge
 function jaHealthy(c) { return Math.ceil(JA_LOW_SHARE * c.jobs); }
 /* GP3b: commute-coupling thresholds. MAX_COMMUTE is the hop BUDGET of the
-   residential trip walk — the walk descends exactly 1 hop per step, so the
-   budget is also the jobDist ceiling past which trips strand. JR_UPG_SHARE
-   drives the binding JOB_REACH growth gate (an upgrade needs the block's
-   street network to reach at least ceil(0.25 * citywide jobs); the existing
-   JA_MIN_CITY_JOBS=50 floor keeps young cities ungated). CMT_FIT_LO/_W shape
-   the gFit commute drag (exactly ×1.0 while avgCommute <= 8); CMT_DEM_LO is
-   where the citywide demand damping starts to bite. Calibration (design
-   phase, C1 twin-topology × 5 seeds): MAX_COMMUTE=32 / JR_UPG_SHARE=0.25
-   pinned — the values below are FROZEN gates (S6). */
+   residential commute walk — the walk descends exactly 1 hop per step, so the
+   budget is also the jobDist ceiling past which trips STRAND. Stranding is a
+   property of ROUTED trips only (finite jobDist > MAX_COMMUTE): a block whose
+   street network reaches no job at ANY distance (jobDist 255) has a job-ACCESS
+   problem, owned by jobAccess + the JOB_REACH gate, and does not damp citywide
+   demand — its residents still drive locally (the legacy 10-step walk), which
+   keeps a disconnected-grid city's congestion at its pre-GP3b level (the C3
+   envelope anchor). JR_UPG_SHARE drives the binding JOB_REACH growth gate (a
+   level-3 tower needs the block's street network to reach at least
+   ceil(0.25 * citywide jobs); the existing JA_MIN_CITY_JOBS=50 floor keeps
+   young cities ungated). CMT_FIT_LO/_W shape the gFit commute drag (exactly
+   ×1.0 while avgCommute <= 8); CMT_DEM_LO is where the citywide demand
+   damping starts to bite. Deposit shape (CMT_STROLL / CMT_LOAD /
+   CMT_STR_LOAD): short commutes pad back to the legacy 10-step stroll at
+   full deposit (load-mass parity with pre-GP3b), long hauls deposit a flat
+   CMT_LOAD × trips per tile so a shared corridor stays short of the 255
+   clamp and a second crossing measurably drains the first (C1), and
+   stranded commuters churn their local streets at CMT_STR_LOAD × the
+   errand rate. Calibration (fix pass, C1 twin-topology
+   × 3 seeds × C3 20-seed envelope): MAX_COMMUTE=32 / JR_UPG_SHARE=0.25
+   pinned — the C1/C3 gate bars themselves are FROZEN (S6). */
 const MAX_COMMUTE = 32;
 const JR_UPG_SHARE = 0.25;
 const jrUpgMin = (c) => Math.ceil(JR_UPG_SHARE * c.jobs);
-const CMT_FIT_LO = 8, CMT_FIT_W = 0.30, CMT_DEM_LO = 10;
+const CMT_FIT_LO = 8, CMT_FIT_W = 0.15, CMT_FIT_STR_W = 0.45, CMT_DEM_LO = 10;
+const CMT_STROLL = 10;     // the legacy walk length: short commutes pad back to it
+const CMT_LOAD = 0.28;     // flat per-tile deposit scale of a long-haul commuter
+const CMT_STR_LOAD = 1.6;  // stranded commuters churn their local streets harder
+/* commuteDamp = min(CAP, max(0,(avgCommute-LO)*AVG_W) + strandedShare*STR_W).
+   The weight sits on STRANDING, not on mean length: a long-but-working
+   corridor is livable, but commuters who literally cannot get to work leave
+   town — and stranding is exactly what a second crossing fixes (C1), so it is
+   the topology-sensitive term. AVG_W is kept gentle so a big legitimately
+   spread-out city is not punished for its geography. */
+const CMT_DEM_CAP = 0.35, CMT_DEM_AVG_W = 0.004, CMT_DEM_STR_W = 0.80;
 
 const ZONE_WORD = { [OV.ZR]: "residential", [OV.ZC]: "commercial", [OV.ZI]: "industrial" };
 const SVC_LABEL = { [OV.POLICE]: "Police station", [OV.FIRESTA]: "Fire station",
@@ -976,11 +999,15 @@ function gFit(c, i, k) {
   let fit = c.landv[i] / 255;
   if (k.ov === OV.ZI) fit = 0.75;             // industry doesn't care about views
   if (k.ov === OV.ZR) fit -= c.crime[i] / 400;
-  // GP3b: long citywide commutes drag residential upgrades. The multiplier is
-  // EXACTLY 1.0 whenever avgCommute <= CMT_FIT_LO (x * 1 === x in IEEE754), so
-  // a short-commute or zero-ZR city's fit — and every draw it feeds — is
-  // bit-identical to pre-GP3b. Reads only the rounded this.avgCommute scalar.
+  // GP3b: commute pain drags residential upgrades — a gentle term for mean
+  // commute length plus a strong term for STRANDING (commuters whose route
+  // blew the MAX_COMMUTE budget), because stranding is what road topology
+  // actually fixes. Both multipliers are EXACTLY 1.0 whenever avgCommute <=
+  // CMT_FIT_LO / strandedShare === 0 (x * 1 === x in IEEE754), so a
+  // short-commute, zero-stranding or zero-ZR city's fit — and every draw it
+  // feeds — is bit-identical to pre-GP3b. Reads ONLY the two rounded scalars.
   if (k.ov === OV.ZR) fit *= 1 - Math.min(1, Math.max(0, (c.avgCommute - CMT_FIT_LO) / (MAX_COMMUTE - CMT_FIT_LO))) * CMT_FIT_W;
+  if (k.ov === OV.ZR) fit *= 1 - c.strandedShare * CMT_FIT_STR_W;
   fit *= 1 - cong * 0.75;                     // nobody moves up on a gridlocked block
   const svc = (c.eduCov[i] + c.medCov[i]) / 510; // 0..1
   fit *= 0.7 + svc * 1.1;
@@ -1064,6 +1091,35 @@ const GROWTH_GATES = Object.freeze([
       : "No water mains — it cannot rise past level 2. Lay pipe from a tower or a pump.",
     evid: (c, i, k) => [["Water", "none"], ["Level", k.lvl]] },
 
+  /* GP3b: the binding commute gate — a level-3 residential tower needs the
+     block's street network to reach at least ceil(JR_UPG_SHARE * citywide
+     jobs); level 1-2 homes still build (people take what work they can find
+     nearby — only big towers demand a real job base). apply:null PRE-EMPTS
+     the upgrade draw on gated tiles: THE declared RNG re-pin of this
+     milestone, deliberately fenced to lvl-2 ZR tiles in cities past the
+     JA_MIN_CITY_JOBS floor so ZC/ZI, young-city and low-density draws never
+     move. Sits with the other caps, ABOVE SVC_CAP: a job-cut-off block that
+     also lacks services reports the job problem first (linking the district
+     is the fix that unlocks anything at all), and since every cap row is
+     apply:null the order among them cannot move a draw. Reads ONLY
+     city.jobAccess, the GP3a field the panel already shows — never a second
+     access computation. */
+  /* Test note: k.dem > 0 rather than the full gUp() threshold — the cap is a
+     STRUCTURAL fact of the block (its streets reach too few jobs), so it must
+     not flicker out of the query panel whenever demand dips under the 0.15
+     upgrade line. RNG-identical either way: in (0, 0.15] the tile would have
+     matched DEM_THRESHOLD instead — apply:null on both rows, zero draws —
+     and dem <= 0 still falls through to DECLINE, whose decline draws this
+     row must never pre-empt. */
+  { code: "JOB_REACH", sel: "up", sev: "warn", label: "No jobs in reach", apply: null,
+    test: (c, i, k) => k.ov === OV.ZR && k.lvl === 2 && k.dem > 0 && c.jobs >= JA_MIN_CITY_JOBS &&
+                       c.jobAccess[i] < jrUpgMin(c),
+    text: (c, i) => `Too few jobs in reach — the streets serving this block connect to ` +
+      `${c.jobAccess[i]} of the city's ${c.jobs} jobs; a level-3 tower needs ${jrUpgMin(c)}. ` +
+      `Link this district to the job side with a road or an open metro line.`,
+    evid: (c, i) => [["Jobs reachable", c.jobAccess[i]], ["Needed", jrUpgMin(c)],
+                     ["Citywide", c.jobs]] },
+
   { code: "SVC_CAP", sel: "up", sev: "warn", label: "No services", apply: null,
     test: (c, i, k) => gUp(k) && k.lvl === 2 && c.eduCov[i] < 8 && c.medCov[i] < 8,
     text: (c, i) => `No school or hospital in reach — towers need service coverage (education ${c.eduCov[i]}, health ${c.medCov[i]}; either must reach 8).`,
@@ -1074,23 +1130,6 @@ const GROWTH_GATES = Object.freeze([
     text: (c) => `Water pressure ${gPct(c.waterPressure)}% — the mains are strained, so no tower rises here until it recovers past 90%.`,
     evid: (c) => [["Pressure", gPct(c.waterPressure) + "%"],
                   ["Supply/demand", c.waterSupply + "/" + c.waterDemand]] },
-
-  /* GP3b: the binding commute gate — a residential upgrade needs the block's
-     street network to reach at least ceil(JR_UPG_SHARE * citywide jobs).
-     apply:null PRE-EMPTS the upgrade draw on gated tiles: THE declared RNG
-     re-pin of this milestone, deliberately fenced to ZR tiles in cities past
-     the JA_MIN_CITY_JOBS floor so ZC/ZI and young-city draws never move.
-     Sits with the other caps, BEFORE UPG_NO_ROAD (caps precede the road test
-     — the shipped order trap). Reads ONLY city.jobAccess, the GP3a field the
-     panel already shows — never a second access computation. */
-  { code: "JOB_REACH", sel: "up", sev: "warn", label: "No jobs in reach", apply: null,
-    test: (c, i, k) => k.ov === OV.ZR && gUp(k) && c.jobs >= JA_MIN_CITY_JOBS &&
-                       c.jobAccess[i] < jrUpgMin(c),
-    text: (c, i) => `Too few jobs in reach — the streets serving this block connect to ` +
-      `${c.jobAccess[i]} of the city's ${c.jobs} jobs; upgrades need ${jrUpgMin(c)}. ` +
-      `Link this district to the job side with a road or an open metro line.`,
-    evid: (c, i) => [["Jobs reachable", c.jobAccess[i]], ["Needed", jrUpgMin(c)],
-                     ["Citywide", c.jobs]] },
 
   { code: "UPG_NO_ROAD", sel: "up", sev: "crit", label: "No road", apply: null,
     test: (c, i, k) => gUp(k) && !k.road,
@@ -2246,29 +2285,87 @@ class City {
       let cur = this.nearestRoad(i);
       if (t === OV.ZR) {
         /* GP3b: the commute walk. Trips descend jobDist exactly one hop per
-           step for d0 steps, depositing at EVERY visited road tile (start and
-           the jobDist===0 destination included). All descending neighbours
-           compete in one reservoir pick (HZ.COMMUTE domain, key
-           (i*MAX_COMMUTE + step)*4 + cnt — max 16384*32*4 ≈ 2.1M, int32-safe;
-           identical pick shape to the C/I walk below), so parallel streets
-           share the load reproducibly. Off-grid / unreachable / over-budget
-           trips STRAND and deposit nothing. */
-        totR += trips;
-        if (cur < 0 || jd[cur] === 255 || jd[cur] > MAX_COMMUTE) { strR += trips; continue; }
+           step for d0 steps, depositing at EVERY visited road tile (start
+           and the jobDist===0 destination included; magnitude — see the
+           load-mass-parity note at the deposit below). All descending
+           neighbours compete in one reservoir pick (HZ.COMMUTE domain, key
+           (i*MAX_COMMUTE + step)*4 + cnt — max 16384*32*4 ≈ 2.1M,
+           int32-safe; identical pick shape to the C/I walk below), so
+           parallel streets share the load reproducibly.
+           Trips that CANNOT commute do not vanish from the streets:
+           • off-grid (no serving road): nothing reaches any road;
+           • routed but over budget (finite jobDist > MAX_COMMUTE): STRANDED —
+             they count into strandedShare AND fall back to the legacy
+             10-step local stroll (school runs, errands) at FULL deposit;
+           • unreachable (jobDist 255, a disconnected street grid): a
+             job-ACCESS problem (jobAccess / JOB_REACH own it), NOT a commute
+             — excluded from the commute scalars, same local stroll. The
+             fallback keeps a disconnected-grid city's road load at its
+             pre-GP3b magnitude (the C3 envelope anchor) and draws from
+             HZ.COMMUTE with the SAME per-tile key shape (step < 10 <
+             MAX_COMMUTE, so descent and stroll keys never collide). */
+        if (cur < 0) continue;
         const d0 = jd[cur];
-        load[cur] += trips;
+        if (d0 === 255 || d0 > MAX_COMMUTE) {
+          /* STRANDED (routed but over budget) commuters deposit CMT_STR_LOAD ×
+             trips on their local streets — they set out for work and give up,
+             so their blocks churn harder than a plain errand stroll. UNROUTED
+             blocks (jobDist 255) deposit exactly `trips`, the legacy
+             magnitude: a disconnected grid keeps its pre-GP3b congestion
+             byte-for-byte in distribution (the C3 envelope anchor). */
+          let fdep = trips;
+          if (d0 !== 255) { totR += trips; strR += trips; fdep = trips * CMT_STR_LOAD; }
+          let prev = -1;
+          for (let step = 0; step < 10; step++) {
+            load[cur] += fdep;
+            const x = cur % MAP, y = (cur / MAP) | 0;
+            /* unrolled 4-neighbour reservoir — E,W,S,N, the SAME candidate
+               order and (i*MAX_COMMUTE+step)*4+cnt keys as the destructuring
+               form it replaces (bit-identical picks, ~2x fewer allocations
+               on what is now every ZR trip's hot path — C8) */
+            const kb = (i * MAX_COMMUTE + step) * 4;
+            let nxt = -1, cnt = 0, j = 0;
+            if (x + 1 < MAP && ((j = cur + 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (x > 0 && ((j = cur - 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (y + 1 < MAP && ((j = cur + MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (y > 0 && ((j = cur - MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (nxt < 0) break;
+            prev = cur; cur = nxt;
+          }
+          continue;
+        }
+        totR += trips;
+        /* Deposit shape — LOAD-MASS PARITY with the legacy stroll:
+           • short commute (d0 <= CMT_STROLL): the trip deposits FULL trips and
+             is padded back to the legacy 10-step length — descend d0 hops to
+             the gate, then keep strolling (parking, errands around work) for
+             the remaining steps. A city whose homes sit right by its jobs
+             therefore loads its roads at the pre-GP3b magnitude (the C3
+             envelope anchor — an under-deposit here was measured to LIFT
+             growth ~14% by evaporating job-side congestion);
+           • long haul (d0 > CMT_STROLL): descent only, per-tile deposit
+             trips * CMT_LOAD, a FLAT scale — long-haul commuters spend their
+             road-time in transit, not circulating, and the flat scale keeps a
+             single shared corridor short of the 255 clamp (saturated
+             congestion carries no topology signal — C1). Flat, not
+             mass-normalized: normalizing by route length was measured to
+             skew the twin-topology corridor split (short-route commuters
+             out-deposit long-route ones per tile), eroding the very drain
+             signal the scale exists to protect. */
+        const dep = d0 <= CMT_STROLL ? trips : trips * CMT_LOAD;
+        load[cur] += dep;
+        let prev = -1;
         for (let step = 0; step < d0; step++) {
           const x = cur % MAP, y = (cur / MAP) | 0;
           const down = jd[cur] - 1;
-          let nxt = -1, cnt = 0;
-          for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-            const X = x + dx, Y = y + dy;
-            if (!this.inMap(X, Y)) continue;
-            const j = Y * MAP + X;
-            if ((this.over[j] !== OV.ROAD && this.over[j] !== OV.WIREROAD) || jd[j] > down) continue;
-            cnt++;
-            if (this.rngHashAt(ch, (i * MAX_COMMUTE + step) * 4 + cnt) * cnt < 1) nxt = j; // reservoir pick
-          }
+          // unrolled 4-neighbour reservoir — E,W,S,N, same candidate order and
+          // keys as the destructuring form it replaces (bit-identical picks)
+          const kb = (i * MAX_COMMUTE + step) * 4;
+          let nxt = -1, cnt = 0, j = 0;
+          if (x + 1 < MAP && ((j = cur + 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && jd[j] <= down)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+          if (x > 0 && ((j = cur - 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && jd[j] <= down)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+          if (y + 1 < MAP && ((j = cur + MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && jd[j] <= down)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+          if (y > 0 && ((j = cur - MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && jd[j] <= down)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
           if (nxt < 0) {
             /* No descending road neighbour: the distance came via a rail
                expansion — take the station jump. Among road tiles 4-adjacent
@@ -2299,8 +2396,31 @@ class City {
             }
             if (nxt < 0) break; // defensive: a malformed field never loops
           }
-          cur = nxt;
-          load[cur] += trips;
+          prev = cur; cur = nxt;
+          load[cur] += dep;
+        }
+        if (d0 <= CMT_STROLL) {
+          /* Stroll padding: continue from the gate with the legacy pick shape
+             (non-prev road neighbours, reservoir) for the remaining steps of
+             the 10-step budget, full deposit — keys continue the same
+             (i*MAX_COMMUTE + step)*4 + cnt sequence (step < 10 < MAX_COMMUTE,
+             int32-safe, per-tile unique). Bound CMT_STROLL - 1: the legacy
+             stroll deposits on exactly 10 tiles, and the descent already
+             deposited d0 + 1 times. */
+          for (let step = d0; step < CMT_STROLL - 1; step++) {
+            const x = cur % MAP, y = (cur / MAP) | 0;
+            // unrolled 4-neighbour reservoir — E,W,S,N, same order/keys as the
+            // destructuring form it replaces (bit-identical picks)
+            const kb = (i * MAX_COMMUTE + step) * 4;
+            let nxt = -1, cnt = 0, j = 0;
+            if (x + 1 < MAP && ((j = cur + 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (x > 0 && ((j = cur - 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (y + 1 < MAP && ((j = cur + MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (y > 0 && ((j = cur - MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(ch, kb + cnt) * cnt < 1) nxt = j; }
+            if (nxt < 0) break;
+            prev = cur; cur = nxt;
+            load[cur] += dep;
+          }
         }
         hopSum += trips * d0; arrR += trips;
         continue;
@@ -2333,8 +2453,12 @@ class City {
       }
     }
     /* GP3b: the two commute scalars, rounded so serialize round-trips exactly
-       (1 decimal / 3 decimals). A zero-ZR city has totR === arrR === 0, so
-       both are the exact integer 0 — bit-identical to the ctor defaults. */
+       (1 decimal / 3 decimals). totR counts ROUTED trips only (finite
+       jobDist): strandedShare is "the share of commuters whose route blew the
+       budget", never "the share of blocks with no route at all" — the latter
+       is jobAccess's story and must not double-damp demand. A zero-ZR city
+       (and a fully disconnected one) has totR === arrR === 0, so both are
+       the exact integer 0 — bit-identical to the ctor defaults. */
     this.avgCommute = arrR ? Math.round(hopSum / arrR * 10) / 10 : 0;
     this.strandedShare = totR ? Math.round(strR / totR * 1000) / 1000 : 0;
     /* GP2: port trips — deposited AFTER the zone walk and BEFORE the EWMA blend,
@@ -3119,7 +3243,7 @@ class City {
        zero-stranding city has commuteDamp === 0 exactly, and x - 0 === x in
        IEEE754, so its demand — and every dem comparison feeding the RNG
        stream — is bit-identical to pre-GP3b. */
-    this.commuteDamp = Math.min(0.25, Math.max(0, (this.avgCommute - CMT_DEM_LO) * 0.008) + this.strandedShare * 0.25);
+    this.commuteDamp = Math.min(CMT_DEM_CAP, Math.max(0, (this.avgCommute - CMT_DEM_LO) * CMT_DEM_AVG_W) + this.strandedShare * CMT_DEM_STR_W);
     this.demand.r = clampD(jobsAvail / 220 + taxMod + stadMod + svcMod + evR + om.demR - this.commuteDamp);
     this.demand.c = clampD((pop * 0.28 - cJobs) / 160 + taxMod * 0.6 + svcMod * 0.5 + evC + om.demC + this.portDemC);
     this.demand.i = clampD((pop * 0.42 - iJobs) / 180 + 0.28 + taxMod * 0.4 + svcMod * 0.5 + evI + om.demI + this.portDemI);

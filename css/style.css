@@ -191,10 +191,14 @@ input[type=range]::-moz-range-thumb {
 .rci-bar.i { background: #d0b000; }
 
 #minimap { width: 100%; image-rendering: pixelated; border: 1px inset #fff; background:#000; cursor: pointer; display:block; }
-/* G8: one-line overlay legend under the minimap (hidden in City mode) */
+/* G8: overlay legend under the minimap (hidden in City mode). flex-wrap +
+   min-width:0 (GP3b fix): a long strip (transit's catchment tail, commute's
+   job-poor swatch) used to min-content-expand the right-anchored side panel
+   past the viewport edge with no scrollbar, pushing its last item off-screen
+   at every window width — wrapped items keep every swatch visible. */
 #mm-legend {
-  display: flex; align-items: center; gap: 3px; margin-top: 3px;
-  font-size: 9px; line-height: 10px; white-space: nowrap;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 3px;
+  font-size: 9px; line-height: 10px; white-space: nowrap; min-width: 0;
 }
 #mm-legend i {
   font-style: normal; display: inline-block; flex: 0 0 auto;

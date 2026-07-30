@@ -264,14 +264,37 @@
       "certified": "2026-07-30 certified & shipped (wf_af0a4bf7). Render-only: SPR.train bake (append-only, zero RNG-stream draws) + computeTrains/drawTrainsAt \u2014 closed Euler tour per >=2-live-station rail net, phase-driven, world-space state with rotation applied only at draw. ALL 12 verify gates passed first try: train visible+moving (C1), RNG purity exact (whole-frame counter 100===100 vs baseline + throwing-probe 600/600 clean, C2), same-seed pixel identity 2/2 byte-identical dataURLs (C3), BYTE-IDENTICAL SIM 21/21 serialize pairs v15 (C4), all 4 rotations (C5), painter occlusion 0 px through buildings (C6), bridge cables paint over the consist (C7), frame time 1.004x (C8), alivenessStats trainLines/trains live with all 7 prior keys (C9), no-rail scene byte-identical + 140-entry sprite manifest identical (C10), ridership scaling strict (C11), zero console errors (C12). Panel fidelity caught 3 defects, fixed: station overdraw (consist now ducks behind the depot at all 4 rotations), terminal overhang (nose stops at the stub tip with braking ease), plus the low-severity residual DISCLOSED: units briefly overlap inside a terminal tile during the phase fold (a true stop-and-reverse shunt would need per-train direction state \u2014 out of proportion for a transient the panel rated low). S6 measurement note: the literal \"call counter = 0\" gate is operationalized as baseline-equal whole-frame counts + a throwing probe on computeTrains, since shipped car/smoke pools legitimately draw per frame \u2014 refinement disclosed, not a weakening. Independent smoke: seeded City(777) rail line, 2/2 stations live, trainLines=1/trains=1, train visible on track, v15 unchanged, zero errors."
     },
     {
-      "id": "GP5",
-      "title": "Service Strain, Visible Coverage & the Education Payoff",
+      "id": "GP5a",
+      "title": "Coverage Previews & Strain Meters (read-only)",
+      "dimensions": [
+        "services-quality",
+        "feedback-legibility"
+      ],
+      "scope": "SPLIT FROM GP5 per its pre_split (S3 read-first). PURE READ + UI \u2014 the sim must remain BYTE-IDENTICAL; strain SCALING and the education payoff are GP5b. (A) LEGIBILITY: Pol and Fire minimap modes with MM_LEGENDS entries (the two services you currently site blind), Police/Fire coverage rows in the query panel, and a coverage-radius ghost in drawCursor outlining the exact diamond stampCoverage would write while dimming existing stations of that type (its honesty gate: the ghost's tile set exactly equals the tiles stampCoverage writes on 20 randomized placements). Own the minimap strip layout: it is at 11 buttons in a 160px sidebar (commute joined in GP3b) and the roadmap adds more \u2014 regroup into a scrollable two-row cluster with the mode name in the legend, every mode rendering without clipping at 160px. (B) STRAIN METERS AS PURE READS: compute and DISPLAY per-department strain (school/hospital/police/fire: funding-scaled capacity per powered anchor vs citywide load from the existing RES_POP/COM_JOB/IND_JOB tables and structure counts) in the budget panel rows and query verdicts (ADVISORY_GATES rows only \u2014 walked by diagnoseTile, never growthPass) \u2014 but the displayed strain must NOT yet multiply any coverage stamp or sim term (that coupling is GP5b's declared re-pin). The meter's honesty gate: the displayed load/capacity numbers are reproduced by an independent harness census of the same tables. This read half proves the instrumentation honest so GP5b's behavior is measured by meters the player already trusts. NO save change (v15 unchanged \u2014 advisory/UI only).",
+      "player_facing_win": "You can finally SEE police and fire coverage while siting a station \u2014 a live ghost of the exact diamond the station will serve \u2014 and budget rows warn which service is overloaded before it starts to bite.",
+      "quality_gates": [
+        "BYTE-IDENTICAL SIM (S3 hard constraint): 20 seeds x 600 ticks vs the GP4b baseline with Math.random UNSTUBBED \u2014 0 differing bytes in all serialized planes and save JSON; save version stays 15; the strain/preview path performs zero sim writes and zero RNG draws (write-trap proxy + counters report 0).",
+        "Ghost honesty: the placement ghost's tile set exactly equals the tiles stampCoverage writes on 20 randomized placements of each of the 4 station types (police/fire/school/hospital).",
+        "Meter honesty: the displayed per-department load/capacity/strain numbers are reproduced exactly by an independent harness census of RES_POP/COM_JOB/IND_JOB tables and anchor counts across 5 scripted cities including a zero-anchor and an over-capacity case.",
+        "Legibility: Pol and Fire minimap modes render with legend entries and pass the shipped deutan-safe check (monotone ramp, dL* >= 25); the regrouped strip renders every mode without clipping at 160px width; advisory verdict rows appear only where coverage is genuinely low.",
+        "Zero console errors; UI additions respect the message-TTL discipline; rotation-invariant displays; perf within ~10% of baseline (previews compute on demand, never per-frame full-map scans)."
+      ],
+      "impact_1_5": 4,
+      "effort_1_5": 3,
+      "priority_rank": 8,
+      "touches_save_format": false,
+      "status": "todo",
+      "split_of": "GP5 (read half; strain scaling + education payoff is GP5b)"
+    },
+    {
+      "id": "GP5b",
+      "title": "Service Strain & the Education Payoff (behavior)",
       "dimensions": [
         "services-quality",
         "economy-progression",
         "simulation-depth"
       ],
-      "scope": "Give the four services the proven waterPressure treatment (sim.js:1035): each powered anchor carries a funding-scaled capacity (school ~500 students, hospital ~800 patients, police ~1200 residents, fire ~1500 structures); recomputeMaps sums citywide load from the existing RES_POP/COM_JOB/IND_JOB tables plus structure counts and derives a per-department strain in [0,1] multiplying the potency term inside stampCoverage (sim.js:1435). PLUS the two things the panel proved this milestone cannot ship without. (A) EDUCATION AND HEALTH ARE NOT CURRENTLY DISTINCT \u2014 sim.js:1392 and 1709 literally SUM eduCov and medCov and 1721 ORs them, so per-department capacity does not by itself meet this dimension's own pass bar, and adding strain without a payoff converts schools from a free stamp into a recurring bill that still returns nothing. Split them: health feeds a mortality/population-growth term and the residential fit; education accumulates a NEW slow city stock, eduLevel, over years of sustained coverage (the decade-scale investment horizon the simulation-depth pass bar asks for) that gates INDUSTRIAL MIX \u2014 below threshold industry is dirty (high pollution, low assessed value per job), above it clean/high-tech industry unlocks with lower pollution and a higher tax base. Schools become the highest-return long investment in the game instead of an overhead line. (B) THE LEGIBILITY HALF, shipped in the same pass and separable if the session runs tight: Pol and Fire minimap modes with MM_LEGENDS entries (ui.js:654 covers power/poll/value/crime/traffic/svc/water/transit/dist \u2014 9 modes, and has never covered the two services you site blind), Police/Fire rows in the query panel, and a coverage-radius ghost in drawCursor (render.js:1677) outlining the diamond stampCoverage would write while dimming existing stations of that type. Own the strip layout: it is at 10 buttons in a 160px sidebar (index.html:101) and this roadmap adds up to 4 more \u2014 regroup into a scrollable two-row cluster with the mode name in the legend. (C) DELETE the draft's vacuous identity gate. At these capacities any pinned baseline city large enough to be interesting is already strained, so this WILL change shipped behaviour and re-pins the baseline; the honest gate is a bounded re-pin plus a strain===1.0 fast-path assertion, not a hidden identity that only holds for toy cities. Save takes the next ladder integer for eduLevel.",
+      "scope": "BEHAVIOR HALF of the GP5 split (declared re-pin; measured by GP5a-certified meters). Give the four services the proven waterPressure treatment (sim.js:1035): each powered anchor carries a funding-scaled capacity (school ~500 students, hospital ~800 patients, police ~1200 residents, fire ~1500 structures); recomputeMaps sums citywide load from the existing RES_POP/COM_JOB/IND_JOB tables plus structure counts and derives a per-department strain in [0,1] multiplying the potency term inside stampCoverage (sim.js:1435). PLUS the two things the panel proved this milestone cannot ship without. (A) EDUCATION AND HEALTH ARE NOT CURRENTLY DISTINCT \u2014 sim.js:1392 and 1709 literally SUM eduCov and medCov and 1721 ORs them, so per-department capacity does not by itself meet this dimension's own pass bar, and adding strain without a payoff converts schools from a free stamp into a recurring bill that still returns nothing. Split them: health feeds a mortality/population-growth term and the residential fit; education accumulates a NEW slow city stock, eduLevel, over years of sustained coverage (the decade-scale investment horizon the simulation-depth pass bar asks for) that gates INDUSTRIAL MIX \u2014 below threshold industry is dirty (high pollution, low assessed value per job), above it clean/high-tech industry unlocks with lower pollution and a higher tax base. Schools become the highest-return long investment in the game instead of an overhead line. (B) THE LEGIBILITY HALF, shipped in the same pass and separable if the session runs tight: Pol and Fire minimap modes with MM_LEGENDS entries (ui.js:654 covers power/poll/value/crime/traffic/svc/water/transit/dist \u2014 9 modes, and has never covered the two services you site blind), Police/Fire rows in the query panel, and a coverage-radius ghost in drawCursor (render.js:1677) outlining the diamond stampCoverage would write while dimming existing stations of that type. Own the strip layout: it is at 10 buttons in a 160px sidebar (index.html:101) and this roadmap adds up to 4 more \u2014 regroup into a scrollable two-row cluster with the mode name in the legend. (C) DELETE the draft's vacuous identity gate. At these capacities any pinned baseline city large enough to be interesting is already strained, so this WILL change shipped behaviour and re-pins the baseline; the honest gate is a bounded re-pin plus a strain===1.0 fast-path assertion, not a hidden identity that only holds for toy cities. Save takes the next ladder integer for eduLevel. NOTE FROM THE SPLIT: the legibility half (B in the text above) ships in GP5a \u2014 this milestone couples the strain the meters already display into stampCoverage potency, splits education from health mechanically (the eduLevel slow stock gating industrial mix), and takes save v16 for eduLevel.",
       "player_facing_win": "Every thousand new residents re-opens the six-way budget fight \u2014 and for the first time schools PAY: two decades of sustained education turns your smokestack district into clean high-tech industry, while you can finally SEE police and fire coverage while siting a station.",
       "quality_gates": [
         "Strain bites and relief works: doubling population against a fixed school count drives strain below 0.6 and mean eduCov down >=25% and measurably slows level-3 upgrades; adding schools or raising the edu slider returns strain to 1.0 and eduCov within 2% of the uncrowded value within 3 rollovers and flips the budget row off OVERCROWDED.",
@@ -283,10 +306,10 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 8,
+      "priority_rank": 9,
       "touches_save_format": true,
       "status": "todo",
-      "pre_split": "Split at launch per S3: GP5a = visible coverage previews + strain meters (read-only, byte-identical). GP5b = strain scaling + the education payoff (behavior; outcome gates: after 20 sustained years of high education, industrial composition shifts to clean/high-tech, measured by census)."
+      "split_of": "GP5 (behavior half; read half is GP5a)"
     },
     {
       "id": "GP6",
@@ -308,7 +331,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 3,
-      "priority_rank": 9,
+      "priority_rank": 10,
       "touches_save_format": true,
       "status": "todo"
     },
@@ -332,7 +355,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 4,
-      "priority_rank": 10,
+      "priority_rank": 11,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP7a = the assessed-value SHADOW ledger \u2014 show what taxes WOULD be under assessed valuation next to actual, read-only, byte-identical. GP7b = the cutover + debt ladder + stabilizer, measured against GP7a projections."
@@ -357,7 +380,7 @@
       ],
       "impact_1_5": 5,
       "effort_1_5": 5,
-      "priority_rank": 11,
+      "priority_rank": 12,
       "touches_save_format": true,
       "status": "todo",
       "pre_split": "Split at launch per S3: GP8a = the risk readout (per-tile hazard odds from coverage/pollution/plant age; read-only; its honesty gate = empirical disaster rates over a long soak match the displayed odds). GP8b = coupled hazard rates + the emergency-response allowance (behavior)."
@@ -382,7 +405,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 12,
+      "priority_rank": 13,
       "touches_save_format": true,
       "status": "todo",
       "launch_note": "Waste chain per original M31 design; S4 applies \u2014 garbage must be visible (landfill fill states, truck traffic on load[])."
@@ -407,7 +430,7 @@
       ],
       "impact_1_5": 4,
       "effort_1_5": 4,
-      "priority_rank": 13,
+      "priority_rank": 14,
       "touches_save_format": true,
       "status": "todo",
       "launch_note": "Last: consumes strain/blight substrates from GP5/GP6. S4: blight must be visible tile-by-tile, and the renewal campaign paints visibly back."

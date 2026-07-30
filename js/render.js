@@ -820,7 +820,10 @@ function renderFrame(city, uiState, clearBG) {
           // UNDER pass (water shadow + slab fascia) goes beneath the deck
           // sprite, the OVER pass (railings/towers/cables) above it, all in
           // this tile's own painter slot
-          const roadBridge = (ov === OV.ROAD || ov === OV.WIREROAD) &&
+          // GP4a: an expressway carried over water rides the same suspension
+          // spans (bridgeRun's third carrier class — drawBridgeUnder/Over
+          // reused verbatim): the xway water crossing IS the red-bridge answer.
+          const roadBridge = (ov === OV.ROAD || ov === OV.WIREROAD || ov === OV.XWAY) &&
             t === TERR.WATER ? bridgeRun(city, i) : null;
           if (roadBridge) drawBridgeUnder(roadBridge, wx, wy);
           if (spr) {
@@ -844,7 +847,7 @@ function renderFrame(city, uiState, clearBG) {
               ctx.fillRect(wx + spr.beacon.x, wy + spr.beacon.y, 3, 3);
             }
             // G2: buildings occlude glow behind them; flat roads/wires don't
-            if (ng && ov !== OV.ROAD && ov !== OV.WIRE && ov !== OV.WIREROAD && ov !== OV.PIPE) // M26: crossing is flat road+wire, doesn't punch; M24: a flat pipe doesn't punch either
+            if (ng && ov !== OV.ROAD && ov !== OV.WIRE && ov !== OV.WIREROAD && ov !== OV.PIPE && !isXp(ov)) // M26: crossing is flat road+wire, doesn't punch; M24: a flat pipe doesn't punch either; GP4a: nor does the open expressway deck
               nightPunch(spr, wx, wy);
           }
           // pothole tint (M23): unmaintained roads visibly darken with wear
@@ -877,7 +880,7 @@ function renderFrame(city, uiState, clearBG) {
             // night lights at this tile's own depth (G2): street lamps on
             // road tiles, prebaked lit-window glow on powered zones, plus
             // the ground pool — unless the tile in front blocks the spill
-            if (ov === OV.ROAD || ov === OV.WIREROAD) { // M26: crossing gets a street lamp like a road
+            if (ov === OV.ROAD || ov === OV.WIREROAD || ov === OV.XWAY || ov === OV.RAMP) { // M26: crossing gets a street lamp like a road; GP4a: highway lighting rides the same additive lamp (night-layer key already includes devRev)
               nightAdd(SPR.lamp, wx, wy);
             } else if (spr && spr.night && city.powered[i] && !city.fire[i]) {
               // (burning buildings show fire, not tidy lit windows — G3)
@@ -1209,7 +1212,8 @@ function updateCars(city, ns, speed = 1) {
   const roads = [];
   let total = 0;
   for (let i = 0; i < city.over.length; i++)
-    if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) { roads.push(i); total += city.traffic[i]; } // M26: cars use crossings
+    if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD ||
+        city.over[i] === OV.XWAY || city.over[i] === OV.RAMP) { roads.push(i); total += city.traffic[i]; } // M26: cars use crossings; GP4a: traffic dots ride the expressway (render-only aliveness)
 
   // G16: cap scales with map area (carCap) instead of the flat 70
   const want = roads.length >= 8 ? Math.min(carCap(), 6 + (total / 45 | 0)) : 0;
@@ -1231,12 +1235,14 @@ function updateCars(city, ns, speed = 1) {
       const px = c.fx, py = c.fy;
       c.fx = c.tx; c.fy = c.ty; c.p = 0;
       const i = c.fy * MAP + c.fx;
-      if (city.over[i] !== OV.ROAD && city.over[i] !== OV.WIREROAD) { cars.splice(k, 1); continue; } // road/crossing got dozed (M26)
+      if (city.over[i] !== OV.ROAD && city.over[i] !== OV.WIREROAD &&
+          city.over[i] !== OV.XWAY && city.over[i] !== OV.RAMP) { cars.splice(k, 1); continue; } // road/crossing/expressway got dozed (M26/GP4a)
       const opts = [], back = [];
       for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const X = c.fx + dx, Y = c.fy + dy;
         if (X < 0 || Y < 0 || X >= MAP || Y >= MAP) continue;
-        if (city.over[Y * MAP + X] !== OV.ROAD && city.over[Y * MAP + X] !== OV.WIREROAD) continue; // M26: cars path through crossings
+        const no = city.over[Y * MAP + X];
+        if (no !== OV.ROAD && no !== OV.WIREROAD && no !== OV.XWAY && no !== OV.RAMP) continue; // M26: cars path through crossings; GP4a: and onto the expressway
         (X === px && Y === py ? back : opts).push([X, Y]);
       }
       const pool = opts.length ? opts : back; // dead end -> U-turn
@@ -1877,6 +1883,8 @@ function minimapCityCol(city, i) {
   if (t === OV.RUBBLE) return "#654";
   if (t === OV.AIRPORT) return "#9ab"; // GQ10: tarmac slate
   if (t === OV.SEAPORT) return "#c52"; // GQ10: crane rust
+  if (t === OV.XWAY) return "#b8bcc8"; // GP4a: pale concrete — brighter than road grey
+  if (t === OV.RAMP) return "#98a0b0"; // GP4a: the exchange, a half-step dimmer
   // GQ10: surface the M28 gap — ids 22..28 used to fall through to the
   // terrain color and were invisible on the minimap.
   if (isArco(t)) return "#a7e";
@@ -1936,7 +1944,8 @@ function renderMinimap(city, mode) {
       const v = city.landv[i];
       col = `rgb(${30 + v * 0.3 | 0},${40 + v * 0.7 | 0},${60 + v * 0.5 | 0})`;
     } else if (mode === "traffic") {
-      if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) { // M26: crossing shows traffic
+      if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD ||
+          city.over[i] === OV.XWAY || city.over[i] === OV.RAMP) { // M26: crossing shows traffic; GP4a: an unused expressway samples the free-flow green — it reads as EMPTY
         // GQ11: bright green → amber → DARK red — lightness falls monotonically
         // with congestion, so free/jammed separate even where red≈green
         const v = city.traffic[i];
@@ -1984,11 +1993,13 @@ function renderMinimap(city, mode) {
       // monotonic-lightness near→far ramp (GQ11). Developed ZR tiles read
       // their job-access health; everything else keeps dimmed City context.
       const t = city.over[i];
-      if (t === OV.ROAD || t === OV.WIREROAD) {
+      if (t === OV.ROAD || t === OV.WIREROAD || t === OV.XWAY || t === OV.RAMP) { // GP4a: the expressway paints its commute distance too
         const d = city.jobDist[i];
+        // GP4a: with any expressway on the map jobDist is in HALF-HOP units —
+        // halve the displayed distance so near/far stays on one scale.
         col = d === 255 ? "#484850"
           : d === 0 ? "#ffe040"
-          : mmRamp(Math.min(1, d / MAX_COMMUTE), MM_COMMUTE);
+          : mmRamp(Math.min(1, (city._xpAny ? d / 2 : d) / MAX_COMMUTE), MM_COMMUTE);
       } else if (t === OV.ZR && city.lvl[i]) {
         col = city.jobAccess[i] >= jaHealthy(city) ? "#25e8a8" : "#e08030";
       } else col = minimapDim(minimapCityCol(city, i), 0.35); // G8: keep district context

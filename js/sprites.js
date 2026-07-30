@@ -1978,6 +1978,127 @@ function buildSprites() {
     g.fillText("T", cx, cy - 3);
   });
 
+  // ---- GP4a: expressway & ramp (16 connection masks, road bit order) ----
+  // ZERO RNG calls (the roadSprite contract): these bakes are appended AFTER
+  // every existing bake and never touch R()/ART_RNG/groundRng, so no
+  // downstream sprite's draw stream shifts (the C6 sprite-manifest identity).
+  // The deck rides 6px above the ground diamond entirely inside this 1x1
+  // painter slot (the rail extraTop idiom: extraTop 12, deck drawn at EDGE
+  // coords +6, ground at +12). Distinctness vs SPR.road at a glance: raised
+  // elevation with piers + fascia, PALE concrete slab framing DARK
+  // carriageways (the road's value scheme inverted), a continuous jersey
+  // median instead of dashes, and no crosswalks/curbs anywhere.
+  const XW_LIFT = 6;   // deck height above the ground diamond, px
+  const xwaySprite = (m, snow) => mkSprite(1, 1, 12, (g, ox, oy) => {
+    const C = [ox, oy - XW_LIFT];                     // deck-level tile centre
+    const deckC = "#6f727c", laneC = "#34353c", medianC = "#c9cad0",
+          railC = "#9ea2ac", edgeC = "#d8c24a", pierC = "#565962", skirtC = "#4c4f58";
+    const D0 = 0.10, D1 = 0.90;                       // deck spans ~80% of each edge
+    const arms = [];
+    for (let b = 0; b < 4; b++) if ((m & (1 << b)) || m === 0) arms.push(b);
+    const geom = (b) => {
+      const [P0, P1] = EDGE[b];
+      const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2 + XW_LIFT];
+      const pt = (f) => [P0[0] + (P1[0] - P0[0]) * f, P0[1] + (P1[1] - P0[1]) * f + XW_LIFT];
+      const cOf = (p) => [C[0] + p[0] - mid[0], C[1] + p[1] - mid[1]];
+      return { pt, cOf };
+    };
+    // pass A: piers, fascia skirts and the concrete slab of every open arm
+    for (const b of arms) {
+      const { pt, cOf } = geom(b);
+      const e1 = pt(D0), e2 = pt(D1), c1 = cOf(e1), c2 = cOf(e2);
+      g.strokeStyle = pierC; g.lineWidth = 2.2; g.lineCap = "butt";
+      for (const f of [0.28, 0.72]) {                 // two piers, deck edge -> ground
+        const p = pt(f);
+        g.beginPath(); g.moveTo(p[0], p[1] + 1.5); g.lineTo(p[0], p[1] + 1.5 + XW_LIFT); g.stroke();
+      }
+      poly(g, [e1, c1, [c1[0], c1[1] + 2.5], [e1[0], e1[1] + 2.5]], skirtC); // slab fascia
+      poly(g, [e2, c2, [c2[0], c2[1] + 2.5], [e2[0], e2[1] + 2.5]], skirtC);
+      poly(g, [e1, e2, c2, c1], deckC);
+    }
+    // junction pad keeps the interchange box solid concrete
+    poly(g, [[C[0] - 7, C[1] - 3.5], [C[0] + 7, C[1] - 3.5],
+             [C[0] + 7, C[1] + 3.5], [C[0] - 7, C[1] + 3.5]], deckC);
+    // pass B: carriageways, median, edge lines and guard rails per arm
+    for (const b of arms) {
+      const { pt, cOf } = geom(b);
+      const q = (f0, f1, col) => { const a = pt(f0), z = pt(f1); poly(g, [a, z, cOf(z), cOf(a)], col); };
+      q(0.22, 0.46, laneC); q(0.54, 0.78, laneC);     // two dark carriageways
+      q(0.47, 0.53, medianC);                          // continuous jersey median
+      g.strokeStyle = edgeC; g.lineWidth = 1.2; g.lineCap = "butt";
+      for (const f of [0.20, 0.80]) {                  // solid yellow edge lines
+        const p = pt(f), cc = cOf(p);
+        g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(cc[0], cc[1]); g.stroke();
+      }
+      const e1 = pt(D0), e2 = pt(D1), c1 = cOf(e1), c2 = cOf(e2);
+      if (snow) {                                      // winter: snow piles on the
+        g.strokeStyle = "#e8edf3"; g.lineWidth = 2.4;  // rails, deck stays plowed
+        g.lineCap = "round";
+      } else {
+        g.strokeStyle = railC; g.lineWidth = 1.2;      // guard rails
+      }
+      g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
+      g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
+      g.lineCap = "butt";
+    }
+  });
+  // The RAMP is keyed by its XWAY-neighbor mask: a ground-level asphalt apron
+  // (roadSprite arm geometry) toward every non-xway arm, plus a rising wedge
+  // (ground edge -> 6px-raised edge, side skirts, 3 white chevrons) toward
+  // each xway arm; an isolated ramp (mask 0) draws the apron + a stub wedge N.
+  const rampSprite = (m) => mkSprite(1, 1, 12, (g, ox, oy) => {
+    const C = [ox, oy];                                // ground-level tile centre
+    const asphalt = "#3e3f46", curb = "#93949c", deckC = "#6f727c",
+          skirtC = "#4c4f58", chevC = "#e6e7ec";
+    const A0 = 0.14, A1 = 0.86;
+    const wedge = m === 0 ? 1 : m;
+    for (let b = 0; b < 4; b++) {                      // ground apron arms
+      if (wedge & (1 << b)) continue;
+      const [P0, P1] = EDGE[b];
+      const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2 + XW_LIFT + 6];
+      const pt = (f) => [P0[0] + (P1[0] - P0[0]) * f, P0[1] + (P1[1] - P0[1]) * f + XW_LIFT + 6];
+      const e1 = pt(A0), e2 = pt(A1);
+      const c1 = [C[0] + e1[0] - mid[0], C[1] + e1[1] - mid[1]];
+      const c2 = [C[0] + e2[0] - mid[0], C[1] + e2[1] - mid[1]];
+      poly(g, [e1, e2, c2, c1], asphalt);
+      g.strokeStyle = curb; g.lineWidth = 1.2; g.lineCap = "butt";
+      g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
+      g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
+    }
+    poly(g, [[C[0] - 7, C[1] - 3.5], [C[0] + 7, C[1] - 3.5],
+             [C[0] + 7, C[1] + 3.5], [C[0] - 7, C[1] + 3.5]], asphalt);
+    for (let b = 0; b < 4; b++) {                      // rising wedge arms
+      if (!(wedge & (1 << b))) continue;
+      const [P0, P1] = EDGE[b];
+      const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2 + XW_LIFT + 6];
+      const eR = (f) => [P0[0] + (P1[0] - P0[0]) * f,       // raised edge (meets
+                         P0[1] + (P1[1] - P0[1]) * f + 6];  // the xway deck)
+      const cG = (f) => { const e = [P0[0] + (P1[0] - P0[0]) * f, P0[1] + (P1[1] - P0[1]) * f + XW_LIFT + 6];
+                          return [C[0] + e[0] - mid[0], C[1] + e[1] - mid[1]]; };
+      const e1 = eR(0.10), e2 = eR(0.90), c1 = cG(0.10), c2 = cG(0.90);
+      poly(g, [e1, [e1[0], e1[1] + XW_LIFT], c1], skirtC); // side skirts to ground
+      poly(g, [e2, [e2[0], e2[1] + XW_LIFT], c2], skirtC);
+      poly(g, [e1, e2, c2, c1], deckC);                    // the sloping deck
+      g.strokeStyle = chevC; g.lineWidth = 1.4; g.lineCap = "butt";
+      for (const u of [0.30, 0.55, 0.80]) {                // 3 chevrons up the slope
+        const p1 = [e1[0] + (c1[0] - e1[0]) * u, e1[1] + (c1[1] - e1[1]) * u];
+        const p2 = [e2[0] + (c2[0] - e2[0]) * u, e2[1] + (c2[1] - e2[1]) * u];
+        const pm = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
+        g.beginPath();
+        g.moveTo(p1[0] * 0.78 + pm[0] * 0.22, p1[1] * 0.78 + pm[1] * 0.22 + 1);
+        g.lineTo(pm[0], pm[1] - 1.2);
+        g.lineTo(p2[0] * 0.78 + pm[0] * 0.22, p2[1] * 0.78 + pm[1] * 0.22 + 1);
+        g.stroke();
+      }
+    }
+  });
+  SPR.xway = []; SPR.xwayWinter = []; SPR.ramp = [];
+  for (let m = 0; m < 16; m++) {
+    SPR.xway.push(xwaySprite(m, false));
+    SPR.xwayWinter.push(xwaySprite(m, true));
+    SPR.ramp.push(rampSprite(m));
+  }
+
   // ---- undeveloped zone markers ----
   // GQ1 fix: the C marker was #3555ff (HSL S=1.00) — the only pixels in an
   // ordinary daytime frame bluer than the lake, falsifying Gate 1's "water is
@@ -3492,6 +3613,13 @@ function spriteFor(city, i) {
     // M24: water mains draw FLAT through this normal ground path (SPR.pipe is
     // baked at elevation 0, so it renders like a road, NOT overhead like a wire);
     // the tower/pump are static single sprites (not per-facing/season bakes).
+    // GP4a: the expressway autotiles on its own class mask (XWAY||RAMP
+    // neighbors) and the ramp keys on which neighbors are true XWAY so its
+    // rising wedge points up the carriageway — rot4 gives 4-rotation
+    // correctness exactly as roads get it (M32a).
+    case OV.XWAY:
+      return (season === "winter" ? SPR.xwayWinter : SPR.xway)[rot4(xwayMask(city, i), cam.r)];
+    case OV.RAMP:  return SPR.ramp[rot4(rampMask(city, i), cam.r)];
     case OV.PIPE:  return SPR.pipe[rot4(pipeMask(city, i), cam.r)];
     case OV.WATERTOWER: return SPR.watertower;
     case OV.PUMP:  return SPR.pump;
@@ -3541,6 +3669,38 @@ function roadMask(city, i) {
   return m;
 }
 
+// GP4a: expressway autotile mask — an XWAY arm points at any XWAY or RAMP
+// 4-neighbor (the carriageway runs through its ramps). Pure logical-neighbor
+// read, never cam.r — rotation correctness comes ONLY from rot4 at the
+// spriteFor call site (M32a).
+function xwayMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let m = 0;
+  const xp = (X, Y) => {
+    if (!city.inMap(X, Y)) return false;
+    const t = city.over[city.idx(X, Y)];
+    return t === OV.XWAY || t === OV.RAMP;
+  };
+  if (xp(x, y - 1)) m |= 1;
+  if (xp(x + 1, y)) m |= 2;
+  if (xp(x, y + 1)) m |= 4;
+  if (xp(x - 1, y)) m |= 8;
+  return m;
+}
+
+// GP4a: ramp wedge mask — ONLY true XWAY neighbors raise a bit; every other
+// arm draws the ground-level apron toward the streets.
+function rampMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let m = 0;
+  const xw = (X, Y) => city.inMap(X, Y) && city.over[city.idx(X, Y)] === OV.XWAY;
+  if (xw(x, y - 1)) m |= 1;
+  if (xw(x + 1, y)) m |= 2;
+  if (xw(x, y + 1)) m |= 4;
+  if (xw(x - 1, y)) m |= 8;
+  return m;
+}
+
 /* ---- GQ9: suspension-bridge run finder ----
    For a WATER tile carrying a road (OV.ROAD / OV.WIREROAD) or surface rail
    (RL.TRACK): the contiguous straight water run of the same carrier class, as
@@ -3560,8 +3720,14 @@ function bridgeRun(city, i) {
   if (bridgeMemo.city !== city || bridgeMemo.key !== key) {
     bridgeMemo.city = city; bridgeMemo.key = key; bridgeMemo.runs.clear();
   }
-  const isRoad = city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD;
-  const mk = (i << 1) | (isRoad ? 0 : 1); // road + rail runs memoize apart
+  // GP4a: a THIRD carrier class — the expressway viaduct crosses water on the
+  // same suspension spans. Memo key widened from (i<<1)|isRoad to i*4+cls
+  // (0 road, 1 rail, 2 xway) so the three run families memoize apart; road
+  // and rail geometry is untouched.
+  const ovi = city.over[i];
+  const isRoad = ovi === OV.ROAD || ovi === OV.WIREROAD;
+  const cls = isRoad ? 0 : ovi === OV.XWAY ? 2 : 1;
+  const mk = i * 4 + cls;
   const hit = bridgeMemo.runs.get(mk);
   if (hit !== undefined) return hit;
   const x = i % MAP, y = (i / MAP) | 0;
@@ -3569,15 +3735,16 @@ function bridgeRun(city, i) {
     if (!city.inMap(X, Y)) return false;
     const j = city.idx(X, Y);
     if (city.terr[j] !== TERR.WATER) return false;
-    return isRoad ? (city.over[j] === OV.ROAD || city.over[j] === OV.WIREROAD)
-                  : city.rail[j] === RL.TRACK;
+    return cls === 0 ? (city.over[j] === OV.ROAD || city.over[j] === OV.WIREROAD)
+         : cls === 2 ? city.over[j] === OV.XWAY
+         : city.rail[j] === RL.TRACK;
   };
   // axis: follow the water-carrier run at x±1, else y±1; a single ambiguous
   // tile reads its carrier mask's opposite-arm pair (default y)
   let ax = 0, ay = 1;
   if (carrier(x - 1, y) || carrier(x + 1, y)) { ax = 1; ay = 0; }
   else if (!carrier(x, y - 1) && !carrier(x, y + 1)) {
-    const cm = isRoad ? roadMask(city, i) : railMask(city, i);
+    const cm = cls === 0 ? roadMask(city, i) : cls === 2 ? xwayMask(city, i) : railMask(city, i);
     if (cm === 10) { ax = 1; ay = 0; } // E+W arm pair ⇒ an x-axis deck
   }
   let x0 = x, y0 = y;
@@ -3720,7 +3887,10 @@ function wireMask(city, i) {
     const t = city.over[city.idx(X, Y)];
     // M24: exclude the water overlays so a power line never draws an arm toward
     // a pipe/tower/pump (the two utilities are visually separate networks).
-    return t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE && !isWaterOv(t);
+    // GP4a: exclude the expressway class too — placement already forbids
+    // contact-conduction (a wire may not cross an xway), so the cosmetic arm
+    // must not suggest otherwise.
+    return t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE && !isWaterOv(t) && !isXp(t);
   };
   if (conn(x, y - 1)) m |= 1;
   if (conn(x + 1, y)) m |= 2;

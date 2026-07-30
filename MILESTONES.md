@@ -9,6 +9,18 @@ Queue policy: keep at least 5 open improvements at all times.
 - **GP4a — Expressways & Ramps** (sim+art together per S4): the answer to
   the commute pressure GP3 made real and visible — a high-capacity route you
   pay for, route around neighbourhoods, and deliberately plug into the grid.
+  **Implement pass landed (under verification, NOT shipped):** OV.XWAY=32 /
+  OV.RAMP=33 with the full isXp anti-crosstalk audit (power/fire/wear);
+  half-hop-unit weighted jobDist + XCOMMUTE commute walk behind an `_xpAny`
+  branch (no-expressway cities run the legacy bodies verbatim — 600-tick
+  serialize byte-identical to 5b4c6db modulo the v:15 bump, checked in node);
+  per-class capacity divisors (XP_CAP=4 / RAMP_CAP=2) at the traffic fold;
+  ramp-gated jobAccess fusion; noise + pollution scars in existing overlays;
+  XWAY_NO_RAMP / RAMP_ORPHAN / XWAY_OPEN verdicts; procedural 16-mask
+  raised-deck sprites (zero shared-RNG draws) + xway bridge class + minimap /
+  traffic / commute overlay coverage; tools `,`/`.` at Town tier; save v15.
+  Spec corrections recorded in `docs/gameplay-roadmap.json` (over[] rides
+  Array.from, not packU8; C2 phase-0 jobDist assertion flagged per S6).
 
 ## Open
 

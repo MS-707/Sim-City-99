@@ -259,6 +259,17 @@ const OV = {
   // consumers, brownout/y2k-eligible, zero pop/jobs). The 22..25 / 26..28 /
   // 22..28 range tests (isArco/isLandmark/isMega) stay FALSE for 29..31.
   NUKE: 29, AIRPORT: 30, SEAPORT: 31,
+  // GP4a: the road-class hierarchy — two more ids appended after the GQ10
+  // tail, never renumbering (over[] is a Uint8Array, so 32/33 round-trip via
+  // the plain Array.from serialization with NO loader change; save v15 is the
+  // version bump only). XWAY is the high-capacity expressway carriageway;
+  // RAMP is the SOLE tile that exchanges traffic between the expressway and
+  // the local street grid (road<->xway adjacency is never a graph edge).
+  // Both are >= ZR and OUTSIDE every predicate family (isPlant/isWaterOv/
+  // isMega/isPort — the 22..28 range tests stay FALSE for 32/33), so they
+  // carry the mandatory isXp anti-crosstalk exclusions at every documented
+  // recomputePower / fire-candidate site below.
+  XWAY: 32, RAMP: 33,
 };
 
 // M25: RAIL — a THIRD network, but on a SEPARATE PLANE (city.rail, a Uint8Array)
@@ -303,6 +314,26 @@ const isPlant = (t) => t === OV.COAL || t === OV.SOLAR || t === OV.GAS || t === 
 // isWaterSrc is the two providers (a tower/pump that seeds the water flood).
 const isWaterOv = (t) => t === OV.PIPE || t === OV.WATERTOWER || t === OV.PUMP;
 const isWaterSrc = (t) => t === OV.WATERTOWER || t === OV.PUMP;
+
+// GP4a: the expressway-class predicates — the isWaterOv/isMega ANTI-CROSSTALK
+// pattern for the two new >= ZR ids. isXp is the escape hatch appended at
+// every documented recomputePower idiom (conducts/demand/brownout/y2k/pump
+// feed) and at wireMask (sprites.js) so concrete never carries electricity;
+// the fire family excludes both ids explicitly (roads don't burn). Every
+// predicate is false for all existing 0..31 types, so a city that places no
+// expressway is byte-identical to the GP3b baseline.
+const isXway = (t) => t === OV.XWAY;
+const isRamp = (t) => t === OV.RAMP;
+const isXp = (t) => t === OV.XWAY || t === OV.RAMP;
+// GP4a D5: may a commuter standing on class-a step onto class-b? The RAMP is
+// the SOLE tile adjacent-legal to both classes — road<->xway is never an
+// edge. Shared by the weighted jobDist BFS and the commute walk so the two
+// can never disagree about the exchange rule.
+const xpStepOk = (a, b) => {
+  if (a === OV.XWAY) return b === OV.XWAY || b === OV.RAMP;
+  if (a === OV.RAMP) return b === OV.XWAY || b === OV.RAMP || b === OV.ROAD || b === OV.WIREROAD;
+  return b === OV.ROAD || b === OV.WIREROAD || b === OV.RAMP; // road-class
+};
 
 // M28: mega-structure predicates — the SINGLE source of truth each, mirroring
 // isPlant/isWaterOv. isArco (22..25) are the pop/jobs carriers counted once per
@@ -498,6 +529,9 @@ const COST = {
   statue: 8000, eiffel: 12000, pyramid: 20000,
   // GQ10: special-buildings gap-fill — the endgame plant + two big civics
   nuke: 15000, airport: 10000, seaport: 5000,
+  // GP4a: expressway class — 4x road per tile (concrete viaduct), ramp 2.5x;
+  // xway joins the 5x water-bridge multiplier in toolCost like road/wire/rail.
+  xway: 40, ramp: 25,
 };
 
 // ---- city milestones (M2) ----
@@ -522,7 +556,9 @@ const TOOL_TIER = { mayor: 2, stadium: 3, rail: 2, subway: 2, station: 2, // Tow
   plymouth: 3, forest: 3, darco: 4, launch: 4, // M28: City / Metropolis
   // GQ10: seaport at Town, airport at City, the nuke at Metropolis endgame
   // (darco/launch precedent) — same padlock/locked-place() machinery.
-  nuke: 4, airport: 3, seaport: 2 };
+  nuke: 4, airport: 3, seaport: 2,
+  // GP4a: expressways unlock at Town alongside rail (the mass-transit tier).
+  xway: 2, ramp: 2 };
 
 /* ---- city ordinances (M22) ----
    Citywide policy booleans the mayor toggles from the #dlg-ordinances panel.
@@ -843,7 +879,11 @@ function rngHash32(a, b, c) { return rngHashFrom(rngHashKey(a, b), c); }
 // same map in the same epoch, so they MUST NOT share a domain.
 // GP3b: COMMUTE is a NEW domain for the residential commute walk, so its
 // picks can never collide with the C/I keys still drawn in TRAFFIC.
-const HZ = { BROWNOUT: 1, Y2K_CUT: 2, TRAFFIC: 3, FX_CHOPPER: 4, FX_Y2KLINE: 5, FX_NAME: 6, COMMUTE: 7 };
+// GP4a: XCOMMUTE is a NEW domain for the half-hop-unit expressway commute
+// walk (keys (i*(MAX_COMMUTE*2)+step)*4+cnt — 16384*64*4 ≈ 4.2M, int32-safe).
+// Legacy cities never touch it, xp cities never touch HZ.COMMUTE's
+// residential keys, and HZ ids 1..7 are NEVER renumbered.
+const HZ = { BROWNOUT: 1, Y2K_CUT: 2, TRAFFIC: 3, FX_CHOPPER: 4, FX_Y2KLINE: 5, FX_NAME: 6, COMMUTE: 7, XCOMMUTE: 8 };
 
 /* ========================= M27: NEIGHBORING CITIES ========================= */
 // Four WORLD-fixed map edges: 0=N (y==0), 1=E (x==MAP-1), 2=S (y==MAP-1), 3=W
@@ -960,6 +1000,20 @@ const CMT_FIT_LO = 8, CMT_FIT_W = 0.15, CMT_FIT_STR_W = 0.45, CMT_DEM_LO = 10;
 const CMT_STROLL = 10;     // the legacy walk length: short commutes pad back to it
 const CMT_LOAD = 0.28;     // flat per-tile deposit scale of a long-haul commuter
 const CMT_STR_LOAD = 1.6;  // stranded commuters churn their local streets harder
+/* GP4a: expressway capacity — a PER-CLASS DIVISOR at the traffic[] EWMA fold,
+   NOT a deposit normalization: deposits stay comparable in load[] so the
+   corridor-drain measurements keep their meaning. XP_CAP=4 means an XWAY tile
+   congests as if it carried 1/4 the load (the "4x capacity" class); the RAMP
+   at /2 is the deliberate chokepoint where the classes exchange. Speed: with
+   any XWAY/RAMP tile on the map, jobDist switches to HALF-HOP units — a
+   road-class edge costs 2, an expressway-class edge costs 1 (2x road speed);
+   hopSum folds back to road-hop equivalents (d0/2) so avgCommute stays on the
+   serialized scale CMT_FIT_LO/CMT_DEM_LO read. Calibration knobs (S6): tune
+   THESE constants, never the milestone gate bars. */
+const XP_CAP = 4;          // expressway congestion divisor (4x road capacity)
+const RAMP_CAP = 2;        // ramp congestion divisor (the chokepoint)
+const XP_NOISE = 44;       // GP4a: expressway noise stamp — potency at d=0…
+const XP_NOISE_K = 12;     // …falling 12/manhattan-tile (44/32/20 over d<=2)
 /* commuteDamp = min(CAP, max(0,(avgCommute-LO)*AVG_W) + strandedShare*STR_W).
    The weight sits on STRANDING, not on mean length: a long-but-working
    corridor is livable, but commuters who literally cannot get to work leave
@@ -1250,7 +1304,55 @@ const INFRA_GATES = Object.freeze([
       [r.t === OV.SEAPORT ? "Industrial demand" : "Commercial demand",
        "+" + (r.t === OV.SEAPORT ? r.demI : r.demC).toFixed(3)],
       ["Net", "§" + (r.rev - r.cost) + "/mo"]]; } },
+
+  /* GP4a: the expressway verdicts — INFRA_GATES rows ONLY (walked by
+     diagnoseTile alone, never by growthPass, so growth RNG cannot move and no
+     draw-neutrality proof is owed). First match wins: the dead expressway is
+     the deeper failure, the half-plugged ramp next, and XWAY_OPEN is the
+     fallthrough for any xway/ramp tile that passed both. Every test is a PURE
+     READ — xpServedByRamp is a bounded local flood over the xp mask with its
+     own throwaway scratch, no caches written. */
+  { code: "XWAY_NO_RAMP", sev: "crit", label: "No ramp",
+    test: (c, i) => c.over[i] === OV.XWAY && !c.xpServedByRamp(i),
+    text: () => "No ramp connects this expressway to the streets — it serves nobody. " +
+      "Place a ramp where it meets the local grid.",
+    evid: (c, i) => [["Ramps to streets", "0"], ["Trips this month", "0"]] },
+
+  { code: "RAMP_ORPHAN", sev: "warn", label: "Ramp orphaned",
+    test: (c, i) => c.over[i] === OV.RAMP &&
+                    !(xpRampSides(c, i).xway && xpRampSides(c, i).road),
+    text: (c, i) => { const s = xpRampSides(c, i);
+      return !s.xway && !s.road
+        ? "This ramp touches neither an expressway nor a street — it exchanges nothing. Butt it against both."
+        : !s.xway
+        ? "This ramp touches no expressway — traffic has nothing to climb onto. Run the expressway against it."
+        : "This ramp touches no street — commuters can't reach it. Lay a road against it."; },
+    evid: (c, i) => { const s = xpRampSides(c, i);
+      return [["Expressway side", s.xway ? "yes" : "no"], ["Street side", s.road ? "yes" : "no"]]; } },
+
+  { code: "XWAY_OPEN", sev: "ok", label: "Expressway open",
+    test: (c, i) => c.over[i] === OV.XWAY || c.over[i] === OV.RAMP,
+    text: (c, i) => c.over[i] === OV.XWAY
+      ? "Expressway open — traffic exchanges with the streets only through ramps, at 4x a road's carrying capacity."
+      : "Ramp open — this is where the expressway plugs into the local grid.",
+    evid: (c, i) => [["Class", c.over[i] === OV.XWAY ? "4x capacity" : "2x capacity"],
+                     ["Trips this month", "~" + c.traffic[i]]] },
 ]);
+
+// GP4a: which sides a RAMP tile actually touches (pure 4-neighbor read) —
+// shared by the RAMP_ORPHAN verdict's test/text/evid so they cannot disagree.
+function xpRampSides(c, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let xway = false, road = false;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const X = x + dx, Y = y + dy;
+    if (!c.inMap(X, Y)) continue;
+    const t = c.over[Y * MAP + X];
+    if (t === OV.XWAY) xway = true;
+    else if (t === OV.ROAD || t === OV.WIREROAD) road = true;
+  }
+  return { xway, road };
+}
 
 /* GP3a: ADVISORY verdicts — a SEPARATE table walked ONLY by diagnoseTile
    (the gridlock-escalation precedent: a panel annotation, never a growth row).
@@ -1403,6 +1505,12 @@ class City {
     this._jdQ = new Int32Array(n);
     this._jdNStn = 0;
     this._jdNNet = 0;
+    /* GP4a: does the map hold ANY XWAY/RAMP tile? Set by recomputeJobDist's
+       dispatch scan every pass (never serialized — derived like jobDist).
+       false => the legacy jobDist body + legacy commute walk run VERBATIM
+       (whole-hop units); true => the weighted half-hop-unit variants. Also
+       read by the commute minimap mode to halve the displayed distance. */
+    this._xpAny = false;
     /* GP3a PERF (C5): _jaComp and the nearest-road-COMPONENT plane (_jaNC =
        comp id of nearestRoad(i), -1 off-grid) are pure functions of WHERE
        the ROAD/WIREROAD tiles sit in over[] — nothing else. _jaRoadMask
@@ -1629,8 +1737,10 @@ class City {
       if (tool === "road" && this.over[i] === OV.WIRE) continue;
       if (this.over[i] !== OV.NONE) return false;
       if (this.terr[i] === TERR.WATER) {
-        // only roads & wires may bridge water
-        if (tool !== "road" && tool !== "wire") return false;
+        // only roads, wires & expressways may bridge water (GP4a: the xway
+        // viaduct crosses like a road; a RAMP stays on dry land — it is the
+        // ground-level exchange and never spans water)
+        if (tool !== "road" && tool !== "wire" && tool !== "xway") return false;
       }
       if (this.terr[i] === TERR.FOREST && (tool === "tree")) return false;
     }
@@ -1670,8 +1780,8 @@ class City {
 
   toolCost(tool, x, y) {
     let c = COST[tool] ?? 0;
-    if ((tool === "road" || tool === "wire" || tool === "rail") && this.inMap(x, y) &&
-        this.terr[this.idx(x, y)] === TERR.WATER) c *= 5; // bridges cost more (surface rail spans water too)
+    if ((tool === "road" || tool === "wire" || tool === "rail" || tool === "xway") && this.inMap(x, y) &&
+        this.terr[this.idx(x, y)] === TERR.WATER) c *= 5; // bridges cost more (surface rail spans water too; GP4a: so does the xway viaduct)
     return c;
   }
 
@@ -1795,7 +1905,8 @@ class City {
     // non-NONE/non-ROAD/non-RUBBLE, so without this exclusion they would WRONGLY
     // conduct electricity like a wire. A pipe carries water, never power.
     const conducts = (i) => this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD
-      && this.over[i] !== OV.RUBBLE && !isWaterOv(this.over[i]) && !isMega(this.over[i]); // M28: a mega footprint never routes power THROUGH itself (an arco can't bridge a wire across)
+      && this.over[i] !== OV.RUBBLE && !isWaterOv(this.over[i]) && !isMega(this.over[i]) // M28: a mega footprint never routes power THROUGH itself (an arco can't bridge a wire across)
+      && !isXp(this.over[i]); // GP4a: concrete carries cars, never electricity — an expressway/ramp is not a conductor
     for (let i = 0; i < this.over.length; i++) {
       if (isPlant(this.over[i]) && this.anc[i] === i) {
         // M19: a plant contributes its AGED effective capacity, not its raw
@@ -1825,7 +1936,7 @@ class City {
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (this.powered[i] && t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
-          && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t)) demand++; // M26: crossing is not a consumer; M24: water infra never draws power; M28: a self-powered mega adds ZERO net demand
+          && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t)) demand++; // M26: crossing is not a consumer; M24: water infra never draws power; M28: a self-powered mega adds ZERO net demand; GP4a: an expressway/ramp never draws power
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -1849,7 +1960,7 @@ class City {
         // cursor. That is exactly what makes powered[] a pure function of
         // serialized state and lets the save omit it.
         if (this.powered[i] && t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t) &&
-            !isWaterOv(t) && !isMega(t) && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out
+            !isWaterOv(t) && !isMega(t) && !isXp(t) && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out; GP4a: an expressway/ramp isn't a consumer either
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -1865,7 +1976,7 @@ class City {
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
         if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
-            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) &&
+            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t) && // GP4a: concrete has no systems to flicker
             this.rngHashAt(yh, i) < 0.3) // GP1b: own domain, so it can't correlate with the brownout cut in the same epoch
           this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer; M28: a power island doesn't flicker
       }
@@ -1889,7 +2000,7 @@ class City {
           const X = fx + nx, Y = fy + ny;
           if (!this.inMap(X, Y)) continue;
           const j = this.idx(X, Y);
-          if (this.powered[j] && !isWaterOv(this.over[j]) && !isMega(this.over[j])) { fed = true; break; } // M28: a self-powered mega island must not feed a pump (it never bridges the grid)
+          if (this.powered[j] && !isWaterOv(this.over[j]) && !isMega(this.over[j]) && !isXp(this.over[j])) { fed = true; break; } // M28: a self-powered mega island must not feed a pump (it never bridges the grid); GP4a symmetry: an xway is never powered, so this is a provable no-op
         }
       }
       this.powered[i] = fed ? 1 : 0;
@@ -2156,7 +2267,8 @@ class City {
       const X = x + dx, Y = y + dy;
       if (!this.inMap(X, Y)) continue;
       const j = Y * MAP + X;
-      if ((this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && this.traffic[j] > m) m = this.traffic[j]; // M26
+      if ((this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD ||
+           this.over[j] === OV.XWAY || this.over[j] === OV.RAMP) && this.traffic[j] > m) m = this.traffic[j]; // M26; GP4a: a jammed expressway drags adjacent zones too (reads nothing new with no xway tiles — their traffic[] is always 0 then)
     }
     return m;
   }
@@ -2184,6 +2296,22 @@ class City {
      (tick % 5), deserialize's load cascade and every out-of-band UI re-entry
      rebuild it for free — never per-frame. */
   recomputeJobDist() {
+    /* GP4a: expressway dispatch. ONE cheap O(n) byte scan (early-out on the
+       first hit) decides which body runs; the result (_xpAny) also steers the
+       commute walk's branch and the commute-overlay display scale. With NO
+       XWAY/RAMP tile on the map the LEGACY body below executes verbatim in
+       whole-hop units — the C6 byte-identity guarantee. With any xp tile the
+       weighted HALF-HOP-UNIT variant (recomputeJobDistXp) runs instead. */
+    {
+      const ovScan = this.over;
+      let xp = false;
+      for (let i = 0; i < ovScan.length; i++) {
+        const t = ovScan[i];
+        if (t === OV.XWAY || t === OV.RAMP) { xp = true; break; }
+      }
+      this._xpAny = xp;
+      if (xp) { this.recomputeJobDistXp(); return; }
+    }
     const n = MAP * MAP;
     const jd = this.jobDist, ov = this.over, lvl = this.lvl, q = this._jdQ;
     const rail = this.rail, railNet = this.railNet, stationLive = this.stationLive;
@@ -2251,6 +2379,140 @@ class City {
     }
   }
 
+  /* ---------- GP4a: the weighted commute-distance variant ----------
+     Runs ONLY when >= 1 XWAY/RAMP tile exists (this._xpAny). Distances are
+     HALF-HOP UNITS: a road-class edge (ROAD/WIREROAD <-> ROAD/WIREROAD/RAMP)
+     costs 2, an expressway-class edge (XWAY <-> XWAY/RAMP) costs 1 — the
+     expressway moves at 2x road speed. road<->xway adjacency is NEVER an
+     edge: the RAMP is the sole tile adjacent-legal to both classes (D5), so
+     "an expressway through a neighbourhood with no ramp serves nobody" falls
+     out structurally. Deterministic Dijkstra for weights {1,2}: a dial of
+     FIFO buckets indexed by distance, processed ascending with insertion
+     order preserved (a stale entry — jd improved since insertion — is
+     skipped on dequeue), so ties resolve identically on every run/engine.
+     Seeds are EXACTLY the legacy shape: ascending-index developed ZC/ZI
+     tiles, jd = 0 at the job-gate ROAD tile the unchanged nearestRoad probe
+     returns — an expressway tile never hosts a job gate and never seeds
+     recomputeAccess. Live-rail expansion keeps cost "one road hop" = 2
+     units, first-expansion-per-net at minimal distance (ascending buckets
+     guarantee minimality exactly as FIFO order did). jd stays Uint8 with
+     ceiling 254; 255 stays the unreachable sentinel; the commute walk's
+     budget tests scale to MAX_COMMUTE*2. ZERO RNG, ascending iteration,
+     never reads cam.r — the recomputeJobDist house rules. */
+  recomputeJobDistXp() {
+    const n = MAP * MAP;
+    const jd = this.jobDist, ov = this.over, lvl = this.lvl;
+    const rail = this.rail, railNet = this.railNet, stationLive = this.stationLive;
+    const RD = OV.ROAD, WR = OV.WIREROAD, XW = OV.XWAY, RM = OV.RAMP, ZC = OV.ZC, ZI = OV.ZI;
+    jd.fill(255);
+    // live-station lists (ascending by construction) + per-net live counts —
+    // the same collection the legacy body performs
+    let stn = this._jdStn || (this._jdStn = new Int32Array(64));
+    let nStn = 0, nNet = 0;
+    for (let i = 0; i < n; i++) {
+      if (stationLive[i] !== 1) continue;
+      if (nStn === stn.length) { const g = new Int32Array(stn.length * 2); g.set(stn); stn = this._jdStn = g; }
+      stn[nStn++] = i;
+      if (railNet[i] >= nNet) nNet = railNet[i] + 1;
+    }
+    this._jdNStn = nStn; this._jdNNet = nNet;
+    let live = this._jdLive, netDone = this._jdNetDone;
+    if (nNet > 0) {
+      if (!live || live.length < nNet) live = this._jdLive = new Int32Array(Math.max(nNet, 16));
+      if (!netDone || netDone.length < nNet) netDone = this._jdNetDone = new Uint8Array(Math.max(nNet, 16));
+      live.fill(0, 0, nNet); netDone.fill(0, 0, nNet);
+      for (let k = 0; k < nStn; k++) live[railNet[stn[k]]]++;
+    }
+    // the dial: bk[d] is the FIFO bucket of tiles inserted at distance d.
+    // Edges cost 1 or 2, so processing bucket d only ever feeds d+1 / d+2 —
+    // no same-bucket appends, plain array iteration stays exhaustive.
+    const bk = [];
+    const push = (d, i) => { (bk[d] || (bk[d] = [])).push(i); };
+    // seeds — developed ZC/ZI tiles in ascending index order (legacy shape)
+    for (let i = 0; i < n; i++) {
+      const t = ov[i];
+      if ((t !== ZC && t !== ZI) || lvl[i] === 0) continue;
+      const j = this.nearestRoad(i);
+      if (j >= 0 && jd[j] !== 0) { jd[j] = 0; push(0, j); }
+    }
+    // class-legal edge cost from tile class a to tile class b (0 = no edge):
+    // road->{road,ramp} 2; ramp->{road,ramp} 2, ramp->xway 1; xway->{xway,ramp} 1
+    const cost = (a, b) => {
+      if (a === XW) return (b === XW || b === RM) ? 1 : 0;
+      if (a === RM) return b === XW ? 1 : (b === RD || b === WR || b === RM) ? 2 : 0;
+      return (b === RD || b === WR || b === RM) ? 2 : 0; // a is road-class
+    };
+    for (let d = 0; d <= 254; d++) {
+      const list = bk[d];
+      if (!list) continue;
+      for (let h = 0; h < list.length; h++) {
+        const i = list[h];
+        if (jd[i] !== d) continue; // stale: improved since insertion
+        const a = ov[i];
+        const x = i % MAP, y = (i / MAP) | 0;
+        let j, w, nd;
+        if (x + 1 < MAP && (w = cost(a, ov[j = i + 1])) && (nd = d + w) <= 254 && nd < jd[j]) { jd[j] = nd; push(nd, j); }
+        if (x > 0 && (w = cost(a, ov[j = i - 1])) && (nd = d + w) <= 254 && nd < jd[j]) { jd[j] = nd; push(nd, j); }
+        if (y + 1 < MAP && (w = cost(a, ov[j = i + MAP])) && (nd = d + w) <= 254 && nd < jd[j]) { jd[j] = nd; push(nd, j); }
+        if (y > 0 && (w = cost(a, ov[j = i - MAP])) && (nd = d + w) <= 254 && nd < jd[j]) { jd[j] = nd; push(nd, j); }
+        if (nStn === 0) continue;
+        // live-rail expansion — one road hop = 2 units, once per net
+        const nd2 = d + 2;
+        if (nd2 > 254) continue;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const s = Y * MAP + X;
+          if (rail[s] !== RL.STATION || stationLive[s] !== 1) continue;
+          const net = railNet[s];
+          if (live[net] < 2 || netDone[net]) continue;
+          netDone[net] = 1;
+          for (let k = 0; k < nStn; k++) {
+            const o = stn[k];
+            if (railNet[o] !== net) continue;
+            const ox = o % MAP, oy = (o / MAP) | 0;
+            if (Math.abs(ox - x) + Math.abs(oy - y) === 1) continue; // not an OTHER station
+            for (const [ex, ey] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+              const RX = ox + ex, RY = oy + ey;
+              if (!this.inMap(RX, RY)) continue;
+              const r = RY * MAP + RX;
+              if ((ov[r] === RD || ov[r] === WR) && nd2 < jd[r]) { jd[r] = nd2; push(nd2, r); }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /* GP4a: PURE READ for the XWAY_NO_RAMP verdict — a bounded local flood
+     over the XWAY/RAMP mask from tile i, true iff the xp component holds a
+     RAMP 4-adjacent to a ROAD/WIREROAD (i.e. the expressway actually
+     exchanges with the streets somewhere). Throwaway local scratch only —
+     never writes a plane or cache (diagnoseTile discipline). */
+  xpServedByRamp(i) {
+    const seen = new Set([i]);
+    const stack = [i];
+    while (stack.length) {
+      const j = stack.pop();
+      const x = j % MAP, y = (j / MAP) | 0;
+      if (this.over[j] === OV.RAMP) {
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const t = this.over[Y * MAP + X];
+          if (t === OV.ROAD || t === OV.WIREROAD) return true;
+        }
+      }
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const X = x + dx, Y = y + dy;
+        if (!this.inMap(X, Y)) continue;
+        const k = Y * MAP + X;
+        if (!seen.has(k) && isXp(this.over[k])) { seen.add(k); stack.push(k); }
+      }
+    }
+    return false;
+  }
+
   // each developed zone emits trips onto its serving road, then the trips
   // walk along the road network (commutes / deliveries). GP3b: residential
   // trips now have DESTINATIONS — they descend the jobDist field toward the
@@ -2265,6 +2527,10 @@ class City {
     // GP3b: the residential walk draws from its OWN domain, so its picks can
     // never collide with (or re-pin) the C/I keys still drawn from HZ.TRAFFIC.
     const ch = this.rngHashKeyFor(HZ.COMMUTE, this.trafficEpoch);
+    // GP4a: the expressway walk draws from ITS own domain in turn (XCOMMUTE,
+    // half-hop keys) — legacy cities never touch it, xp cities never touch
+    // COMMUTE's residential keys. Pure hash half; gated for clarity only.
+    const xh = this._xpAny ? this.rngHashKeyFor(HZ.XCOMMUTE, this.trafficEpoch) : 0;
     const jd = this.jobDist;
     let totR = 0, strR = 0, arrR = 0, hopSum = 0; // commute accounting (post-rail-diversion trips)
     for (let i = 0; i < n; i++) {
@@ -2284,6 +2550,106 @@ class City {
       this.railRiders += baseTrips * share;
       let cur = this.nearestRoad(i);
       if (t === OV.ZR) {
+        /* GP4a: the EXPRESSWAY branch — runs ONLY when this._xpAny (so a
+           no-expressway city executes the legacy walk below verbatim, C6).
+           Same trip accounting, but (i) budget tests scale to MAX_COMMUTE*2
+           (jobDist is in half-hop units); (ii) descent is jd[j] < jd[cur]
+           over the D5 class-legal candidate set (E,W,S,N order preserved),
+           reservoir picks drawn from the XCOMMUTE domain with key
+           (i*(MAX_COMMUTE*2)+step)*4+cnt; (iii) deposits once per VISITED
+           tile — short commutes (d0 <= CMT_STROLL*2) at full trips, padded
+           back to 10 total deposits with legacy-shape road-only strolls;
+           long hauls flat at trips*CMT_LOAD; stranded/unrouted fall back to
+           the legacy 10-step local stroll (streets only, full strength);
+           (iv) hopSum accrues ROAD-HOP EQUIVALENTS (trips*d0/2) so
+           avgCommute stays on the serialized scale CMT_FIT_LO/CMT_DEM_LO
+           read. */
+        if (this._xpAny) {
+          if (cur < 0) continue;
+          const d0 = jd[cur];
+          const B2 = MAX_COMMUTE * 2; // the commute budget in half-hop units
+          if (d0 === 255 || d0 > B2) {
+            let fdep = trips;
+            if (d0 !== 255) { totR += trips; strR += trips; fdep = trips * CMT_STR_LOAD; }
+            let prev = -1;
+            for (let step = 0; step < 10; step++) {
+              load[cur] += fdep;
+              const x = cur % MAP, y = (cur / MAP) | 0;
+              const kb = (i * B2 + step) * 4;
+              let nxt = -1, cnt = 0, j = 0;
+              if (x + 1 < MAP && ((j = cur + 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (x > 0 && ((j = cur - 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (y + 1 < MAP && ((j = cur + MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (y > 0 && ((j = cur - MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (nxt < 0) break;
+              prev = cur; cur = nxt;
+            }
+            continue;
+          }
+          totR += trips;
+          const short = d0 <= CMT_STROLL * 2;
+          const dep = short ? trips : trips * CMT_LOAD;
+          load[cur] += dep;
+          let prev = -1, v = 1; // v = deposits so far (start included)
+          for (let step = 0; jd[cur] > 0 && step < d0; step++) {
+            const x = cur % MAP, y = (cur / MAP) | 0;
+            const dcur = jd[cur], a = this.over[cur];
+            const kb = (i * B2 + step) * 4;
+            let nxt = -1, cnt = 0, j = 0;
+            // class-legal descending candidates (D5) — E,W,S,N order
+            if (x + 1 < MAP && ((j = cur + 1), xpStepOk(a, this.over[j]) && jd[j] < dcur)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+            if (x > 0 && ((j = cur - 1), xpStepOk(a, this.over[j]) && jd[j] < dcur)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+            if (y + 1 < MAP && ((j = cur + MAP), xpStepOk(a, this.over[j]) && jd[j] < dcur)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+            if (y > 0 && ((j = cur - MAP), xpStepOk(a, this.over[j]) && jd[j] < dcur)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+            if (nxt < 0) {
+              // no descending class-legal neighbour: the distance came via a
+              // rail expansion — take the station jump (RNG-FREE, legacy rule)
+              let bestD = 256;
+              for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                const X = x + dx, Y = y + dy;
+                if (!this.inMap(X, Y)) continue;
+                const s = Y * MAP + X;
+                if (this.rail[s] !== RL.STATION || this.stationLive[s] !== 1) continue;
+                const net = this.railNet[s];
+                if (this._jdLive[net] < 2) continue;
+                for (let k = 0; k < this._jdNStn; k++) {
+                  const o = this._jdStn[k];
+                  if (this.railNet[o] !== net) continue;
+                  const ox = o % MAP, oy = (o / MAP) | 0;
+                  if (Math.abs(ox - x) + Math.abs(oy - y) === 1) continue; // not an OTHER station
+                  for (const [ex, ey] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                    const RX = ox + ex, RY = oy + ey;
+                    if (!this.inMap(RX, RY)) continue;
+                    const r = RY * MAP + RX;
+                    if ((this.over[r] !== OV.ROAD && this.over[r] !== OV.WIREROAD) || jd[r] === 255) continue;
+                    if (jd[r] < bestD || (jd[r] === bestD && r < nxt)) { bestD = jd[r]; nxt = r; }
+                  }
+                }
+              }
+              if (nxt < 0) break; // defensive: a malformed field never loops
+            }
+            prev = cur; cur = nxt;
+            load[cur] += dep; v++;
+          }
+          if (short) {
+            // stroll padding to 10 total deposits — legacy-shape picks over
+            // local streets only (pad steps v..CMT_STROLL-1)
+            for (let step = v; step < CMT_STROLL; step++) {
+              const x = cur % MAP, y = (cur / MAP) | 0;
+              const kb = (i * B2 + step) * 4;
+              let nxt = -1, cnt = 0, j = 0;
+              if (x + 1 < MAP && ((j = cur + 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (x > 0 && ((j = cur - 1), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (y + 1 < MAP && ((j = cur + MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (y > 0 && ((j = cur - MAP), (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) && j !== prev)) { cnt++; if (this.rngHashAt(xh, kb + cnt) * cnt < 1) nxt = j; }
+              if (nxt < 0) break;
+              prev = cur; cur = nxt;
+              load[cur] += dep;
+            }
+          }
+          hopSum += trips * d0 / 2; arrR += trips; // road-hop equivalents
+          continue;
+        }
         /* GP3b: the commute walk. Trips descend jobDist exactly one hop per
            step for d0 steps, depositing at EVERY visited road tile (start
            and the jobDist===0 destination included; magnitude — see the
@@ -2502,8 +2868,18 @@ class City {
       // i.e. a fully worn road congests as if it hauled 60% more trips.
       // wear = 0 gives a factor of exactly 1: the legacy arithmetic untouched.
       const wearMul = 1 + this.roadWear[i] / 255 * 0.6;
-      this.traffic[i] = (this.over[i] === OV.ROAD || this.over[i] === OV.WIREROAD) // M26: crossing carries traffic
+      const tv = this.over[i];
+      this.traffic[i] = (tv === OV.ROAD || tv === OV.WIREROAD) // M26: crossing carries traffic
         ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i] * wearMul) * seasonMul * 0.5)
+        // GP4a: the expressway class carries traffic under a PER-CLASS
+        // capacity divisor — an XWAY congests as if it hauled 1/4 the load,
+        // the RAMP chokepoint 1/2. wearMul is provably 1 here (roadWearTick
+        // zeroes wear on non-road tiles: concrete doesn't pothole), so the
+        // divisor is the only difference from the road arm. Zero deposits
+        // (an unserved expressway) fold to exactly 0 — the "reads as empty"
+        // traffic-overlay pixel.
+        : (tv === OV.XWAY || tv === OV.RAMP)
+        ? Math.min(255, this.traffic[i] * 0.5 + Math.min(255, load[i] / (tv === OV.XWAY ? XP_CAP : RAMP_CAP)) * seasonMul * 0.5)
         : 0;
     }
   }
@@ -2580,10 +2956,20 @@ class City {
     if (opt) rawJobs.fill(0, 0, cidOld);
     let stn = this._jaStn || (this._jaStn = new Int32Array(64));
     let nStn = 0, nNet = 0;
+    // GP4a: xp tiles (XWAY/RAMP) collected in the SAME fused scan (the
+    // station-collection idiom) — rare tiles, so the fusion below never
+    // rescans the map. They are NOT part of the road mask, so the certified
+    // _jaComp/_jaNC mask-compare caches never rebuild on an xway edit.
+    let xpl = this._jaXp || (this._jaXp = new Int32Array(64));
+    let nXp = 0;
     for (let i = 0; i < n; i++) {
       const t = ov[i];
       const m = (t === RD || t === WR) ? 1 : 0;
       if (mask[i] !== m) { mask[i] = m; dirty = true; }
+      if (t === OV.XWAY || t === OV.RAMP) {
+        if (nXp === xpl.length) { const g = new Int32Array(xpl.length * 2); g.set(xpl); xpl = this._jaXp = g; }
+        xpl[nXp++] = i; // ascending order by construction
+      }
       if (stationLive[i] === 1) {
         if (nStn === stn.length) { const g = new Int32Array(stn.length * 2); g.set(stn); stn = this._jaStn = g; }
         stn[nStn++] = i; // ascending order by construction
@@ -2685,6 +3071,55 @@ class City {
         }
       }
     }
+    /* GP4a: expressway fusion — union-find-stage work recomputed each pass
+       (the rail-fusion pattern; the certified _jaComp/_jaNC caches are NOT
+       touched). One ascending flood-fill over the XWAY/RAMP mask assigns
+       xp-component ids into the _xpComp scratch (_railStack idiom), then for
+       each xp component every road component 4-adjacent to that component's
+       RAMP tiles is unioned — two street grids linked only by an expressway
+       WITH ramps at both ends become ONE commute-shed; a rampless (or
+       one-ramp-only) expressway unions nothing new. No ramps => no unions =>
+       byte-identical jobAccess. */
+    if (nXp > 0) {
+      const xc = this._xpComp || (this._xpComp = new Int32Array(n));
+      xc.fill(-1);
+      const stack = this._jaStack;
+      let xcid = 0;
+      for (let k = 0; k < nXp; k++) {
+        const s = xpl[k];
+        if (xc[s] !== -1) continue;
+        let sp = 0;
+        stack[sp++] = s; xc[s] = xcid;
+        while (sp > 0) {
+          const i = stack[--sp];
+          const x = i % MAP, y = (i / MAP) | 0;
+          let j, t2;
+          if (x + 1 < MAP && ((t2 = ov[j = i + 1]) === OV.XWAY || t2 === OV.RAMP) && xc[j] === -1) { xc[j] = xcid; stack[sp++] = j; }
+          if (x > 0 && ((t2 = ov[j = i - 1]) === OV.XWAY || t2 === OV.RAMP) && xc[j] === -1) { xc[j] = xcid; stack[sp++] = j; }
+          if (y + 1 < MAP && ((t2 = ov[j = i + MAP]) === OV.XWAY || t2 === OV.RAMP) && xc[j] === -1) { xc[j] = xcid; stack[sp++] = j; }
+          if (y > 0 && ((t2 = ov[j = i - MAP]) === OV.XWAY || t2 === OV.RAMP) && xc[j] === -1) { xc[j] = xcid; stack[sp++] = j; }
+        }
+        xcid++;
+      }
+      // per xp component: union every road component its RAMP tiles touch
+      if (!this._xpNetComp || this._xpNetComp.length < xcid) this._xpNetComp = new Int32Array(Math.max(xcid, 16));
+      const xnc = this._xpNetComp;
+      xnc.fill(-1, 0, xcid);
+      for (let k = 0; k < nXp; k++) {
+        const i = xpl[k];
+        if (ov[i] !== OV.RAMP) continue;
+        const cxc = xc[i];
+        const x = i % MAP, y = (i / MAP) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const rc = comp[this.idx(X, Y)];
+          if (rc < 0) continue;
+          if (xnc[cxc] < 0) xnc[cxc] = rc;
+          else union(xnc[cxc], rc);
+        }
+      }
+    }
     /* 3. collapse the per-raw-component masses onto their union roots, then
          flatten to compJobs[c] = its root's total, so the O(n) assignment
          below is a flat lookup — no find() in the hot loop. Union-by-LOWER-id
@@ -2782,6 +3217,7 @@ class City {
       if (t === OV.COAL) src[i] += coalSmog;
       if (t === OV.GAS) src[i] += gasSmog;   // gas smokes; solar & wind stay clean
       if (t === OV.ROAD || t === OV.WIREROAD) src[i] += 8 * pm; // M26: crossing pollutes like a road
+      if (t === OV.XWAY || t === OV.RAMP) src[i] += 12 * pm;    // GP4a: an expressway is a road, only dirtier (higher speeds, heavier flow)
       // GP2: a WORKING seaport smokes — cranes, shunting diesels and idling
       // ships. Reads the precomputed per-tile portWork flag, so this loop can
       // never disagree with the port state; NOT scaled by pollMul (combustion,
@@ -2824,6 +3260,11 @@ class City {
     // GP2: the airport approach cone, rebuilt fresh from over[]/portWork the
     // same way — a stalled or razed airport lifts its scar on the next pass.
     this.stampAirportNoise();
+    // GP4a: expressway corridor noise, MAX-COMBINED into the SAME noiseCov
+    // plane immediately after the airport stamp (never a fill — a fill here
+    // would erase the airport scar). Zero xway tiles => zero writes, so the
+    // landv accumulation below stays bit-identical to pre-GP4a.
+    this.stampXwayNoise();
     // PERF: hoisted out of the fold below so a city with no working airport
     // (noiseCov provably all-zero) does not pay a per-tile over[] compare for a
     // term that is identically 0. `noisy && …` short-circuits to the SAME
@@ -3124,6 +3565,40 @@ class City {
         }
       }
     }
+  }
+
+  /* GP4a: expressway corridor noise — runs immediately AFTER
+     stampAirportNoise(), MAX-COMBINING into the SAME noiseCov plane (never a
+     fill(0): that would erase the GP2 airport scar; the airport stamp owns
+     the clear-on-empty contract, and when it clears a plane that held only
+     xway noise this stamp simply re-writes it fresh — the revert contract
+     holds for both sources). Every XWAY/RAMP tile stamps a manhattan d<=2
+     halo at potency XP_NOISE - d*XP_NOISE_K (44/32/20), read by the existing
+     RESIDENTIAL-ONLY `- noiseCov[i]*NOISE_LV` land-value term — so the
+     siting tradeoff surfaces in the land-value overlay with NO new UI.
+     Deterministic, RNG-free, ascending iteration. Zero xway tiles => zero
+     writes and _noiseAny untouched: the no-expressway city stays
+     bit-identical. */
+  stampXwayNoise() {
+    const out = this.noiseCov, ov = this.over;
+    let wrote = false;
+    for (let i = 0; i < ov.length; i++) {
+      const t = ov[i];
+      if (t !== OV.XWAY && t !== OV.RAMP) continue;
+      wrote = true;
+      const x = i % MAP, y = (i / MAP) | 0;
+      for (let dy = -2; dy <= 2; dy++) {
+        const ad = Math.abs(dy);
+        for (let dx = ad - 2; dx <= 2 - ad; dx++) {
+          const X = x + dx, Y = y + dy;
+          if (X < 0 || Y < 0 || X >= MAP || Y >= MAP) continue;
+          const pot = XP_NOISE - (Math.abs(dx) + ad) * XP_NOISE_K;
+          const j = Y * MAP + X;
+          if (out[j] < pot) out[j] = pot;
+        }
+      }
+    }
+    if (wrote) this._noiseAny = true;
   }
 
   /* Freight/passenger trips onto the street grid: a bounded BFS over ROAD/
@@ -3571,6 +4046,7 @@ class City {
         const flammable = (this.over[j] !== OV.NONE && this.over[j] !== OV.ROAD &&
                            this.over[j] !== OV.WIREROAD && // M26: crossing is a road, non-flammable
                            this.over[j] !== OV.PIPE &&      // M24: a buried pipe doesn't burn (towers/pumps do)
+                           this.over[j] !== OV.XWAY && this.over[j] !== OV.RAMP && // GP4a: concrete doesn't burn (roads precedent)
                            this.over[j] !== OV.RUBBLE) || this.terr[j] === TERR.FOREST;
         if (!flammable) continue;
         const chance = 0.09 * (1 - this.fireCov[j] / 300);
@@ -3585,6 +4061,7 @@ class City {
     const flammable = (this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD &&
                        this.over[i] !== OV.WIREROAD && // M26: crossing is a road, non-flammable
                        this.over[i] !== OV.PIPE &&      // M24: a buried pipe doesn't burn (towers/pumps do)
+                       this.over[i] !== OV.XWAY && this.over[i] !== OV.RAMP && // GP4a: concrete doesn't burn (roads precedent)
                        this.over[i] !== OV.RUBBLE) || this.terr[i] === TERR.FOREST;
     // GP1b: ignite() is reached from fireTick AND from disasterTick/
     // startDisaster — all STEP passes, so one fixed stream (`fire`) is correct
@@ -3610,6 +4087,7 @@ class City {
       for (let i = 0; i < this.over.length; i++)
         if (this.over[i] >= OV.ZR && this.over[i] !== OV.RUBBLE &&
             this.over[i] !== OV.WIREROAD && // M26: crossing is a road, not flammable
+            this.over[i] !== OV.XWAY && this.over[i] !== OV.RAMP && // GP4a: concrete isn't a fire candidate
             this.over[i] !== OV.PIPE) cand.push(i); // M24: a buried pipe isn't a fire candidate (towers/pumps, like plants, are)
       const i = cand.length ? cand[rh.pick(cand.length)]
                             : rh.pick(this.over.length);
@@ -3913,7 +4391,8 @@ class City {
   deptCosts() {
     let roads = 0, wires = 0, police = 0, fireSt = 0, schools = 0,
         hospitals = 0, plants = 0, towers = 0, pumps = 0, pipeTiles = 0,
-        surface = 0, subway = 0, stations = 0; // M25 rail-plane tallies
+        surface = 0, subway = 0, stations = 0, // M25 rail-plane tallies
+        xwayTiles = 0, rampTiles = 0; // GP4a: expressway upkeep tallies
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       // M25: rail rides a separate plane — tally it alongside the over[] scan
@@ -3921,6 +4400,8 @@ class City {
       else if (this.rail[i] === RL.SUB) subway++;
       else if (this.rail[i] === RL.STATION) stations++;
       if (t === OV.ROAD || t === OV.WIREROAD) roads++; // M26: a crossing is counted as road infrastructure
+      else if (t === OV.XWAY) xwayTiles++;   // GP4a: pricier concrete per tile…
+      else if (t === OV.RAMP) rampTiles++;   // …and the ramps in between
       else if (t === OV.WIRE) wires++;
       else if (t === OV.PIPE) pipeTiles++;                              // M24
       else if (t === OV.WATERTOWER && this.anc[i] === i) towers++;      // M24
@@ -3937,7 +4418,10 @@ class City {
       fire:   Math.round(fireSt * 25 * f.fire / 100),
       edu:    Math.round(schools * 25 * f.edu / 100),
       health: Math.round(hospitals * 25 * f.health / 100),
-      roads:  Math.round((roads * 0.4 + wires * 0.15) * f.roads / 100),
+      // GP4a: expressway upkeep folds into the roads line (funding-scaled by
+      // the same slider). Zero xway/ramp tiles adds a literal 0 INSIDE the
+      // single round, so no-expressway budgets stay digit-identical.
+      roads:  Math.round((roads * 0.4 + wires * 0.15 + xwayTiles * 1.6 + rampTiles * 0.8) * f.roads / 100),
       plants: plants * 40,
       // M24: flat water-network upkeep (no funding slider — mirrors "plants*40").
       water:  Math.round(towers * 15 + pumps * 40 + pipeTiles * 0.15),
@@ -4373,9 +4857,16 @@ class City {
        they MUST persist because they are sim inputs (gFit / demand.r) and the
        load-cascade rebuild can drift (lvl[] moves up to 4 ticks past
        trafficEpoch — the exact reason traffic[] itself is serialized).
-       jobDist stays DERIVED and unsaved. No v===14 test anywhere. */
+       jobDist stays DERIVED and unsaved. No v===14 test anywhere.
+       GP4a (save v15): the v bump is the ONLY changed byte. Expressway/ramp
+       state is entirely the two new over[] ids 32/33, which ride the existing
+       Array.from(over) below (plain JSON numbers into a Uint8Array — NOT the
+       packU8 planes, which cover only traffic/unpow/fire); avgCommute/
+       strandedShare are already serialized; NO new keys, NO new history
+       series (so normaliseHistory is untouched), and no v===15 test anywhere
+       in deserialize — a v14 save simply loads with no xp tiles. */
     return JSON.stringify({
-      v: 14, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 15, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -4684,5 +5175,9 @@ function toolOverlay(tool) {
     statue: OV.STATUE, eiffel: OV.EIFFEL, pyramid: OV.PYRAMID,
     // GQ10: special-buildings gap-fill
     nuke: OV.NUKE, airport: OV.AIRPORT, seaport: OV.SEAPORT,
+    // GP4a: expressway class — both ride the generic 1x1 place() path (anc=i,
+    // lvl=0, varnt from the rng.build stream exactly like a road, powerDirty
+    // set), so scripted determinism replays byte-identically.
+    xway: OV.XWAY, ramp: OV.RAMP,
   })[tool] ?? OV.NONE;
 }

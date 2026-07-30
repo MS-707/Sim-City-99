@@ -88,6 +88,11 @@ const TOOLS = [
   { id: "rail",    name: "Railway",  key: "r", icon: null, spr: () => SPR.rail[5],   minTier: TOOL_TIER.rail },
   { id: "subway",  name: "Subway",   key: "k", icon: null, spr: () => SPR.subwayIcon, minTier: TOOL_TIER.subway },
   { id: "station", name: "Station",  key: "n", icon: null, spr: () => SPR.station,    minTier: TOOL_TIER.station },
+  // GP4a: the expressway class — Town-gated like rail (TOOL_TIER.xway/ramp=2).
+  // Keys , and . are free; cost chips, padlocks and the shortcut overlay all
+  // derive from TOOLS/COST/TOOL_TIER automatically.
+  { id: "xway", name: "Xpresswy", key: ",", icon: null, spr: () => SPR.xway[10], minTier: TOOL_TIER.xway },
+  { id: "ramp", name: "Ramp",     key: ".", icon: null, spr: () => SPR.ramp[2],  minTier: TOOL_TIER.ramp },
   // milestone rewards — locked until the city earns its rank
   { id: "mayor",    name: "Mayor Hse", key: "m", icon: null, spr: () => SPR.mayor,
     minTier: TOOL_TIER.mayor },
@@ -1614,7 +1619,9 @@ const OV_NAMES = ["—", "Road", "Power line", "Residential", "Commercial", "Ind
   "Statue of Liberty", "Eiffel Tower", "Great Pyramid",
   // GQ10: indices 29..31 (the plant age/output row keys on isPlant and is
   // automatic for the nuke)
-  "Nuclear plant", "Airport", "Seaport"];
+  "Nuclear plant", "Airport", "Seaport",
+  // GP4a: indices 32/33 — the expressway class
+  "Expressway", "Ramp"];
 
 const htmlEsc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 

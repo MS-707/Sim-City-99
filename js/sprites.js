@@ -3701,6 +3701,11 @@ function buildSprites() {
       };
       quad(0, 1.15, 1.15); g.fillStyle = "rgba(8,8,14,0.5)"; g.fill(); // ground shadow (car idiom)
       if (kind) {
+        // dark underframe first: a chassis quad 2px below and a hair wider
+        // than the slab leaves a dark rim outlining the pale body — winter
+        // legibility (panel: silver-on-snow was marginal) without touching
+        // the slab's silver day/night read
+        quad(2, 1.04, 1.6); g.fillStyle = "#232833"; g.fill();     // underframe rim
         quad(4, 1, 1); g.fillStyle = "#8b93a2"; g.fill();          // boxcar slab
         quad(6, 0.9, 0.5); g.fillStyle = "#c9ced6"; g.fill();      // roof stripe
         g.fillStyle = "#2c323c";                                   // 3 window ticks

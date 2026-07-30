@@ -6,21 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- **GP4b — The First Moving Train** (presentation half of GP4): trains run
-  the rail plane between live stations, deterministic phase-driven, zero
-  sim writes — closes the aliveness guard's N/A train slot.
-  *Implement pass 2026-07-30 (under verification, NOT shipped):* `SPR.train`
-  consist bake appended after `bridgeTower` (zero RNG-stream calls, no
-  night layer); `computeTrains` builds a closed Euler tour per ≥2-live-
-  station `railNet` once per tick (memo `terrRev|devRev|tickCount`), phase
-  advances by `uiState.speed`, units bucket by owner tile and draw inside
-  the tile's own painter slot (TRACK before `drawBridgeOver`, STATION after
-  sprite/zap) so occlusion holds by construction; speed & consist count
-  scale with Σ`railCov` ridership; `alivenessStats` gains
-  `trainLines`/`trains`. Local checks vs a dc7d369 worktree: moving train
-  at all 4 rotations, RNG count baseline-equal + throwing-probe clean,
-  no-rail frames & sprite manifest byte-identical, frame time 0.96×,
-  sim.js untouched, zero console errors.
+- **GP5a — Coverage Previews & Strain Meters** (read-only half of GP5 per
+  S3): see police/fire/school/hospital coverage and per-service strain
+  before it binds; byte-identical sim.
 
 ## Open
 
@@ -93,6 +81,20 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP4b — The First Moving Train** *(gameplay roadmap 7/11, certified
+  2026-07-30 — the GP4 pair complete)*: the rail line finally **carries a
+  visible train**. A procedural three-unit consist (graphite loco with a
+  yellow nose stripe + two boxcars) runs a closed tour of every rail line
+  with two or more powered stations, phase-driven with zero randomness —
+  speed and train count scale with real ridership. Render-only: the sim is
+  provably untouched (21/21 serialize pairs byte-identical over 600 unstubbed
+  ticks; a no-rail scene renders byte-identical to baseline). Correct at all
+  four rotations; buildings and bridge cables paint over the consist
+  correctly; frame cost +0.4%. The panel caught the consist overdrawing the
+  station depot and overhanging dead-end stubs — both fixed (it now ducks
+  behind the shed and brakes to stop exactly at the stub tip). The graphics
+  aliveness guard's train slot flips from N/A to live.
 
 - [x] **GP4a — Expressways & Ramps** *(gameplay roadmap 6/11, certified
   2026-07-30)*: the red bridge finally has an **answer**. A raised-deck

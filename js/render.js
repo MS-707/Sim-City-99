@@ -174,9 +174,24 @@ function computeTrains(city, speed) {
       for (let u = 0; u < TRAIN_CARS; u++) {
         let ph = (headPhase - u * TRAIN_GAP) % l.tourLen;
         if (ph < 0) ph += l.tourLen;
-        const seg = ph | 0, f = ph - seg;
-        const a = l.tour[seg], b = l.tour[(seg + 1) % l.tourLen];
+        const seg = ph | 0;
+        let f = ph - seg;
+        const L = l.tourLen;
+        const a = l.tour[seg], b = l.tour[(seg + 1) % L];
         if (city.rail[a] === RL.SUB && city.rail[b] === RL.SUB) continue; // underground
+        // terminal fold remap (panel fix): at a dead-end stub the raw
+        // interpolation drives the unit CENTER onto the last tile's center,
+        // so the loco nose (hl 0.40) overhangs ~0.4 tile past the stub tip
+        // onto bare terrain. b is a fold when the tour immediately bounces
+        // back (next === a); a is a fold when we just bounced there
+        // (prev === b) — wrap indices cover a root terminal. Compressing the
+        // two fold segments to [0, 0.6] / [0.4, 1] keeps the center 0.4 tile
+        // shy of the terminal center (nose stops exactly at the stub tip)
+        // and eases in/out at 60% speed like a braking train. A continuous
+        // monotone function of ph alone — zero state, zero RNG.
+        const lo = l.tour[(seg - 1 + L) % L] === b ? 0.4 : 0;
+        const hi = l.tour[(seg + 2) % L] === a ? 0.6 : 1;
+        f = lo + (hi - lo) * f;
         const xa = a % MAP, ya = (a / MAP) | 0, xb = b % MAP, yb = (b / MAP) | 0;
         const owner = f < 0.5 ? a : b; // the tile whose painter slot draws it
         let q = trainQ.get(owner);
@@ -1111,6 +1126,11 @@ function renderFrame(city, uiState, clearBG) {
         drawTrainsAt(city, i);
         if (railBridge) drawBridgeOver(railBridge);
       } else if (rl === RL.STATION) {
+        // GP4b fix (panel, gate 3): units owned by the station tile draw
+        // BEFORE the depot sprite, so the full-tile depot cube occludes them
+        // — the consist ducks behind the shed (tail still peeking over the
+        // approach tile) instead of a loco slab painting across the facade.
+        drawTrainsAt(city, i);
         const ss = SPR.station;
         ctx.drawImage(ss.c, wx - ss.ox, wy - ss.oy);
         if (ng) {
@@ -1120,9 +1140,6 @@ function renderFrame(city, uiState, clearBG) {
         // no-power bolt on an inert station (unpowered or unlinked)
         if (blink && !city.stationLive[i])
           ctx.drawImage(SPR.zap.c, wx - SPR.zap.ox, wy - SPR.zap.oy - 4);
-        // GP4b: the train pulls across the depot's front apron at the tile's
-        // own painter depth (after the station sprite + night/zap handling)
-        drawTrainsAt(city, i);
       } else if (rl === RL.SUB && typeof UI !== "undefined" && UI.mapMode === "transit") {
         const vs = SPR.subwayVent;
         ctx.drawImage(vs.c, wx - vs.ox, wy - vs.oy);

@@ -30,9 +30,20 @@ Queue policy: keep at least 5 open improvements at all times.
   (tax rate, treasury) open the budget instead, because a tax RATE has no
   argmax tile. The whole O(MAP²) census runs at rollover and at dialog-open
   **only** — `refreshHUD` is a pure read of the serialized scalar.
-  Sustained collapse (under 25% for six straight months) files a
-  **recall petition** front page, exactly once per city, latched on a
-  serialized flag so a save/load cannot republish it. And the ladder finally
+  Sustained collapse (under 40% — the survey's own "ready to march on City
+  Hall" line — for six straight months) files a **recall petition** front
+  page, exactly once per city, latched on a serialized flag so a save/load
+  cannot republish it. Every severity scale is anchored to a MEASURED range
+  rather than an array's type range, and every share and coverage mean is
+  taken over the **zoned footprint** rather than the developed one, so a
+  grievance lasts as long as the neglect instead of healing itself as the
+  dark blocks abandon (measured: 544 zoned tiles / 168 dark, constant across
+  24 months, where the developed-zone ratio decayed 0.309 → 0.000). Smog and
+  crime read their planes over the inhabited city (a whole-map mean dilutes
+  them tenfold with wilderness) and congestion reads the SHARE of streets at
+  or past the traffic report's own 80 threshold. All six mood bands are
+  reachable on measurement: 94 on the reference city down to a sustained
+  36.7 on a wrecked one. And the ladder finally
   grows a rung above Metropolis: **Megalopolis**, gated on 12,000 residents
   **and** approval held at or above 65% for 24 straight months **and** a
   city that either moves (avg commute ≤ 12) or breathes (smog ≤ 55).

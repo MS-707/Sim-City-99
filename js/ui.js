@@ -739,6 +739,9 @@ function bindKeys() {
 // G8: one-line legend per overlay mode — swatches/gradients echo the exact
 // colors renderMinimap paints, so the strip explains what the map shows
 const MM_LEGENDS = {
+  // GP6: the plain City view has no overlay ramp to explain, so it names the
+  // land uses its own colours already carry
+  all:     '<i class="sw" style="background:#2d2"></i>homes <i class="sw" style="background:#46f"></i>shops <i class="sw" style="background:#dc2"></i>industry <i class="sw" style="background:#654"></i>rubble <i class="sw" style="background:#f80"></i>fire',
   power:   '<i class="sw" style="background:#ff0"></i>plant <i class="sw" style="background:#f80"></i>powered <i class="sw" style="background:#334"></i>dark',
   // GQ11: gradients/swatches mirror the retuned deutan-safe overlay ramps
   // (render.js MM_POLL/MM_CRIME/MM_TRAFFIC + the blue/orange svc pair)
@@ -774,9 +777,18 @@ const MM_NAMES = { all: "City", power: "Power", poll: "Pollution",
 
 function updateMapLegend(mode) {
   const el = document.getElementById("mm-legend");
-  if (mode === "all") { el.classList.add("hidden"); return; }
   // GP5a: mode name prepended before the swatches, every non-"all" mode
   const name = `<b class="mm-name">${MM_NAMES[mode]}</b>`;
+  /* GP6 fix-pass: "all" used to add .hidden and return, which left the strip
+     carrying the PREVIOUS mode's swatches as a stale caption and gave the two
+     survey rows that jump to the plain city view (rubble, disaster) a "Show me"
+     with no feedback at all. It now labels itself like every other mode — the
+     City view has no swatches to print, so it prints what it is. */
+  if (mode === "all") {
+    el.innerHTML = name + MM_LEGENDS.all;
+    el.classList.remove("hidden");
+    return;
+  }
   if (mode === "dist") {
     // build live swatches from DISTRICT_COLS via DOM nodes so user names are
     // inserted as text (never HTML) — safe against name injection
@@ -1931,29 +1943,57 @@ function openTrafficReport() {
 const SURVEY_ROWS = 5; // rows printed, at most
 
 // Mood bands over the published (smoothed) approval number.
+/* GP6 fix-pass: the six bands are spaced across the range the approval model
+   can actually REACH, measured rather than assumed. The published mood runs
+   from ~94 on the well-governed reference city down to a sustained 36.7 on a
+   city with every station razed, every budget at zero, 20% tax, a third of its
+   blocks dark and every cross-street bulldozed. The first draft's bands
+   (85/70/55/40/25) put "Angry" and "Ready to march on City Hall" below anything
+   the sim could produce, so the bottom two thirds of the vocabulary — and the
+   recall newspaper that quotes it — were unreachable. RECALL_T is pinned to the
+   bottom band's line, so the petition and the word mean the same thing. */
 function surveyMood(a) {
-  return a >= 85 ? "Adored"
-    : a >= 70 ? "Popular"
-    : a >= 55 ? "Getting by"
-    : a >= 40 ? "Restless"
-    : a >= 25 ? "Angry"
+  return a >= 88 ? "Adored"
+    : a >= 76 ? "Popular"
+    : a >= 64 ? "Getting by"
+    : a >= 52 ? "Restless"
+    : a >= 40 ? "Angry"
     : "Ready to march on City Hall";
 }
 
 function openSurvey() {
   const rep = city.approvalReport();          // one scan, at open time only
-  const a = city.approval < 0 ? rep.target : city.approval;
   const head = document.getElementById("survey-head");
-  head.innerHTML =
-    `<div class="survey-num">${Math.round(a)}% <span class="survey-mood">${surveyMood(a)}</span></div>` +
-    `<div class="survey-note">The headline is the mood, smoothed over the last few months. ` +
-    `The list below is <b>this month's ledger</b> — what the city is angry about right now.</div>`;
+  /* GP6 fix-pass: the headline can no longer disagree with the Vitals cell it
+     hangs off. refreshHUD prints "—" when there is nobody to poll (pop 0) or
+     before the first monthly poll has been filed (the approval < 0 sentinel);
+     the dialog used to substitute this month's raw target in both cases and
+     headline "100% Adored" over an empty map. It now says the same thing the
+     HUD does, and still prints the ledger underneath — the grievances are real
+     even before anyone has been polled about them. */
+  const polled = city.pop > 0 && city.approval >= 0;
+  head.innerHTML = polled
+    ? `<div class="survey-num">${Math.round(city.approval)}% ` +
+      `<span class="survey-mood">${surveyMood(city.approval)}</span></div>` +
+      `<div class="survey-note">The headline is the mood, smoothed over the last few months. ` +
+      `The list below is <b>this month's ledger</b> — what the city is angry about right now.</div>`
+    : `<div class="survey-num">—<span class="survey-mood">${city.pop > 0
+        ? "not polled yet" : "nobody to poll"}</span></div>` +
+      `<div class="survey-note">${city.pop > 0
+        ? "The pollsters file their first report at the end of the month."
+        : "Not one resident lives here, Mayor — there is no one to ask."} ` +
+      `The list below is <b>this month's ledger</b> either way.</div>`;
 
   const shown = rep.rows.filter((r) => r.s > 0).slice(0, SURVEY_ROWS);
   const tbl = document.getElementById("survey-table");
   tbl.innerHTML = shown.length
     ? shown.map((r, k) => {
-        const bar = Math.max(2, Math.round(100 * r.p));
+        /* The bar encodes the SAME quantity as the printed percentage and the
+           rank — the row's share of the total grievance. It used to be drawn
+           at 100*p, the row's fraction of its OWN weight, so a 2-point row at
+           full severity drew a longer bar than a 9-point row at three quarters
+           and the picture contradicted the ranking it sat inside. */
+        const bar = Math.max(2, Math.min(100, r.naming));
         return `<tr><td class="survey-rank">${k + 1}</td>` +
           `<td><b>${r.label}</b>` +
           `<div class="survey-bar"><i style="width:${bar}%"></i></div>` +

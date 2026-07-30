@@ -475,7 +475,7 @@
       "save_version": 17,
       "certified_through": "GP5b (service strain & the education payoff \u2014 the GP5 pair complete). GP6 (citizen opinion poll) is LIVE in the tree at save v17 and is NOT yet certified \u2014 its verify + panel pass owns that promotion; see live_but_uncertified below.",
       "live_but_uncertified": [
-        "GP6 citizen-opinion-poll (composite approval over 15 weighted APPROVAL_TERMS + monthly EMA carry, City Survey dialog with the ranked problem list and per-row Show-me jumps, the gated Megalopolis rung, the recall-petition edition, save v17 \u2014 sim.js/ui.js/index.html/css/style.css) \u2014 code live, docs reconciled in the same pass per S1; certified or fixed/reverted by the running verify + panel workflow."
+        "GP6 citizen-opinion-poll (composite approval over weighted APPROVAL_TERMS + monthly EMA carry, City Survey dialog with ranked problems and Show-me jumps, Megalopolis rung, recall petition, save v17 \u2014 sim.js/ui.js/index.html/css) INCLUDING the reconcile-pass rescoping of the pollution/crime/congestion/coverage penalties from citywide means onto the INHABITED zoned footprint (approvalCensus) \u2014 code live, docs reconciled per S1; certified or fixed/reverted by the running workflow wf_5f681c5f-da0."
       ],
       "artifact_reflects": "this ship (bundle rebuilt at GP5b close)"
     }

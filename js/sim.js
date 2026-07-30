@@ -1491,9 +1491,52 @@ const SVC_OK = 96;
 // a sustained policy moves it. The carry is PATH-DEPENDENT by construction
 // (that is the point of a mood) — which is exactly why it serializes.
 const APPROVAL_RATE = 1 / 4;
-// The recall episode: approval under RECALL_T for RECALL_MONTHS consecutive
-// rollovers files the petition, once per city (the recallDone latch).
-const RECALL_T = 25, RECALL_MONTHS = 6;
+/* The recall episode: approval under RECALL_T for RECALL_MONTHS consecutive
+   rollovers files the petition, once per city (the recallDone latch).
+   RECALL_T IS ANCHORED TO THE MEASURED FLOOR OF THE MODEL, not guessed. The
+   first draft set it at 25 without measuring what the term table can reach: a
+   city with every police station, fire house, school, hospital and water tower
+   razed, every department at 0% funding, tax at 20%, the treasury §50,000 in
+   the red, a third of its zoned blocks dark and every cross-street bulldozed
+   measures a SUSTAINED approval of 36.7-38.7 (its month-by-month target bottoms
+   at 25.0 and only for three months, because a collapse eventually removes the
+   congestion, crime and unemployment grievances along with the citizens who
+   held them). Under 25 for six straight months was therefore unreachable and
+   the petition was dead art. 40 is the line the survey itself calls "ready to
+   march on City Hall" (see surveyMood) — the petition is filed when the city
+   has sat in the bottom mood band for half a year, which is the rule the
+   newspaper's own sub-head describes. */
+const RECALL_T = 40, RECALL_MONTHS = 6;
+
+/* GP6 fix-pass — THE SEVERITY SCALES, each anchored to a MEASURED reachable
+   range of the field it reads rather than to the array's 0..255 type range.
+   The original draft divided the pollution and crime planes' CITYWIDE means by
+   100; both means are taken over the whole MAP (wilderness included), so on an
+   80x80 map with 544 zoned tiles they read 5 and 0 in a healthy city and are
+   arithmetically incapable of reaching 100 — measured ceiling of cityIndex(poll)
+   with the ENTIRE map converted to coal plants is 40, and cityIndex(crime) sat
+   at 5 with every patrol defunded. 12 + 8 points of weight were dead. The
+   penalties now read the same planes over the INHABITED city (the zoned
+   footprint — see approvalCensus), which is what a citizen actually breathes
+   and walks through, and divide by these documented lines:
+     POLL_BAD    the smog level at which a block reads solidly orange on the
+                 pollution overlay. A wall-to-wall industrial map measures 34
+                 across its zoned footprint, a park-rich mixed city 17.
+     CRIME_BAD   COMPLAINT_T.crime — the exact level at which the shipped
+                 complaint system says a block is bad enough to fax city hall.
+     TRAFFIC_JAM ui.js's TRAFFIC_REPORT_MIN (kept in sync; both are 80) — the
+                 congestion the traffic report reads out on air. Congestion is
+                 scored as the SHARE of carrier tiles at or above it, not the
+                 mean over every carrier: a rural lane at 0 dilutes the mean of
+                 a gridlocked downtown, and the mean also swings ~24 points on
+                 the seasonal traffic cycle while the jam share barely moves.
+     JAM_OK/BAD  the share of streets at that level that a working city runs at
+                 (below it there is no grievance — the comfort floor the shipped
+                 draft carried as "mean traffic 30"), and the share at which
+                 congestion is total. Measured: a healthy grid runs 0.08, a city
+                 with every cross-street razed runs 0.33-0.48. */
+const POLL_BAD = 60, CRIME_BAD = 100;
+const TRAFFIC_JAM = 80, JAM_OK = 0.10, JAM_BAD = 0.35;
 
 // GP6: argmax of a plane, lowest-index tie-break, optionally restricted to an
 // eligible set. Returns null when nothing eligible carries a positive value.
@@ -1538,44 +1581,66 @@ function apxWin5(mark) {
   return null;
 }
 
-// GP6: is this a developed zone tile (the census population every coverage /
-// power / water term is measured over)?
-const apxDevZone = (c, i) => (c.over[i] === OV.ZR || c.over[i] === OV.ZC ||
-  c.over[i] === OV.ZI) && c.lvl[i] > 0;
+/* GP6: is this a ZONED tile — the census population every coverage / power /
+   water / air / crime term is measured over?
+   FIX-PASS: this used to require lvl > 0 (a DEVELOPED zone). That made every
+   share self-healing: cut the power to a third of the city and the dark blocks
+   abandon, so devZ falls with devUnpow and the measured grievance decays back
+   to zero inside 20 months while the wire is still on the ground (measured:
+   unpowShare 0.309 -> 0.000, approval 97.7 -> 87.1 -> 98.0). The zoned
+   footprint is what the mayor actually committed to and it does NOT shrink when
+   buildings abandon (measured: 544 zoned tiles, 168 of them dark, both constant
+   for the whole 24-month window), so the grievance persists exactly as long as
+   the neglect does. `apxDevZone` is retained for the focus fields, where the
+   camera should land on a block somebody still lives on. */
+const apxZone = (c, i) => c.over[i] === OV.ZR || c.over[i] === OV.ZC ||
+  c.over[i] === OV.ZI;
+const apxDevZone = (c, i) => apxZone(c, i) && c.lvl[i] > 0;
 // GP6: the traffic CARRIER set — verified as the only tiles recomputeTraffic
 // ever writes a nonzero traffic[] to (the two folds at the ROAD/WIREROAD and
 // XWAY/RAMP arms). Everything else is assigned exactly 0, so averaging over
 // carriers is the only honest "mean road traffic".
 const apxCarrier = (c, i) => { const t = c.over[i];
   return t === OV.ROAD || t === OV.WIREROAD || t === OV.XWAY || t === OV.RAMP; };
-// GP6: shared shape of the four coverage penalties — 0.75 of the weight rides
-// the COVERAGE GAP and 0.25 the department's strain. That split is load-bearing:
-// deptStrain() reports strain === 1 (no strain) whenever cap === 0, i.e. a city
-// with NO stations or 0% funding reports none at all, so the gap component must
-// dominate or "bulldoze every fire station" would read as a healthy city.
-const apxCovPen = (cov, strain) =>
-  0.75 * Math.min(1, Math.max(0, (SVC_OK - cov) / SVC_OK)) + 0.25 * (1 - strain);
+/* GP6: shared shape of the four coverage penalties — the COVERAGE GAP carries
+   the whole weight, and the department's STRAIN adds up to a further quarter on
+   top (clamped to 1). Strain has to be additive rather than a 0.25 slice of the
+   weight, because deptStrain() reports strain === 1 (no strain) whenever
+   cap === 0 — a city with NO stations, or every station defunded, reports no
+   strain at all. Under the original 0.75/0.25 SPLIT that put a hard ceiling of
+   0.75 on the penalty, so razing every fire station could only ever take
+   0.75 * 9 = 6.75 points off (measured: 6.859 including EMA drift) and the two
+   coverage sensitivity cases could not reach their 8-point bar no matter what
+   the mayor did. A city with literally zero fire coverage now scores the whole
+   fire grievance, which is also the only reading that makes sense to a citizen;
+   an adequately-covered but overstretched department still shows up, at up to a
+   quarter of the weight. */
+const apxCovPen = (cov, strain) => Math.min(1,
+  Math.min(1, Math.max(0, (SVC_OK - cov) / SVC_OK)) + 0.25 * (1 - strain));
 const apxPct = (v) => Math.round(v * 100);
 
 const APPROVAL_TERMS = Object.freeze([
   { id: "pollution", label: "The air is filthy", w: 12,
-    pen: (c, cen) => Math.min(1, cen.pollIdx / 100), mode: "poll", dlg: null,
+    pen: (c, cen) => Math.min(1, cen.pollLocal / POLL_BAD), mode: "poll", dlg: null,
     focus: (c) => apxArgmax(c.poll),
-    blurb: (c, cen) => `The citywide smog index reads ${cen.pollIdx}. Industry, ` +
-      `traffic and power plants all smoke — parks and clean generation cut it.` },
+    blurb: (c, cen) => `Smog over the blocks people actually live and work on ` +
+      `averages ${Math.round(cen.pollLocal)} of a filthy ${POLL_BAD} (citywide ` +
+      `index ${cen.pollIdx}). Industry, traffic and power plants all smoke — ` +
+      `parks and clean generation cut it.` },
 
   { id: "power", label: "The lights keep going out", w: 12,
     pen: (c, cen) => Math.min(1, cen.unpowShare / 0.25), mode: "power", dlg: null,
-    focus: (c) => apxWin5((i) => (apxDevZone(c, i) && !c.powered[i]) ? 1 : 0),
-    blurb: (c, cen) => `${cen.devUnpow} of ${cen.devZ} developed blocks ` +
-      `(${apxPct(cen.unpowShare)}%) are dark. Run wire to them, or build capacity.` },
+    focus: (c) => apxWin5((i) => (apxZone(c, i) && !c.powered[i]) ? 1 : 0),
+    blurb: (c, cen) => `${cen.zUnpow} of your ${cen.zoneZ} zoned blocks ` +
+      `(${apxPct(cen.unpowShare)}%) have no power. Run wire to them, or build capacity.` },
 
   { id: "congestion", label: "The traffic is unbearable", w: 12,
-    pen: (c, cen) => Math.min(1, Math.max(0, cen.meanTraffic - 30) / 70),
+    pen: (c, cen) => Math.min(1, Math.max(0, cen.jamShare - JAM_OK) / (JAM_BAD - JAM_OK)),
     mode: "traffic", dlg: null,
     focus: (c) => apxArgmax(c.traffic, (i) => apxCarrier(c, i)),
-    blurb: (c, cen) => `Average congestion across your ${cen.roadTiles} road tiles ` +
-      `is ${Math.round(cen.meanTraffic)} of 255. Rail, expressways and carpooling relieve it.` },
+    blurb: (c, cen) => `${apxPct(cen.jamShare)}% of your ${cen.roadTiles} road tiles ` +
+      `are jammed at ${TRAFFIC_JAM} or worse (mean ${Math.round(cen.meanTraffic)} of 255). ` +
+      `Rail, expressways and carpooling relieve it.` },
 
   { id: "tax", label: "Taxes are too high", w: 10,
     pen: (c) => Math.min(1, Math.max(0, c.taxRate - 7) / 8),
@@ -1585,14 +1650,14 @@ const APPROVAL_TERMS = Object.freeze([
 
   { id: "covPolice", label: "Police never come", w: 9,
     pen: (c, cen) => apxCovPen(cen.covPol, c.svcStrain.police), mode: "pol", dlg: null,
-    focus: (c) => apxWin5((i) => apxDevZone(c, i) ? Math.max(0, SVC_OK - c.polCov[i]) : 0),
-    blurb: (c, cen) => `Police coverage over your developed blocks averages ` +
+    focus: (c) => apxWin5((i) => apxZone(c, i) ? Math.max(0, SVC_OK - c.polCov[i]) : 0),
+    blurb: (c, cen) => `Police coverage over your zoned blocks averages ` +
       `${Math.round(cen.covPol)} against a healthy ${SVC_OK}, at ${c.funding.police}% funding.` },
 
   { id: "covFire", label: "The fire service can't reach us", w: 9,
     pen: (c, cen) => apxCovPen(cen.covFire, c.svcStrain.fire), mode: "fire", dlg: null,
-    focus: (c) => apxWin5((i) => apxDevZone(c, i) ? Math.max(0, SVC_OK - c.fireCov[i]) : 0),
-    blurb: (c, cen) => `Fire coverage over your developed blocks averages ` +
+    focus: (c) => apxWin5((i) => apxZone(c, i) ? Math.max(0, SVC_OK - c.fireCov[i]) : 0),
+    blurb: (c, cen) => `Fire coverage over your zoned blocks averages ` +
       `${Math.round(cen.covFire)} against a healthy ${SVC_OK}, at ${c.funding.fire}% funding.` },
 
   { id: "unemployment", label: "There is no work", w: 8,
@@ -1607,10 +1672,12 @@ const APPROVAL_TERMS = Object.freeze([
       `of them want one. Zone commerce and industry they can actually reach.` },
 
   { id: "crime", label: "Crime is out of control", w: 8,
-    pen: (c, cen) => Math.min(1, cen.crimeIdx / 100), mode: "crime", dlg: null,
+    pen: (c, cen) => Math.min(1, cen.crimeLocal / CRIME_BAD), mode: "crime", dlg: null,
     focus: (c) => apxArgmax(c.crime),
-    blurb: (c, cen) => `The citywide crime index reads ${cen.crimeIdx}. Patrols, ` +
-      `land value and jobs all push it down.` },
+    blurb: (c, cen) => `Crime over the blocks people live and work on averages ` +
+      `${Math.round(cen.crimeLocal)} against the ${CRIME_BAD} at which residents ` +
+      `start faxing city hall (citywide index ${cen.crimeIdx}). Patrols, land ` +
+      `value and jobs all push it down.` },
 
   { id: "commute", label: "The commute is brutal", w: 5,
     pen: (c) => Math.min(1, Math.max(0, c.avgCommute - CMT_FIT_LO) / (MAX_COMMUTE - CMT_FIT_LO)),
@@ -1621,30 +1688,30 @@ const APPROVAL_TERMS = Object.freeze([
 
   { id: "water", label: "The taps run dry", w: 4,
     pen: (c, cen) => Math.min(1, cen.unwatShare / 0.35), mode: "water", dlg: null,
-    focus: (c) => apxWin5((i) => (apxDevZone(c, i) && !c.watered[i]) ? 1 : 0),
-    blurb: (c, cen) => `${cen.devUnwat} of ${cen.devZ} developed blocks ` +
+    focus: (c) => apxWin5((i) => (apxZone(c, i) && !c.watered[i]) ? 1 : 0),
+    blurb: (c, cen) => `${cen.zUnwat} of your ${cen.zoneZ} zoned blocks ` +
       `(${apxPct(cen.unwatShare)}%) have no water. Lay pipe from a tower or pump.` },
 
   { id: "covEdu", label: "The schools are failing", w: 3,
     pen: (c, cen) => apxCovPen(cen.covEdu, c.svcStrain.edu), mode: "svc", dlg: null,
-    focus: (c) => apxWin5((i) => (c.over[i] === OV.ZR && c.lvl[i] > 0)
+    focus: (c) => apxWin5((i) => (c.over[i] === OV.ZR)
       ? Math.max(0, SVC_OK - c.eduCov[i]) : 0),
     blurb: (c, cen) => `School coverage over your neighborhoods averages ` +
       `${Math.round(cen.covEdu)} against a healthy ${SVC_OK}, at ${c.funding.edu}% funding.` },
 
   { id: "covHealth", label: "Nobody can see a doctor", w: 3,
     pen: (c, cen) => apxCovPen(cen.covMed, c.svcStrain.health), mode: "svc", dlg: null,
-    focus: (c) => apxWin5((i) => (c.over[i] === OV.ZR && c.lvl[i] > 0)
+    focus: (c) => apxWin5((i) => (c.over[i] === OV.ZR)
       ? Math.max(0, SVC_OK - c.medCov[i]) : 0),
     blurb: (c, cen) => `Hospital coverage over your neighborhoods averages ` +
       `${Math.round(cen.covMed)} against a healthy ${SVC_OK}, at ${c.funding.health}% funding.` },
 
   { id: "rubble", label: "Nobody clears the rubble", w: 2,
-    pen: (c, cen) => Math.min(1, cen.rubble / Math.max(1, cen.devZ) / 0.05),
+    pen: (c, cen) => Math.min(1, cen.rubble / Math.max(1, cen.zoneZ) / 0.05),
     mode: "all", dlg: null,
     focus: (c) => apxWin5((i) => c.over[i] === OV.RUBBLE ? 1 : 0),
     blurb: (c, cen) => `${cen.rubble} tiles of burnt-out rubble are still standing ` +
-      `against ${cen.devZ} developed blocks. Bulldoze them.` },
+      `against ${cen.zoneZ} zoned blocks. Bulldoze them.` },
 
   { id: "disaster", label: "The city is under siege", w: 2,
     pen: (c) => c.disaster ? 1 : 0, mode: "all", dlg: null,
@@ -4971,50 +5038,75 @@ class City {
      APPROVAL_TERMS penalties need. PURE read — writes nothing, draws nothing,
      never reads cam.r. Run at month rollover and at survey-dialog open ONLY
      (the openTrafficReport precedent); refreshHUD must never call it.
-     ONE-SOURCE DISCIPLINE: the pollution and crime means come from the shipped
-     cityIndex() over the same planes the graphs and advisors read, and the
-     department strain figures are READ from this.svcStrain (which recomputeMaps
-     derives from the GP5a/GP5b deptStrain census) — nothing here recomputes a
-     figure the sim already publishes.
-       devZ / devUnpow / devUnwat  developed zone tiles, and how many of them
-                                   sit dark / dry
-       zrDev                       developed residential tiles (the population
-                                   eduAttain is measured over, so the school and
-                                   clinic means match it)
-       covPol/covFire              mean police/fire coverage over DEVELOPED zones
-       covEdu/covMed               mean school/hospital coverage over developed ZR
-       roadTiles / trafficSum      the traffic CARRIER set (see apxCarrier)
-       rubble                      burnt-out tiles still standing
-     With nothing developed the four coverage means read SVC_OK ("nothing to
-     cover is not a coverage failure") and every share reads 0, so an empty map
-     scores no grievances rather than all of them. */
+     ONE-SOURCE DISCIPLINE: every figure below is read off a plane the sim
+     already publishes (poll/crime/polCov/fireCov/eduCov/medCov/traffic/
+     powered/watered); the department strain figures are READ from
+     this.svcStrain (which recomputeMaps derives from the GP5a/GP5b deptStrain
+     census). Nothing here recomputes a field, and the citywide cityIndex()
+     figures the graphs and advisors publish are carried through untouched as
+     pollIdx / crimeIdx for the blurbs.
+
+     THE CENSUS POPULATION IS THE ZONED FOOTPRINT, NOT THE DEVELOPED ONE.
+     Every share and coverage mean below is taken over ZR/ZC/ZI tiles at ANY
+     level. That is the fix for the self-healing failure the first draft shipped
+     with: measured over developed zones, cutting the power to a third of the
+     city made the dark blocks abandon, which removed them from BOTH sides of
+     the ratio, so unpowShare decayed 0.309 -> 0.000 over 20 months with the
+     wire still cut and approval climbed back from 87.1 to 98.0. The zoned
+     footprint is the commitment the mayor made and it does not shrink when
+     buildings abandon (measured: 544 zoned tiles / 168 dark, both constant
+     across the same 24 months), so a grievance lasts exactly as long as the
+     neglect that caused it.
+       zoneZ / zUnpow / zUnwat  zoned tiles, and how many sit dark / dry
+       devZ                     of those, how many are actually built on (kept
+                                for the pop-facing blurbs and the tests)
+       zrZ                      zoned residential tiles — the population
+                                eduAttain is measured over, so the school and
+                                clinic means match it
+       covPol/covFire           mean police/fire coverage over the zoned city
+       covEdu/covMed            mean school/hospital coverage over zoned ZR
+       pollLocal/crimeLocal     mean smog / crime over the zoned city — what a
+                                citizen actually breathes and walks through,
+                                rather than a whole-MAP mean that wilderness
+                                dilutes by an order of magnitude
+       roadTiles/trafficSum     the traffic CARRIER set (see apxCarrier)
+       jam / jamShare           carriers at or above TRAFFIC_JAM, and their share
+       rubble                   burnt-out tiles still standing
+     With nothing zoned the four coverage means read SVC_OK ("nothing to cover
+     is not a coverage failure") and every share reads 0, so an empty map scores
+     no grievances rather than all of them. */
   approvalCensus() {
-    let devZ = 0, devUnpow = 0, devUnwat = 0, zrDev = 0;
-    let sPol = 0, sFire = 0, sEdu = 0, sMed = 0;
-    let roadTiles = 0, trafficSum = 0, rubble = 0;
+    let zoneZ = 0, zUnpow = 0, zUnwat = 0, zrZ = 0, devZ = 0;
+    let sPol = 0, sFire = 0, sEdu = 0, sMed = 0, sPoll = 0, sCrime = 0;
+    let roadTiles = 0, trafficSum = 0, jam = 0, rubble = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (t === OV.NONE) continue;
       if (t === OV.RUBBLE) { rubble++; continue; }
       if (t === OV.ROAD || t === OV.WIREROAD || t === OV.XWAY || t === OV.RAMP) {
-        roadTiles++; trafficSum += this.traffic[i]; continue;
+        roadTiles++; trafficSum += this.traffic[i];
+        if (this.traffic[i] >= TRAFFIC_JAM) jam++;
+        continue;
       }
       if (t === OV.ZR || t === OV.ZC || t === OV.ZI) {
-        if (!this.lvl[i]) continue; // a painted lot is not yet anybody's home
-        devZ++;
-        if (!this.powered[i]) devUnpow++;
-        if (!this.watered[i]) devUnwat++;
+        zoneZ++;
+        if (this.lvl[i]) devZ++;
+        if (!this.powered[i]) zUnpow++;
+        if (!this.watered[i]) zUnwat++;
         sPol += this.polCov[i]; sFire += this.fireCov[i];
-        if (t === OV.ZR) { zrDev++; sEdu += this.eduCov[i]; sMed += this.medCov[i]; }
+        sPoll += this.poll[i]; sCrime += this.crime[i];
+        if (t === OV.ZR) { zrZ++; sEdu += this.eduCov[i]; sMed += this.medCov[i]; }
       }
     }
     return {
-      devZ, devUnpow, devUnwat, zrDev, roadTiles, trafficSum, rubble,
-      covPol: devZ ? sPol / devZ : SVC_OK, covFire: devZ ? sFire / devZ : SVC_OK,
-      covEdu: zrDev ? sEdu / zrDev : SVC_OK, covMed: zrDev ? sMed / zrDev : SVC_OK,
-      unpowShare: devZ ? devUnpow / devZ : 0,
-      unwatShare: devZ ? devUnwat / devZ : 0,
+      zoneZ, zUnpow, zUnwat, zrZ, devZ, roadTiles, trafficSum, jam, rubble,
+      covPol: zoneZ ? sPol / zoneZ : SVC_OK, covFire: zoneZ ? sFire / zoneZ : SVC_OK,
+      covEdu: zrZ ? sEdu / zrZ : SVC_OK, covMed: zrZ ? sMed / zrZ : SVC_OK,
+      unpowShare: zoneZ ? zUnpow / zoneZ : 0,
+      unwatShare: zoneZ ? zUnwat / zoneZ : 0,
+      pollLocal: zoneZ ? sPoll / zoneZ : 0, crimeLocal: zoneZ ? sCrime / zoneZ : 0,
       meanTraffic: roadTiles ? trafficSum / roadTiles : 0,
+      jamShare: roadTiles ? jam / roadTiles : 0,
       pollIdx: this.cityIndex(this.poll), crimeIdx: this.cityIndex(this.crime),
     };
   }
@@ -5040,7 +5132,13 @@ class City {
       rows.push({ id: t.id, label: t.label, w: t.w, p, s, naming: 0,
         mode: t.mode, dlg: t.dlg, focus: t.focus, blurb: t.blurb(this, cen) });
     }
-    for (const r of rows) r.naming = (r.s > 0 && sum > 0) ? Math.round(100 * r.s / sum) : 0;
+    // A row that took ANY points off is named by at least one citizen in a
+    // hundred: without the floor a grievance worth 0.03 of 14 points rounds to
+    // "0% of citizens name this" while still printing in the ranked list, which
+    // reads as a contradiction. The floor moves the sum by at most one point
+    // per such row and never reorders anything (naming stays monotone in s).
+    for (const r of rows) r.naming = (r.s > 0 && sum > 0)
+      ? Math.max(1, Math.round(100 * r.s / sum)) : 0;
     rows.sort((a, b) => (b.s - a.s) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     return { target: Math.max(0, Math.min(100, 100 - sum)), census: cen, rows };
   }

@@ -456,9 +456,14 @@ input[type=range]::-moz-range-thumb {
 .traffic-lead { font-size: 12px; font-weight: bold; }
 .traffic-note { font-size: 10px; color: #444; margin-top: 6px; text-align: center; }
 /* GP6: the City Survey — reuses the shipped .budget-table / .btn95.tiny chrome */
-.vital-click { cursor: pointer; text-decoration: underline dotted; }
+/* solid underline — the shipped clickable-text precedent (#ticker.complaint);
+   a DOTTED underline meant "accelerator/focus" in Win95, never "link" */
+.vital-click { cursor: pointer; text-decoration: underline; }
 #dlg-survey { min-width: 360px; }
-#dlg-survey .dlg-body { max-width: 420px; }
+/* the shipped tall-dialog idiom (#dlg-rci / #dlg-ordinances / #dlg-region /
+   #dlg-shortcuts): five grievance rows with blurbs run past 500px, which pushed
+   the titlebar and its ✕ off the top of a 620px viewport at .dlg top:40% */
+#dlg-survey .dlg-body { max-width: 420px; max-height: 68vh; overflow-y: auto; }
 .survey-num { font-size: 18px; font-weight: bold; }
 .survey-mood { font-size: 12px; font-weight: normal; color: #303030; }
 .survey-note { font-size: 10px; color: #444; margin-top: 2px; }

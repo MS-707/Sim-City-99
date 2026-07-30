@@ -3428,70 +3428,219 @@ function buildSprites() {
      every existing bake and drawn ONLY under a forked mulberry32 seed swapped
      in/out of ART_RNG (the i2/gasRng idiom above), so every shipped sprite —
      all facings, all seasons, night/pool layers — stays byte-identical (C5).
-     Palette: cool glass/white campus, hue ~190-205 (12deg+ clear of every
-     zone family), lightness DECLINING by density (MN3 non-hue cue); rooftop
-     AC/antennas instead of rust stacks. Built from the same prism/windows/
-     withNight/withJitter helpers, so night sets, winter snow caps, per-facing
-     lazy bakes and click-picking come free. */
+
+     PALETTE (GQ3 hue budget): jade / sea-green anodized panel, hue 142-156,
+     S .19-.30, lightness DECLINING by density (.60/.50/.40 — the MN3 non-hue
+     cue). Margins: >=25deg to commercial teal/cyan (c 180-224), >=47deg to
+     dirty industrial olive (i 70-95), >=97deg to the residential warm band
+     (r 8-45), >=25deg to the grass family (117). IC_ROOF is a DARK saturated
+     emerald metal cap (L .26-.30) — the clean family's roof/trim punch, the
+     rust I_ROOF analogue — which also keeps the tops far from ROOF_SNOW so
+     the G14 winter cap stays a visible cue and the district never whites out.
+
+     NIGHT (G1): the clean ladder keeps the certified SODIUM industrial glow
+     for panes AND yard pools. Education changes what industry BUILDS, never
+     what zone it IS — ZI must still read warm against commercial's cool
+     #a8ccf8 after dark, at every eduLevel.
+
+     SILHOUETTE (rubric: archetypes distinguishable by outline alone): each
+     family remasses on variant parity, like the dirty ladder's A8/A9 —
+     i1c monitor-roof shed + silo vs flat lab box + solar deck; i2c stepped
+     rear-block campus vs full-lot block + cooling drum; i3c setback tier
+     tower vs slab + drum. The loading dock (onFace, the i1 idiom) stays on
+     level 1 so clean industry still reads as industry, not as an office. */
   const i1c = [], i2c = [], i3c = [];
   {
     const cleanRng = mulberry32((0xC1EA12 ^ (BR * 0x9E3779B1)) >>> 0);
     const prevRng = ART_RNG; ART_RNG = cleanRng;
     const Rc = () => cleanRng();
-    const i1cBase = ["#a9c6ce", "#a4c3d0", "#aecad2", "#9fbfc9", "#abc8d5"];
-    const i2cBase = ["#8bb0bd", "#85acbe", "#90b4c1", "#7fa7b8", "#88afc4"];
-    const i3cBase = ["#6d95a8", "#67909f", "#7299ae", "#628ba0", "#6b93ab"];
-    const IC_ROOF = ["#e8eef2", "#e4ebf0", "#eceff4", "#e0e8ee", "#e6edf3"];
-    const IC_LIT = "#d8f2fa", IC_DARK = "#1e2a32";
+    const i1cBase = ["#83af96", "#89ae9c", "#7cb18f", "#8ab2a1", "#7aae92"];
+    const i2cBase = ["#619e7c", "#689c84", "#5b9f75", "#68a189", "#5b9a79"];
+    const i3cBase = ["#4a8264", "#4f826b", "#46815d", "#4f8771", "#457d61"];
+    const IC_ROOF = ["#2b644d", "#2f6553", "#276247", "#2f6a54", "#275d46"];
+    // lighter same-hue tones for the secondary masses (lantern / wing / podium).
+    // Hex literals, never shade()/lighten() — those return rgb() strings and
+    // zoneFaces()/faceL() parse a HEX, so a computed tone would blacken a face.
+    const IC_LANT = ["#98bda8", "#9ebdae", "#93bea3", "#9fc1b2", "#90bba4"];
+    const IC_WING = ["#7db094", "#84ae9a", "#77b18d", "#85b29f", "#75ae90"];
+    const IC_PODM = ["#5b9f7b", "#619e83", "#569f73", "#62a389", "#559b78"];
+    const IC_TRIM = "#3dc296", IC_TRIM_LO = "#307e64";
+    const IC_LIT = "#ffe1a6", IC_DARK = "#1b2a25";
+    const IC_MET = "#b9c6c0", IC_MET_HI = "#d7e0da", IC_MET_LO = "#7f8f88";
+    // rooftop chiller bank: n light-metal units stepped along a tile diagonal
+    const chillers = (g, cx, cy, n) => {
+      for (let k = 0; k < n; k++) {
+        const px = cx + k * 9, py = cy + k * 4;
+        g.fillStyle = "#1d2b26"; g.fillRect(px - 4, py - 1, 9, 3);
+        g.fillStyle = IC_MET_LO; g.fillRect(px - 4, py - 5, 9, 5);
+        g.fillStyle = IC_MET; g.fillRect(px - 4, py - 6, 9, 2);
+        g.fillStyle = IC_TRIM_LO; g.fillRect(px - 4, py - 3, 9, 1);
+      }
+    };
+    // process silo / cooling drum — the clean family's vertical signature,
+    // standing in for the dirty ladder's smoke stacks (no plume, ever)
+    const drum = (g, cx, cy, rx, ht) => {
+      const ry = rx * 0.55;
+      g.fillStyle = IC_MET_LO;
+      g.fillRect(cx - rx, cy - ht, rx * 2, ht);
+      g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, 7); g.fill();
+      g.fillStyle = IC_MET; g.fillRect(cx - rx, cy - ht, rx * 0.72, ht);
+      g.fillStyle = IC_TRIM_LO; g.fillRect(cx - rx, cy - Math.round(ht * 0.55), rx * 2, 2);
+      g.fillStyle = IC_MET_HI;
+      g.beginPath(); g.ellipse(cx, cy - ht, rx, ry, 0, 0, 7); g.fill();
+      g.strokeStyle = IC_MET_LO; g.lineWidth = 1;
+      g.beginPath(); g.ellipse(cx, cy - ht, rx, ry, 0, 0, 7); g.stroke();
+    };
+    const latticeMast = (g, x, y, ht) => {
+      g.strokeStyle = "#33463f"; g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(x - 2.5, y); g.lineTo(x, y - ht); g.stroke();
+      g.beginPath(); g.moveTo(x + 2.5, y); g.lineTo(x, y - ht); g.stroke();
+      g.strokeStyle = "#6f8079"; g.lineWidth = 1;
+      for (let k = 1; k * 5 < ht; k++) {
+        const t = (k * 5) / ht, hw = 2.5 * (1 - t);
+        g.beginPath(); g.moveTo(x - hw, y - k * 5); g.lineTo(x + hw, y - k * 5); g.stroke();
+      }
+    };
+    const dish = (g, x, y) => {
+      g.fillStyle = "#dfe8e3";
+      g.beginPath(); g.ellipse(x, y, 5, 3, -0.5, 0, 7); g.fill();
+      g.strokeStyle = "#8fa39b"; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + 3, y + 4); g.stroke();
+    };
+    // parapet trim band (roofs/trim punch): bright jade on the SE face, the
+    // shaded jade on SW, so the crown reads at every rotation
+    const trimBand = (g, cn, ht) => {
+      poly(g, [up(cn.S, ht), up(cn.E, ht), up(cn.E, ht - 3), up(cn.S, ht - 3)], IC_TRIM);
+      poly(g, [up(cn.W, ht), up(cn.S, ht), up(cn.S, ht - 3), up(cn.W, ht - 3)], IC_TRIM_LO);
+    };
     for (let v = 0; v < NV; v++) {
-      // i1c: low white lab shed — glass entry band, one roof AC + whip antenna
-      const i1cHT = 16;
-      i1c.push(withJitter(mkSprite(1, 1, 30, (g, ox, oy) => {
+      /* i1c — level 1. v0,2,4 remass as a MONITOR-ROOF SHED (low walls under
+         a raised central clerestory, the north-light lab archetype); v1,3 are
+         a flat lab box with a solar deck and a ground-standing process silo
+         that breaks the box outline. Both keep i1's big loading door on ONE
+         world face, so level-1 clean industry can never be mistaken for the
+         level-1 commercial storefront. */
+      const i1cMon = (v % 2) === 0, i1cHT = i1cMon ? 8 : 23;
+      i1c.push(withJitter(mkSprite(1, 1, 40, (g, ox, oy) => {
         const base = i1cBase[v];
         const cn = prism(g, ox, oy, 1, 1, i1cHT, base, zoneFaces(base, IC_ROOF[v]));
-        windows(g, up(cn.W, 0), up(cn.S, 0), i1cHT, 1, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
-        windows(g, up(cn.S, 0), up(cn.E, 0), i1cHT, 1, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
-        const rx = ox, ry = cn.N[1] - i1cHT + 4;
-        g.fillStyle = "#b8c4cc"; g.fillRect(rx - 6, ry - 2, 8, 5);   // roof AC
-        g.fillStyle = "#d4dde3"; g.fillRect(rx - 6, ry - 3, 8, 2);
-        g.strokeStyle = "#5a6a74"; g.lineWidth = 1;                  // whip antenna
-        g.beginPath(); g.moveTo(rx + 8, ry + 2); g.lineTo(rx + 8, ry - 10); g.stroke();
+        if (i1cMon) {
+          // clerestory monitor: a narrow raised lantern that clears the shed's
+          // own top-face outline by ~8px, so the stepped profile survives the
+          // grayscale-silhouette test against both c1 and the dirty i1 gable
+          const mo = raise(insetCorners(ox, oy, 1, 1, 0.55), i1cHT);
+          const mb = IC_LANT[v];
+          prismFrom(g, mo, 18, mb, zoneFaces(mb, IC_ROOF[v]));
+          const lrp = (a, c, t) => [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t];
+          for (const [p0, p1] of [[mo.W, mo.S], [mo.S, mo.E]]) { // north-light clerestory
+            poly(g, [up(p0, 4), up(p1, 4), up(p1, 13), up(p0, 13)], "#1a2e2c");
+            for (const t of [0.22, 0.5, 0.78]) { // 3 iso glazing panes per face
+              const q0 = lrp(p0, p1, t - 0.11), q1 = lrp(p0, p1, t + 0.11);
+              poly(g, [up(q0, 6), up(q1, 6), up(q1, 12), up(q0, 12)], "#b6ddd0");
+            }
+          }
+          trimBand(g, mo, 18);
+          g.fillStyle = IC_MET; // ridge vent line on the monitor cap
+          g.fillRect(ox - 5, mo.N[1] - 19, 10, 2);
+          g.fillStyle = IC_MET_LO; g.fillRect(ox - 5, mo.N[1] - 17, 10, 1);
+          chillers(g, ox - 13, oy - i1cHT + 5, 1);
+        } else {
+          const rc = [ox, oy - i1cHT];
+          // solar-deck shadow pad
+          poly(g, [[rc[0] - 15, rc[1]], [rc[0], rc[1] - 7], [rc[0] + 15, rc[1]], [rc[0], rc[1] + 7]], "rgba(14,24,20,.35)");
+          for (let k = 0; k < 3; k++) { // tilted PV array
+            const px = rc[0] + (k - 1) * 9, py = rc[1] + (k - 1) * 4.5;
+            poly(g, [[px - 6, py + 1], [px + 5, py + 1], [px + 6, py - 5], [px - 5, py - 5]], "#1f3f4d", "#4d6b74");
+            g.fillStyle = "#3f7686"; g.fillRect(px - 4, py - 4, 9, 1);
+          }
+          chillers(g, ox - 14, oy - i1cHT + 6, 1);
+          // roof-standing process silo + whip mast: both clear the box outline
+          drum(g, ox + 7, rc[1] + 3, 5, 21);
+          latticeMast(g, ox - 9, rc[1] + 2, 19);
+          trimBand(g, cn, i1cHT);
+        }
+        onFace(FE_PX, cn, (p0, p1) => { // loading dock (the i1 idiom)
+          const fm = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+          const dt = i1cMon ? 6 : 15;
+          poly(g, [up(p0, 2), up(p1, 2), up(p1, dt), up(p0, dt)].map(p => [
+            p[0] * 0.5 + fm[0] * 0.5, p[1] * 0.5 + fm[1] * 0.5]), "#243a34");
+          poly(g, [up(p0, dt), up(p1, dt), up(p1, dt + 2), up(p0, dt + 2)].map(p => [
+            p[0] * 0.5 + fm[0] * 0.5, p[1] * 0.5 + fm[1] * 0.5]), IC_TRIM_LO);
+        });
       })));
-      // i2c: mid glass block — cool curtain-wall panes, roof AC pair + mast
-      const i2cHT = 26;
+      /* i2c — level 2. v0,2,4: a low front wing under a TALL REAR BLOCK
+         (stepped campus, half-lot corner sets); v1,3: a full-lot block with a
+         rooftop cooling drum. Sodium panes + sodium forecourt pool (G1). */
+      const i2cStep = (v % 2) === 0;
       i2c.push(withJitter(withNight(1, 1, 56, (g, ox, oy) => {
         const base = i2cBase[v];
-        const { W, S, E, N } = prism(g, ox, oy, 1, 1, i2cHT, base, zoneFaces(base, IC_ROOF[v]));
-        windows(g, up(W, 0), up(S, 0), i2cHT, 2, 3, 0.55, IC_LIT, IC_DARK, GLOW_COOL);
-        windows(g, up(S, 0), up(E, 0), i2cHT, 2, 3, 0.55, IC_LIT, IC_DARK, GLOW_COOL);
-        const [cx2, cy2] = roofDeck(g, ox, oy, 1, 1, i2cHT, shade(base, 1.25), "rgba(20,26,32,.7)");
-        g.fillStyle = "#b8c4cc"; g.fillRect(cx2 - 8, cy2 - 1, 8, 5);  // AC pair, no stacks
-        g.fillStyle = "#d4dde3"; g.fillRect(cx2 - 8, cy2 - 2, 8, 2);
-        g.fillStyle = "#b8c4cc"; g.fillRect(cx2 + 3, cy2 + 3, 7, 4);
-        g.strokeStyle = "#4a5a64"; g.lineWidth = 1.4;                 // comms mast
-        g.beginPath(); g.moveTo(cx2, cy2 - 2); g.lineTo(cx2, cy2 - 16); g.stroke();
-        groundPool(ox + 8, oy + 4, 15, 6, GLOW_COOL); // campus forecourt light
-        if (GLOWG) { GLOWG.fillStyle = "#8ae0f0"; GLOWG.fillRect(cx2 - 1, cy2 - 18, 3, 3); }
-      }), { BR, fam: 20, v, cx: HW, cy: 44, spread: 8 }));
-      // i3c: dense hi-tech tower — full glass, dish + lattice mast, zero stacks
+        const cn = corners(ox, oy, 1, 1);
+        const mid = (a, b2) => [(a[0] + b2[0]) / 2, (a[1] + b2[1]) / 2];
+        if (i2cStep) {
+          const rear = { N: cn.N, E: cn.E, S: mid(cn.E, cn.S), W: mid(cn.N, cn.W) };
+          const front = { N: mid(cn.N, cn.W), E: mid(cn.E, cn.S), S: cn.S, W: cn.W };
+          prismFrom(g, rear, 30, base, zoneFaces(base, IC_ROOF[v]));
+          windows(g, rear.W, rear.S, 30, 2, 2, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          windows(g, rear.S, rear.E, 30, 2, 2, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          trimBand(g, rear, 30);
+          const [rx, ry] = roofDeckFrom(g, rear, 30, shade(base, 0.62), "rgba(12,22,18,.85)");
+          chillers(g, rx - 9, ry - 1, 2);
+          latticeMast(g, rx + 9, ry + 2, 15);
+          const fb = IC_WING[v];
+          prismFrom(g, front, 14, fb, zoneFaces(fb, IC_ROOF[v]));
+          windows(g, front.W, front.S, 14, 1, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          windows(g, front.S, front.E, 14, 1, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          drum(g, front.W[0] + 10, front.S[1] - 15, 5, 16); // wing-top silo
+        } else {
+          const HT = 26;
+          prismFrom(g, cn, HT, base, zoneFaces(base, IC_ROOF[v]));
+          windows(g, cn.W, cn.S, HT, 2, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          windows(g, cn.S, cn.E, HT, 2, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          trimBand(g, cn, HT);
+          const [rx, ry] = roofDeckFrom(g, cn, HT, shade(base, 0.62), "rgba(12,22,18,.85)");
+          drum(g, rx + 9, ry + 4, 6, 14);
+          chillers(g, rx - 13, ry - 2, 2);
+          latticeMast(g, rx - 1, ry + 3, 17);
+        }
+        groundPool(ox + 8, oy + 4, 15, 6, GLOW_SODIUM); // yard flood stays sodium (G1)
+      }), { BR, fam: 20, v, cx: i2cStep ? 40 : HW, cy: i2cStep ? 38 : 46, spread: 7 }));
+      /* i3c — level 3. v0,2,4: a SETBACK TIER tower (podium + inset shaft);
+         v1,3: a single slab crowned by a big cooling drum. Both carry the
+         dish + lattice mast; neither carries a stack. */
+      const i3cTier = (v % 2) === 0;
       i3c.push(withJitter(withNight(1, 1, 74, (g, ox, oy) => {
         const base = i3cBase[v];
-        const { W, S, E, N } = prism(g, ox, oy, 1, 1, 38, base, zoneFaces(base, IC_ROOF[v]));
-        windows(g, up(W, 0), up(S, 0), 38, 3, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
-        windows(g, up(S, 0), up(E, 0), 38, 3, 3, 0.6, IC_LIT, IC_DARK, GLOW_COOL);
-        const ry = N[1] - 38;
-        roofClutter(g, ox - 2, ry + 8, 2, Rc);                       // AC/vents (seeded, forked)
-        g.fillStyle = "#dfe6ea";                                     // satellite dish
-        g.beginPath(); g.ellipse(ox + 12, ry + 6, 5, 3, -0.5, 0, 7); g.fill();
-        g.strokeStyle = "#9aa6ae"; g.beginPath(); g.moveTo(ox + 12, ry + 6); g.lineTo(ox + 15, ry + 2); g.stroke();
-        g.strokeStyle = "#3c4854"; g.lineWidth = 1.6;                // lattice mast
-        g.beginPath(); g.moveTo(ox - 10, ry + 4); g.lineTo(ox - 10, ry - 14); g.stroke();
-        g.strokeStyle = "#6a7680"; g.lineWidth = 1;
-        for (let k = 0; k < 3; k++) {
-          g.beginPath(); g.moveTo(ox - 13, ry - 2 - k * 4); g.lineTo(ox - 7, ry - 2 - k * 4); g.stroke();
+        if (i3cTier) {
+          const pb = IC_PODM[v];
+          const t = setbackTiers(g, ox, oy, 1, 1, [
+            { k: 1.0, ht: 16, base: pb, opts: zoneFaces(pb, IC_ROOF[v]) },
+            { k: 0.62, ht: 26, base, opts: zoneFaces(base, IC_ROOF[v]) },
+          ]);
+          windows(g, t[0].cn.W, t[0].cn.S, 16, 1, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          windows(g, t[0].cn.S, t[0].cn.E, 16, 1, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          windows(g, t[1].cn.W, t[1].cn.S, 26, 2, 2, 0.55, IC_LIT, IC_DARK, GLOW_SODIUM);
+          windows(g, t[1].cn.S, t[1].cn.E, 26, 2, 2, 0.55, IC_LIT, IC_DARK, GLOW_SODIUM);
+          trimBand(g, t[1].cn, 26);
+          const [rx, ry] = roofDeckFrom(g, t[1].cn, 26, shade(base, 0.62), "rgba(12,22,18,.85)");
+          roofClutter(g, rx, ry + 2, 2, Rc);
+          drum(g, rx + 8, ry + 3, 5, 13);
+          dish(g, rx - 9, ry - 2);
+          latticeMast(g, rx - 2, ry + 2, 18);
+          if (GLOWG) { GLOWG.fillStyle = "#ff8a5a"; GLOWG.fillRect(rx - 3, ry - 18, 3, 3); }
+        } else {
+          const HT = 38, cn = corners(ox, oy, 1, 1);
+          prismFrom(g, cn, HT, base, zoneFaces(base, IC_ROOF[v]));
+          windows(g, cn.W, cn.S, HT, 3, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          windows(g, cn.S, cn.E, HT, 3, 3, 0.5, IC_LIT, IC_DARK, GLOW_SODIUM);
+          trimBand(g, cn, HT);
+          const [rx, ry] = roofDeckFrom(g, cn, HT, shade(base, 0.62), "rgba(12,22,18,.85)");
+          roofClutter(g, rx - 2, ry + 2, 2, Rc);
+          drum(g, rx + 10, ry + 4, 7, 18);
+          dish(g, rx - 12, ry - 1);
+          latticeMast(g, rx - 4, ry + 3, 20);
+          if (GLOWG) { GLOWG.fillStyle = "#ff8a5a"; GLOWG.fillRect(rx - 5, ry - 20, 3, 3); }
         }
-        groundPool(ox - 2, oy + 6, 17, 7, GLOW_COOL); // forecourt, cool not sodium
-        if (GLOWG) { GLOWG.fillStyle = "#8ae0f0"; GLOWG.fillRect(ox - 11, ry - 16, 3, 3); }
+        groundPool(ox - 2, oy + 6, 17, 7, GLOW_SODIUM); // yard flood stays sodium (G1)
       })));
     }
     ART_RNG = prevRng;

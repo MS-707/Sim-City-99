@@ -6,9 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- **GP5b — Service Strain & the Education Payoff** (behavior half of GP5):
-  strain coupling + eduLevel slow stock — implement pass checkpointed at
-  08d94c9, UNDER VERIFICATION by workflow wf_aa86ee7d-fe4, NOT shipped.
+- **GP6 — Citizen Opinion Poll**: the headline "how am I doing" number stops
+  being a tax readout in costume and becomes a ranked, clickable to-do list
+  pointing at the city's actual worst block.
 
 ## Open
 
@@ -81,6 +81,29 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP5b — Service Strain & the Education Payoff** *(gameplay roadmap
+  9/13, certified 2026-07-30 — the GP5 pair complete, the declared re-pin of
+  the phase)*: services finally have **capacity**. Every powered station
+  serves a funding-scaled load, and past that line coverage genuinely
+  thins — the strain the GP5a budget meters display is now literally the
+  multiplier scaling the coverage stamp (one census, one function, one
+  threshold). Education and health stopped being the same stat: health gates
+  residential towers and drives population growth, while education gates big
+  industrial plants and accumulates **eduLevel**, a decade-scale stock that
+  flips your smokestack district to clean high-tech industry — 45% of the
+  pollution, a 50% tax premium, and a visibly different jade campus skyline
+  that stops smoking. Let coverage lapse and it decays back. Save v16.
+  Verify passed 10/10 (strain relief restores exactly 1.0; the clean flip
+  crosses at 6.9 sim-years; unstrained cities stay pixel-identical to
+  baseline at all four rotations; population envelope worst case 7.4% vs a
+  15% bar; all four scenarios still winnable). The panel refuted two of
+  three lenses with six defects — clean industry had been lit with
+  commercial's cool glow (a direct G1 night-legibility regression), sat in
+  the commercial hue family, and had *zero* silhouette variety — all already
+  corrected by the checkpoint rebake and independently re-measured: sodium
+  glow restored, 35° hue margin, and clean L3 now more varied than the
+  shipped dirty family.
 
 - [x] **GP5a — Coverage Previews & Strain Meters** *(gameplay roadmap 8/13,
   certified 2026-07-30)*: the two services you sited **blind** for the whole

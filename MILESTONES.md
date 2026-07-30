@@ -6,21 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- **GP4a — Expressways & Ramps** (sim+art together per S4): the answer to
-  the commute pressure GP3 made real and visible — a high-capacity route you
-  pay for, route around neighbourhoods, and deliberately plug into the grid.
-  **Implement pass landed (under verification, NOT shipped):** OV.XWAY=32 /
-  OV.RAMP=33 with the full isXp anti-crosstalk audit (power/fire/wear);
-  half-hop-unit weighted jobDist + XCOMMUTE commute walk behind an `_xpAny`
-  branch (no-expressway cities run the legacy bodies verbatim — 600-tick
-  serialize byte-identical to 5b4c6db modulo the v:15 bump, checked in node);
-  per-class capacity divisors (XP_CAP=4 / RAMP_CAP=2) at the traffic fold;
-  ramp-gated jobAccess fusion; noise + pollution scars in existing overlays;
-  XWAY_NO_RAMP / RAMP_ORPHAN / XWAY_OPEN verdicts; procedural 16-mask
-  raised-deck sprites (zero shared-RNG draws) + xway bridge class + minimap /
-  traffic / commute overlay coverage; tools `,`/`.` at Town tier; save v15.
-  Spec corrections recorded in `docs/gameplay-roadmap.json` (over[] rides
-  Array.from, not packU8; C2 phase-0 jobDist assertion flagged per S6).
+- **GP4b — The First Moving Train** (presentation half of GP4): trains run
+  the rail plane between live stations, deterministic phase-driven, zero
+  sim writes — closes the aliveness guard's N/A train slot.
 
 ## Open
 
@@ -43,10 +31,6 @@ Queue policy: keep at least 5 open improvements at all times.
 > test), and any milestone that adds a `history` key **must** extend the
 > hardcoded list in `normaliseHistory` — unknown keys are silently dropped.
 
-
-- [ ] **GP4b — The First Moving Train** *(presentation half of GP4)*: the
-  rail line you built years ago finally carries a visible train; joins the
-  alivenessStats guard, closing its N/A slot.
 
 - [ ] **GP4 — Expressways, Ramps & the First Moving Train** *(I5/E3, save+)*: The red bridge finally has an answer that is a decision and not just more asphalt — a high-capacity route you must pay for, route around good neighbourhoods, and deliberately plug into the grid — and the rail line you built years 
   **Gates:** Capacity is real: replacing a congested arterial with an expressway pl · Ramps gate access: an expressway with zero ramps carries zero trips an · Siting tradeoff bites: mean landv of residential tiles within 2 of an  …
@@ -97,6 +81,26 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP4a — Expressways & Ramps** *(gameplay roadmap 6/11, certified
+  2026-07-30)*: the red bridge finally has an **answer**. A raised-deck
+  expressway class (2× road speed in the commute model, 4× capacity) that
+  exchanges traffic with the local grid **only through ramp tiles** — an
+  expressway through a neighbourhood with no ramp serves nobody, and the
+  query panel says so (`XWAY_NO_RAMP`/`RAMP_ORPHAN` verdicts). Replacing a
+  congested arterial with an expressway + 2 ramps cuts parallel-street peak
+  load 55.7% and average commute 20.2% vs an equal-tile road control; the
+  siting tradeoff bites (residential land value within 2 tiles falls 28
+  points), so the cheapest route is measurably not the best route. Full
+  anti-crosstalk audit (no power conduction/demand, no brownout/y2k/fire
+  candidacy, asserted per documented site); procedural 16/256-mask deck and
+  ramp sprites with winter variants, visible piers, cars riding the deck;
+  save v15; a no-expressway city stays byte-identical to the GP3b baseline
+  over 600 unstubbed ticks. The panel's fidelity lens caught five render
+  defects (dirt-gapped interchanges, occluded piers, aprons into grass,
+  grounded cars, missing winter ramp) — all fixed and re-verified. One
+  design-phase harness was self-contradictory and is disclosed per S6; the
+  user-level gate passes verbatim with margin.
 
 - [x] **GP3b — Commute Coupling** *(gameplay roadmap 5/11, certified
   2026-07-30 — the GP3 pair complete, THE declared re-pin of the phase)*:

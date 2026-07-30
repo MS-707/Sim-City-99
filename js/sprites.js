@@ -2003,27 +2003,63 @@ function buildSprites() {
       const cOf = (p) => [C[0] + p[0] - mid[0], C[1] + p[1] - mid[1]];
       return { pt, cOf };
     };
-    // pass A: piers, fascia skirts and the concrete slab of every open arm
+    // pass A0: ground shadow — each arm's deck quad projected straight down
+    // XW_LIFT onto the ground plane, so grass visibly runs UNDER the slab.
+    // This (plus the mid-arm piers below) is what makes "elevated" read:
+    // edge-pinned piers were 100% occluded by the neighbouring tile drawn
+    // later in painter order (panel defect), so the shadow + piers now live
+    // in the tile INTERIOR where no neighbour's slab can cover them.
+    for (const b of arms) {
+      const { pt, cOf } = geom(b);
+      const sh = (p) => [p[0], p[1] + XW_LIFT];
+      const e1 = pt(0.16), e2 = pt(0.84);
+      poly(g, [sh(e1), sh(e2), sh(cOf(e2)), sh(cOf(e1))], "rgba(14,20,14,0.30)");
+    }
+    // pass A: fascia skirts and the concrete slab of every open arm
     for (const b of arms) {
       const { pt, cOf } = geom(b);
       const e1 = pt(D0), e2 = pt(D1), c1 = cOf(e1), c2 = cOf(e2);
-      g.strokeStyle = pierC; g.lineWidth = 2.2; g.lineCap = "butt";
-      for (const f of [0.28, 0.72]) {                 // two piers, deck edge -> ground
-        const p = pt(f);
-        g.beginPath(); g.moveTo(p[0], p[1] + 1.5); g.lineTo(p[0], p[1] + 1.5 + XW_LIFT); g.stroke();
-      }
       poly(g, [e1, c1, [c1[0], c1[1] + 2.5], [e1[0], e1[1] + 2.5]], skirtC); // slab fascia
       poly(g, [e2, c2, [c2[0], c2[1] + 2.5], [e2[0], e2[1] + 2.5]], skirtC);
       poly(g, [e1, e2, c2, c1], deckC);
     }
-    // junction pad keeps the interchange box solid concrete
+    // junction pad keeps the interchange box solid concrete — CLIPPED to the
+    // union of the arm slabs so its axis-aligned corners can never poke past
+    // the deck as floating grey triangles at elbows/dead ends (panel defect)
+    g.save(); g.beginPath();
+    for (const b of arms) {
+      const { pt, cOf } = geom(b);
+      const e1 = pt(D0), e2 = pt(D1), c1 = cOf(e1), c2 = cOf(e2);
+      g.moveTo(e1[0], e1[1]); g.lineTo(e2[0], e2[1]);
+      g.lineTo(c2[0], c2[1]); g.lineTo(c1[0], c1[1]); g.closePath();
+    }
+    g.clip();
     poly(g, [[C[0] - 7, C[1] - 3.5], [C[0] + 7, C[1] - 3.5],
              [C[0] + 7, C[1] + 3.5], [C[0] - 7, C[1] + 3.5]], deckC);
-    // pass B: carriageways, median, edge lines and guard rails per arm
+    g.restore();
+    // pass A2: support piers on each arm's screen-FRONT deck side (whichever
+    // side sits lower on screen), at mid-arm params clear of the shared edge:
+    // drawn after the slab, hanging from the fascia to the ground shadow, so
+    // painter order can never hide them behind the next tile's deck.
+    g.strokeStyle = pierC; g.lineWidth = 2.6; g.lineCap = "butt";
+    for (const b of arms) {
+      const { pt, cOf } = geom(b);
+      const sideY = (f) => { const e = pt(f), cc = cOf(e); return (e[1] + cc[1]) / 2; };
+      const f = sideY(0.14) > sideY(0.86) ? 0.14 : 0.86;   // front side
+      const e = pt(f), cc = cOf(e);
+      for (const u of [0.30, 0.62]) {                      // two piers per arm
+        const px = e[0] + (cc[0] - e[0]) * u, py = e[1] + (cc[1] - e[1]) * u;
+        g.beginPath(); g.moveTo(px, py + 2); g.lineTo(px, py + XW_LIFT + 1); g.stroke();
+      }
+    }
+    // pass B: carriageways, median, edge lines and guard rails per arm.
+    // Carriageways narrowed 0.22-0.46/0.54-0.78 -> 0.25-0.45/0.55-0.75 so the
+    // PALE slab genuinely frames the dark lanes (the stated value inversion
+    // vs SPR.road, which previously read as a dark ribbon with thin edges).
     for (const b of arms) {
       const { pt, cOf } = geom(b);
       const q = (f0, f1, col) => { const a = pt(f0), z = pt(f1); poly(g, [a, z, cOf(z), cOf(a)], col); };
-      q(0.22, 0.46, laneC); q(0.54, 0.78, laneC);     // two dark carriageways
+      q(0.25, 0.45, laneC); q(0.55, 0.75, laneC);     // two dark carriageways
       q(0.47, 0.53, medianC);                          // continuous jersey median
       g.strokeStyle = edgeC; g.lineWidth = 1.2; g.lineCap = "butt";
       for (const f of [0.20, 0.80]) {                  // solid yellow edge lines
@@ -2042,31 +2078,71 @@ function buildSprites() {
       g.lineCap = "butt";
     }
   });
-  // The RAMP is keyed by its XWAY-neighbor mask: a ground-level asphalt apron
-  // (roadSprite arm geometry) toward every non-xway arm, plus a rising wedge
-  // (ground edge -> 6px-raised edge, side skirts, 3 white chevrons) toward
-  // each xway arm; an isolated ramp (mask 0) draws the apron + a stub wedge N.
-  const rampSprite = (m) => mkSprite(1, 1, 12, (g, ox, oy) => {
+  // The RAMP keys on BOTH neighbor classes (panel fix — was xway-mask only,
+  // which sprouted dead-end asphalt stubs into open grass): index =
+  // wedgeMask | apronMask<<4. A rising wedge (ground edge -> 6px-raised edge,
+  // side skirts, 3 white chevrons) toward each true-XWAY arm; a ground-level
+  // asphalt apron (roadSprite arm geometry) ONLY toward arms that actually
+  // hold street-class tiles (ROAD/WIREROAD/RAMP). An isolated ramp draws the
+  // centre pad + a stub wedge toward the first apron-free arm. `snow` bakes
+  // the winter variant (snow banks on apron verges + wedge skirts) so the
+  // ramp finally participates in G12/G14 like every other road-class overlay.
+  const rampSprite = (wm, am, snow) => mkSprite(1, 1, 12, (g, ox, oy) => {
     const C = [ox, oy];                                // ground-level tile centre
     const asphalt = "#3e3f46", curb = "#93949c", deckC = "#6f727c",
-          skirtC = "#4c4f58", chevC = "#e6e7ec";
+          skirtC = "#4c4f58", chevC = "#e6e7ec", snowC = "#e8edf3";
     const A0 = 0.14, A1 = 0.86;
-    const wedge = m === 0 ? 1 : m;
-    for (let b = 0; b < 4; b++) {                      // ground apron arms
-      if (wedge & (1 << b)) continue;
+    let wedge = wm;
+    if (!wedge) {                                      // no xway yet: stub wedge
+      for (let b = 0; b < 4 && !wedge; b++) if (!(am & (1 << b))) wedge = 1 << b;
+      if (!wedge) wedge = 1;
+    }
+    const apG = (b) => {                               // ground-level arm geometry
       const [P0, P1] = EDGE[b];
       const mid = [(P0[0] + P1[0]) / 2, (P0[1] + P1[1]) / 2 + XW_LIFT + 6];
       const pt = (f) => [P0[0] + (P1[0] - P0[0]) * f, P0[1] + (P1[1] - P0[1]) * f + XW_LIFT + 6];
-      const e1 = pt(A0), e2 = pt(A1);
-      const c1 = [C[0] + e1[0] - mid[0], C[1] + e1[1] - mid[1]];
-      const c2 = [C[0] + e2[0] - mid[0], C[1] + e2[1] - mid[1]];
+      const cOf = (p) => [C[0] + p[0] - mid[0], C[1] + p[1] - mid[1]];
+      return { pt, cOf };
+    };
+    const apronArms = [];
+    for (let b = 0; b < 4; b++)
+      if (!(wedge & (1 << b)) && (am & (1 << b))) apronArms.push(b);
+    for (const b of apronArms) {                       // ground apron arms
+      const { pt, cOf } = apG(b);
+      const e1 = pt(A0), e2 = pt(A1), c1 = cOf(e1), c2 = cOf(e2);
       poly(g, [e1, e2, c2, c1], asphalt);
-      g.strokeStyle = curb; g.lineWidth = 1.2; g.lineCap = "butt";
+      if (snow) {                                      // winter: plowed banks on
+        g.strokeStyle = snowC; g.lineWidth = 2.6;      // both verges (M12 roads)
+        g.lineCap = "round";
+      } else {
+        g.strokeStyle = curb; g.lineWidth = 1.2; g.lineCap = "butt";
+      }
       g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
       g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
+      g.lineCap = "butt";
     }
+    // centre pad, CLIPPED to the union of apron quads + wedge plates + a small
+    // iso diamond, so its axis-aligned corners never escape the silhouette
+    g.save(); g.beginPath();
+    for (const b of apronArms) {
+      const { pt, cOf } = apG(b);
+      const e1 = pt(A0), e2 = pt(A1), c1 = cOf(e1), c2 = cOf(e2);
+      g.moveTo(e1[0], e1[1]); g.lineTo(e2[0], e2[1]);
+      g.lineTo(c2[0], c2[1]); g.lineTo(c1[0], c1[1]); g.closePath();
+    }
+    for (let b = 0; b < 4; b++) {
+      if (!(wedge & (1 << b))) continue;
+      const { pt, cOf } = apG(b);
+      const e1 = pt(0.10), e2 = pt(0.90), c1 = cOf(e1), c2 = cOf(e2);
+      g.moveTo(e1[0], e1[1]); g.lineTo(e2[0], e2[1]);
+      g.lineTo(c2[0], c2[1]); g.lineTo(c1[0], c1[1]); g.closePath();
+    }
+    g.moveTo(C[0] - 7, C[1]); g.lineTo(C[0], C[1] - 3.5);
+    g.lineTo(C[0] + 7, C[1]); g.lineTo(C[0], C[1] + 3.5); g.closePath();
+    g.clip();
     poly(g, [[C[0] - 7, C[1] - 3.5], [C[0] + 7, C[1] - 3.5],
              [C[0] + 7, C[1] + 3.5], [C[0] - 7, C[1] + 3.5]], asphalt);
+    g.restore();
     for (let b = 0; b < 4; b++) {                      // rising wedge arms
       if (!(wedge & (1 << b))) continue;
       const [P0, P1] = EDGE[b];
@@ -2079,6 +2155,13 @@ function buildSprites() {
       poly(g, [e1, [e1[0], e1[1] + XW_LIFT], c1], skirtC); // side skirts to ground
       poly(g, [e2, [e2[0], e2[1] + XW_LIFT], c2], skirtC);
       poly(g, [e1, e2, c2, c1], deckC);                    // the sloping deck
+      if (snow) {                                          // winter: snow piled
+        g.strokeStyle = snowC; g.lineWidth = 2.0;          // along both wedge
+        g.lineCap = "round";                               // side rails
+        g.beginPath(); g.moveTo(e1[0], e1[1]); g.lineTo(c1[0], c1[1]); g.stroke();
+        g.beginPath(); g.moveTo(e2[0], e2[1]); g.lineTo(c2[0], c2[1]); g.stroke();
+        g.lineCap = "butt";
+      }
       g.strokeStyle = chevC; g.lineWidth = 1.4; g.lineCap = "butt";
       for (const u of [0.30, 0.55, 0.80]) {                // 3 chevrons up the slope
         const p1 = [e1[0] + (c1[0] - e1[0]) * u, e1[1] + (c1[1] - e1[1]) * u];
@@ -2092,11 +2175,18 @@ function buildSprites() {
       }
     }
   });
-  SPR.xway = []; SPR.xwayWinter = []; SPR.ramp = [];
+  SPR.xway = []; SPR.xwayWinter = [];
   for (let m = 0; m < 16; m++) {
     SPR.xway.push(xwaySprite(m, false));
     SPR.xwayWinter.push(xwaySprite(m, true));
-    SPR.ramp.push(rampSprite(m));
+  }
+  // ramp: 256 (wedgeMask | apronMask<<4) combos x 2 seasons — tiny flat
+  // bakes, still ZERO RNG and still appended after every existing bake, so
+  // the C6 sprite-manifest identity holds unchanged.
+  SPR.ramp = []; SPR.rampWinter = [];
+  for (let k = 0; k < 256; k++) {
+    SPR.ramp.push(rampSprite(k & 15, k >> 4, false));
+    SPR.rampWinter.push(rampSprite(k & 15, k >> 4, true));
   }
 
   // ---- undeveloped zone markers ----
@@ -3619,7 +3709,12 @@ function spriteFor(city, i) {
     // correctness exactly as roads get it (M32a).
     case OV.XWAY:
       return (season === "winter" ? SPR.xwayWinter : SPR.xway)[rot4(xwayMask(city, i), cam.r)];
-    case OV.RAMP:  return SPR.ramp[rot4(rampMask(city, i), cam.r)];
+    // GP4a fix: the ramp keys on BOTH neighbor classes (wedge toward true
+    // XWAY, apron only toward real street tiles) and gets a winter variant
+    // like every other road-class overlay (G12/G14).
+    case OV.RAMP:
+      return (season === "winter" ? SPR.rampWinter : SPR.ramp)[
+        rot4(rampMask(city, i), cam.r) | (rot4(rampApronMask(city, i), cam.r) << 4)];
     case OV.PIPE:  return SPR.pipe[rot4(pipeMask(city, i), cam.r)];
     case OV.WATERTOWER: return SPR.watertower;
     case OV.PUMP:  return SPR.pump;
@@ -3660,8 +3755,16 @@ function spriteFor(city, i) {
 function roadMask(city, i) {
   const x = i % MAP, y = (i / MAP) | 0;
   let m = 0;
-  const road = (X, Y) => city.inMap(X, Y) &&
-    (city.over[city.idx(X, Y)] === OV.ROAD || city.over[city.idx(X, Y)] === OV.WIREROAD); // M26: road connects through a crossing
+  // M26: road connects through a crossing. GP4a fix: it ALSO draws its
+  // junction arm toward a RAMP's ground apron (the exact WIREROAD lesson —
+  // without this the road's curb + centre dashes ran unbroken past every
+  // interchange and a working ramp looked disconnected). Render-only; with
+  // zero ramps on the map the mask is byte-identical to shipped output.
+  const road = (X, Y) => {
+    if (!city.inMap(X, Y)) return false;
+    const t = city.over[city.idx(X, Y)];
+    return t === OV.ROAD || t === OV.WIREROAD || t === OV.RAMP;
+  };
   if (road(x, y - 1)) m |= 1;
   if (road(x + 1, y)) m |= 2;
   if (road(x, y + 1)) m |= 4;
@@ -3688,8 +3791,7 @@ function xwayMask(city, i) {
   return m;
 }
 
-// GP4a: ramp wedge mask — ONLY true XWAY neighbors raise a bit; every other
-// arm draws the ground-level apron toward the streets.
+// GP4a: ramp wedge mask — ONLY true XWAY neighbors raise a bit.
 function rampMask(city, i) {
   const x = i % MAP, y = (i / MAP) | 0;
   let m = 0;
@@ -3698,6 +3800,25 @@ function rampMask(city, i) {
   if (xw(x + 1, y)) m |= 2;
   if (xw(x, y + 1)) m |= 4;
   if (xw(x - 1, y)) m |= 8;
+  return m;
+}
+
+// GP4a fix: ramp apron mask — street-class neighbors (ROAD/WIREROAD/RAMP)
+// the ramp actually serves. Aprons draw ONLY toward these arms, never into
+// open grass (panel defect: unconditional aprons sprouted dead-end stubs).
+// Pure logical-neighbor read, never cam.r (M32a).
+function rampApronMask(city, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  let m = 0;
+  const rd = (X, Y) => {
+    if (!city.inMap(X, Y)) return false;
+    const t = city.over[city.idx(X, Y)];
+    return t === OV.ROAD || t === OV.WIREROAD || t === OV.RAMP;
+  };
+  if (rd(x, y - 1)) m |= 1;
+  if (rd(x + 1, y)) m |= 2;
+  if (rd(x, y + 1)) m |= 4;
+  if (rd(x - 1, y)) m |= 8;
   return m;
 }
 

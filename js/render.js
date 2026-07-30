@@ -1255,7 +1255,17 @@ function updateCars(city, ns, speed = 1) {
     }
     c.x = c.fx + (c.tx - c.fx) * c.p;
     c.y = c.fy + (c.ty - c.fy) * c.p;
-    const wx = worldX(c.x, c.y), wy = worldY(c.x, c.y);
+    // GP4a fix: cars on the elevated deck ride at DECK height — the xway
+    // sprite is baked lifted 6px (XW_LIFT, sprites.js) but cars were drawn at
+    // ground-plane coords, straddling the guardrail one body-height low
+    // (panel defect). Lift interpolates from-tile -> to-tile (ramp = half
+    // height) so a car climbs the ramp smoothly. Render-only aliveness.
+    const lift = (X, Y) => {
+      const o = city.over[Y * MAP + X];
+      return o === OV.XWAY ? 6 : o === OV.RAMP ? 3 : 0;
+    };
+    const wx = worldX(c.x, c.y),
+          wy = worldY(c.x, c.y) - (lift(c.fx, c.fy) * (1 - c.p) + lift(c.tx, c.ty) * c.p);
     // cull off-screen cars: the pool is map-sized (G16) but only visible cars
     // pay draw + night-light cost, so a busy 128 map stays cheap
     const sx = (wx - cam.x) * cam.z + VW / 2;

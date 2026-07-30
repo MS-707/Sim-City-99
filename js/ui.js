@@ -92,7 +92,7 @@ const TOOLS = [
   // Keys , and . are free; cost chips, padlocks and the shortcut overlay all
   // derive from TOOLS/COST/TOOL_TIER automatically.
   { id: "xway", name: "Xpresswy", key: ",", icon: null, spr: () => SPR.xway[10], minTier: TOOL_TIER.xway },
-  { id: "ramp", name: "Ramp",     key: ".", icon: null, spr: () => SPR.ramp[2],  minTier: TOOL_TIER.ramp },
+  { id: "ramp", name: "Ramp",     key: ".", icon: null, spr: () => SPR.ramp[2 | (8 << 4)],  minTier: TOOL_TIER.ramp }, // wedge E + apron W (ramp keys wedgeMask | apronMask<<4)
   // milestone rewards — locked until the city earns its rank
   { id: "mayor",    name: "Mayor Hse", key: "m", icon: null, spr: () => SPR.mayor,
     minTier: TOOL_TIER.mayor },

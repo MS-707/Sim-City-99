@@ -71,6 +71,142 @@ function buildCarSprites() {
   carSprites.y = CAR_COLS.map((c) => bake(c, "y"));
 }
 
+/* ---------------- GP4b: phase-driven metro trains ----------------
+   Pure presentation, the cars/chopper pool policy: state lives HERE, is
+   NEVER serialized, and resets on city identity change. The MODEL is fully
+   deterministic and world-space — ZERO Math.random, ZERO city.rng/rngHash,
+   ZERO city writes, and it NEVER reads cam (cam.r applies only at draw, the
+   M32a discipline) — so two same-seed runs are pixel-identical and the sim
+   stays byte-identical to a trainless build.
+   Per TICK (memo key terrRev|devRev|tickCount — one O(n) ascending scan, a
+   strictly cheaper class than updateCars' per-FRAME road scan): group rail
+   tiles by city.railNet id and, for each net with >= 2 live stations, build
+   a CLOSED EULER TOUR over the net's spanning tree — DFS from the net's
+   LOWEST tile index (recomputeRail's ascending discipline), neighbors probed
+   in fixed N,E,S,W order (railMask bit order), pushing the tile on entry and
+   again after each child returns — out-and-back, so consecutive tour entries
+   are always 4-adjacent and branches/dead-ends are handled with no RNG.
+   riders = Σ railCov over the net's live station tiles (deterministic;
+   reflects station count and transit funding), scaling speed and consist
+   count per line.
+   Per FRAME: trainClock advances by uiState.speed (speed 0 = frozen but
+   still drawn — the updateCars pause idiom) and every unit resolves to a
+   fractional world position bucketed by OWNER TILE into trainQ; the painter
+   loop's RL.TRACK/RL.STATION slots draw their own tile's units, so occlusion
+   (a building on a nearer s = u+v diagonal paints over the train) holds by
+   construction. No nightAdd/nightPunch/carLightQ entries — the G1/G2 night
+   layer stays byte-identical. */
+const TRAIN_CARS = 3;        // units per consist: loco + 2 boxcars
+const TRAIN_GAP = 0.62;      // spacing between consecutive units, tiles
+const TRAIN_SPD0 = 0.035;    // base line speed, tiles/frame
+const TRAIN_EXTRA = 900;     // riders threshold: a second train joins the line
+const TRAIN_EXTRA2 = 2400;   // riders threshold: a third train
+let trainClock = 0;                                     // Σ speed, frames
+const trainMemo = { city: null, key: "", lines: [] };   // per-tick tour memo
+const trainQ = new Map();                               // ownerTile -> units, per frame
+let trainStats = { lines: 0, trains: 0, perLine: [] };  // aliveness slot (O(1) reads)
+
+function computeTrains(city, speed) {
+  const key = `${city.terrRev}|${city.devRev}|${city.tickCount}`;
+  if (trainMemo.city !== city || trainMemo.key !== key) {
+    if (trainMemo.city !== city) trainClock = 0; // newCity/loadCity: pool reset
+    trainMemo.city = city; trainMemo.key = key;
+    const lines = trainMemo.lines;
+    lines.length = 0;
+    const n = city.rail.length;
+    // one ascending scan: per-net lowest tile, live-station count, ridership
+    const low = [], live = [], riders = [];
+    for (let i = 0; i < n; i++) {
+      const net = city.railNet[i];
+      if (net < 0) continue;
+      if (low[net] === undefined) { low[net] = i; live[net] = 0; riders[net] = 0; }
+      if (city.rail[i] === RL.STATION && city.stationLive[i]) {
+        live[net]++; riders[net] += city.railCov[i];
+      }
+    }
+    const seen = new Uint8Array(n); // rebuild-local; every rail tile is in one net
+    for (let net = 0; net < low.length; net++) {
+      if (low[net] === undefined || live[net] < 2) continue;
+      // closed Euler tour: iterative DFS (explicit stack — a 128-map line can
+      // run thousands of tiles), tile pushed on entry and after each child
+      const tour = [low[net]];
+      const stack = [low[net]], cur = [0];
+      seen[low[net]] = 1;
+      while (stack.length) {
+        const c = stack[stack.length - 1];
+        const k = cur[cur.length - 1]++;
+        if (k >= 4) {
+          stack.pop(); cur.pop();
+          if (stack.length) tour.push(stack[stack.length - 1]);
+          continue;
+        }
+        const x = c % MAP, y = (c / MAP) | 0;
+        const X = k === 1 ? x + 1 : k === 3 ? x - 1 : x;  // N,E,S,W probe order
+        const Y = k === 0 ? y - 1 : k === 2 ? y + 1 : y;
+        if (X < 0 || Y < 0 || X >= MAP || Y >= MAP) continue;
+        const j = Y * MAP + X;
+        if (seen[j] || city.rail[j] === RL.NONE) continue;
+        seen[j] = 1; tour.push(j);
+        stack.push(j); cur.push(0);
+      }
+      tour.pop(); // drop the final root duplicate — the wrap seg closes the loop
+      if (tour.length < 2) continue;
+      const rid = riders[net];
+      lines.push({
+        tour, tourLen: tour.length, riders: rid, netIdx: net,
+        // strictly increasing in riders up to the 1200 cap
+        spd: TRAIN_SPD0 * (0.75 + 0.5 * Math.min(1, rid / 1200)),
+        // 1..3 consists by ridership, never more than the tour can space out
+        nTrains: Math.min(1 + (rid >= TRAIN_EXTRA ? 1 : 0) + (rid >= TRAIN_EXTRA2 ? 1 : 0),
+                          Math.max(1, (tour.length / 8) | 0)),
+      });
+    }
+    trainStats.lines = lines.length;
+    trainStats.perLine = lines.map((l) => ({ riders: l.riders, spd: l.spd, nTrains: l.nTrains }));
+  }
+  // per frame: resolve every unit to a world position, bucketed by owner tile
+  trainClock += speed;
+  trainQ.clear();
+  let heads = 0;
+  for (const l of trainMemo.lines) {
+    for (let t = 0; t < l.nTrains; t++) {
+      const headPhase = (trainClock * l.spd + t * l.tourLen / l.nTrains) % l.tourLen;
+      for (let u = 0; u < TRAIN_CARS; u++) {
+        let ph = (headPhase - u * TRAIN_GAP) % l.tourLen;
+        if (ph < 0) ph += l.tourLen;
+        const seg = ph | 0, f = ph - seg;
+        const a = l.tour[seg], b = l.tour[(seg + 1) % l.tourLen];
+        if (city.rail[a] === RL.SUB && city.rail[b] === RL.SUB) continue; // underground
+        const xa = a % MAP, ya = (a / MAP) | 0, xb = b % MAP, yb = (b / MAP) | 0;
+        const owner = f < 0.5 ? a : b; // the tile whose painter slot draws it
+        let q = trainQ.get(owner);
+        if (!q) { q = []; trainQ.set(owner, q); }
+        q.push({ x: xa + (xb - xa) * f, y: ya + (yb - ya) * f,
+                 dx: xb - xa, dy: yb - ya, kind: u ? 1 : 0 });
+        if (u === 0) heads++;
+      }
+    }
+  }
+  trainStats.trains = heads;
+}
+
+// draw the units owned by tile i, inside i's OWN painter slot (never
+// post-loop like cars — that is what makes occlusion hold by construction).
+// Fractional worldX/worldY projection (rot() is linear — the GQ4 street-tree
+// / GQ9 bridge idiom) makes all 4 rotations free; the body-axis pick rotates
+// the travel delta into view space exactly like the M32a car idiom.
+function drawTrainsAt(city, i) {
+  const q = trainQ.get(i);
+  if (!q) return;
+  for (let k = 0; k < q.length; k++) {
+    const u = q[k];
+    const wx = worldX(u.x, u.y), wy = worldY(u.x, u.y);
+    const r0 = rot(0, 0, cam.r), r1 = rot(u.dx, u.dy, cam.r); // linear part only
+    const spr = SPR.train[r1.u - r0.u !== 0 ? "x" : "y"][u.kind];
+    ctx.drawImage(spr.c, wx - spr.ox, wy - spr.oy);
+  }
+}
+
 function renderInit(canvas) {
   cvs = canvas;
   ctx = canvas.getContext("2d");
@@ -701,6 +837,13 @@ function renderFrame(city, uiState, clearBG) {
   // in buildTerrainLayer keep the shimmer lively between rebuilds
   const waterFrame = (frame / 32 | 0) % WATER_FRAMES;
 
+  // GP4b: sim speed hoisted once — computeTrains runs BEFORE the painter loop
+  // so this frame's consists are already bucketed when the RL.TRACK/RL.STATION
+  // tile slots draw; updateCars keeps its existing post-loop call site and
+  // shares the hoisted value.
+  const carSpeed = (uiState && uiState.speed != null) ? uiState.speed : 1;
+  computeTrains(city, carSpeed);
+
   // flat terrain: one cached blit unless the camera / water / terrain moved —
   // or the season changed (M12): the palette swap costs exactly one rebuild
   const tKey = `${cam.x},${cam.y},${cam.z},${cam.r},${cvs.width},${cvs.height},${RS},` +
@@ -962,6 +1105,10 @@ function renderFrame(city, uiState, clearBG) {
         if (railBridge) drawBridgeUnder(railBridge, wx, wy);
         const rs = SPR.rail[rot4(railMask(city, i), cam.r)];
         ctx.drawImage(rs.c, wx - rs.ox, wy - rs.oy);
+        // GP4b: the consist rides the deck — drawn after the rail sprite and
+        // BEFORE drawBridgeOver, so bridge cables/towers paint over the train
+        // (bridgeRun memo consumed read-only above, exactly as-is)
+        drawTrainsAt(city, i);
         if (railBridge) drawBridgeOver(railBridge);
       } else if (rl === RL.STATION) {
         const ss = SPR.station;
@@ -973,6 +1120,9 @@ function renderFrame(city, uiState, clearBG) {
         // no-power bolt on an inert station (unpowered or unlinked)
         if (blink && !city.stationLive[i])
           ctx.drawImage(SPR.zap.c, wx - SPR.zap.ox, wy - SPR.zap.oy - 4);
+        // GP4b: the train pulls across the depot's front apron at the tile's
+        // own painter depth (after the station sprite + night/zap handling)
+        drawTrainsAt(city, i);
       } else if (rl === RL.SUB && typeof UI !== "undefined" && UI.mapMode === "transit") {
         const vs = SPR.subwayVent;
         ctx.drawImage(vs.c, wx - vs.ox, wy - vs.oy);
@@ -1008,8 +1158,7 @@ function renderFrame(city, uiState, clearBG) {
     nightLayer.key = nKey;
   }
 
-  const carSpeed = (uiState && uiState.speed != null) ? uiState.speed : 1;
-  updateCars(city, ns, carSpeed);
+  updateCars(city, ns, carSpeed); // carSpeed hoisted pre-loop (GP4b)
   updateSmoke(city);
   drawDisaster(city);
   updateChopper(city); // news helicopter (M18) — O(1), presentation-only
@@ -1570,13 +1719,15 @@ function updateChopper(city) {
 
 // GQ8: aliveness instrumentation — an O(1) snapshot of every ambient-motion
 // pool for the regression harness (traffic, smoke, night car lights, the
-// chopper, animated water). Globally reachable as a bare name; never called
-// per frame by the renderer itself. (No animated train exists yet — the rail
-// bakes are static track — so there is deliberately no train slot to report.)
+// chopper, animated water — and, since GP4b, the metro trains). Globally
+// reachable as a bare name; never called per frame by the renderer itself.
+// trainLines/trains read the trainStats snapshot computeTrains maintains:
+// lines with >= 2 live stations, and consists queued last frame.
 function alivenessStats() {
   return { cars: cars.length, carCap: carCap(), smoke: smoke.length,
            smokeMax: SMOKE_MAX, carLights: carLightQ.length / 4,
-           chopper: !!chopper, waterFrames: WATER_FRAMES };
+           chopper: !!chopper, waterFrames: WATER_FRAMES,
+           trainLines: trainStats.lines, trains: trainStats.trains };
 }
 
 function drawDisaster(city) {

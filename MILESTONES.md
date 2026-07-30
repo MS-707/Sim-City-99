@@ -9,6 +9,18 @@ Queue policy: keep at least 5 open improvements at all times.
 - **GP4b — The First Moving Train** (presentation half of GP4): trains run
   the rail plane between live stations, deterministic phase-driven, zero
   sim writes — closes the aliveness guard's N/A train slot.
+  *Implement pass 2026-07-30 (under verification, NOT shipped):* `SPR.train`
+  consist bake appended after `bridgeTower` (zero RNG-stream calls, no
+  night layer); `computeTrains` builds a closed Euler tour per ≥2-live-
+  station `railNet` once per tick (memo `terrRev|devRev|tickCount`), phase
+  advances by `uiState.speed`, units bucket by owner tile and draw inside
+  the tile's own painter slot (TRACK before `drawBridgeOver`, STATION after
+  sprite/zap) so occlusion holds by construction; speed & consist count
+  scale with Σ`railCov` ridership; `alivenessStats` gains
+  `trainLines`/`trains`. Local checks vs a dc7d369 worktree: moving train
+  at all 4 rotations, RNG count baseline-equal + throwing-probe clean,
+  no-rail frames & sprite manifest byte-identical, frame time 0.96×,
+  sim.js untouched, zero console errors.
 
 ## Open
 

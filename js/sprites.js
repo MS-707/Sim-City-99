@@ -3662,6 +3662,62 @@ function buildSprites() {
     }
     return { c, ox, oy };
   });
+
+  /* ---- GP4b: the metro consist — loco + boxcar, one bake per travel axis ----
+     Appended at the very END of buildSprites, after SPR.bridgeTower, with
+     ZERO calls to R()/ART_RNG/any stream (the roadSprite/bridgeTower append
+     contract) so every prior bake's draw stream stays byte-identical.
+     Construction is the buildCarSprites iso-quad recipe (render.js): an iso
+     ground-plane quad with half-length hl along the travel tile axis and
+     half-width hw across it, raised body faces stacked by elevation, plus
+     the same ground-shadow quad cars use. Anchored at the unit's ground
+     center; render.js (computeTrains/drawTrainsAt) drives the position per
+     frame, so the bake itself is static art. Deliberately NO withNight —
+     trains contribute NOTHING to the G1/G2 night layer.
+     SPR.train[axis][kind]: axis "x"/"y" = travel tile axis, kind 0 = loco
+     (graphite, warning-yellow nose stripe on the leading end, raised cab
+     with dark glass), kind 1 = boxcar (slab body, pale roof stripe, 3 dark
+     window ticks on the screen-front face). */
+  SPR.train = (() => {
+    const OX = 20, OY = 16, W = 40, H = 26;   // anchor = ground center
+    const bake = (axis, kind) => {
+      const c = document.createElement("canvas"); c.width = W; c.height = H;
+      const g = c.getContext("2d");
+      const hl = kind ? 0.36 : 0.40, hw = 0.13; // loco runs a touch longer
+      // iso quad: half-length hl*sl along the travel axis, half-width hw*sw
+      // across it, slid `off` tiles toward the +travel (leading) end
+      const quad = (elev, sl, sw, off = 0) => {
+        const L = hl * sl, Wd = hw * sw;
+        const pts = axis === "x"
+          ? [[off + L, Wd], [off + L, -Wd], [off - L, -Wd], [off - L, Wd]]
+          : [[Wd, off + L], [-Wd, off + L], [-Wd, off - L], [Wd, off - L]];
+        g.beginPath();
+        for (let k = 0; k < 4; k++) {
+          const dx = pts[k][0], dy = pts[k][1];
+          const X = OX + (dx - dy) * HW, Y = OY + (dx + dy) * HH - elev;
+          k ? g.lineTo(X, Y) : g.moveTo(X, Y);
+        }
+        g.closePath();
+      };
+      quad(0, 1.15, 1.15); g.fillStyle = "rgba(8,8,14,0.5)"; g.fill(); // ground shadow (car idiom)
+      if (kind) {
+        quad(4, 1, 1); g.fillStyle = "#8b93a2"; g.fill();          // boxcar slab
+        quad(6, 0.9, 0.5); g.fillStyle = "#c9ced6"; g.fill();      // roof stripe
+        g.fillStyle = "#2c323c";                                   // 3 window ticks
+        for (const t of [-0.18, 0, 0.18]) {
+          const dx = axis === "x" ? t : hw, dy = axis === "x" ? hw : t;
+          g.fillRect(OX + (dx - dy) * HW - 1, OY + (dx + dy) * HH - 5.5, 2, 2);
+        }
+      } else {
+        quad(4, 1, 1); g.fillStyle = "#3a4150"; g.fill();          // graphite body
+        quad(4.5, 0.16, 1, 0.33); g.fillStyle = "#f2c53a"; g.fill(); // nose stripe, leading end
+        quad(6.5, 0.42, 0.85, -0.12); g.fillStyle = "#4a5262"; g.fill(); // raised cab block
+        quad(7, 0.24, 0.5, -0.12); g.fillStyle = "#202730"; g.fill();    // cab glass
+      }
+      return { c, ox: OX, oy: OY };
+    };
+    return { x: [bake("x", 0), bake("x", 1)], y: [bake("y", 0), bake("y", 1)] };
+  })();
 }
 
 // sprite lookup for an overlay tile (returns null when tile isn't the drawn anchor)

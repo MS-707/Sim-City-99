@@ -1917,13 +1917,14 @@ const SVC_TOOL_TYPE = { police: OV.POLICE, firesta: OV.FIRESTA,
 const SVC_GHOST_COL = { police: "#7ddcff", fire: "#ffd07a",   // = ramp top stops
   edu: "#288cfa", health: "#fc8c32" };                        // = svc legend pair
 let svcGhostCache = { city: null, tool: "", x: -1, y: -1, f: -1, tick: -1,
-  tiles: null, rim: null, anchors: null };
+  tiles: null, rim: null, anchors: null,
+  camR: -1, camZ: -1, lx: 0, ly: 0, lw: 0, lh: 0, has: false };
+let svcGhostLayer = null; // one reused offscreen canvas — rebaked event-rate
 
-function ghostDiamond(wx, wy) {
-  ctx.beginPath();
-  ctx.moveTo(wx, wy - HH); ctx.lineTo(wx + HW, wy);
-  ctx.lineTo(wx, wy + HH); ctx.lineTo(wx - HW, wy);
-  ctx.closePath();
+function ghostDiamond(path, wx, wy) {
+  path.moveTo(wx, wy - HH); path.lineTo(wx + HW, wy);
+  path.lineTo(wx, wy + HH); path.lineTo(wx - HW, wy);
+  path.closePath();
 }
 
 function drawServiceGhost(city, tool, x, y) {
@@ -1949,38 +1950,86 @@ function drawServiceGhost(city, tool, x, y) {
     const anchors = [];
     for (let i = 0; i < city.over.length; i++)
       if (city.over[i] === type && city.anc[i] === i) anchors.push(i);
-    c = svcGhostCache = { city, tool, x, y, f, tick: city.tickCount, tiles, rim, anchors };
+    c = svcGhostCache = { city, tool, x, y, f, tick: city.tickCount,
+      tiles, rim, anchors, camR: -1, camZ: -1, lx: 0, ly: 0, lw: 0, lh: 0, has: false };
   }
-  const colr = SVC_GHOST_COL[def.dept];
-  // (a) dim the existing same-type stations, full footprint, rotation-aware
-  ctx.fillStyle = "rgba(10,12,20,0.45)";
-  const s = sizeOf(type);
-  for (const a of c.anchors) {
-    const ax = a % MAP, ay = (a / MAP) | 0;
-    for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
-      ghostDiamond(worldX(ax + dx, ay + dy), worldY(ax + dx, ay + dy));
-      ctx.fill();
+  if (c.camR !== cam.r || c.camZ !== cam.z || c.rs !== RS) {
+    // bake the ~R^2 diamonds into ONE offscreen layer per memo miss /
+    // rotation / zoom (all event-rate), so a static hover pays a single
+    // drawImage per frame — per-tile (and even batched-Path2D) rasterizing
+    // of ~300 alpha diamonds every frame was a measured 1.4-1.8x whole-frame
+    // regression. World coords depend only on cam.r; pan rides the ctx
+    // transform; the layer is baked at cam.z*RS device scale so the blit is
+    // 1:1-crisp. source-over is associative, so pre-compositing the three
+    // passes into a transparent layer blends pixel-identically.
+    const s = sizeOf(type);
+    // (a) existing same-type stations to dim, full footprint, rotation-aware
+    const aP = new Path2D();
+    let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+    const grow = (wx, wy) => {
+      if (wx - HW < mnX) mnX = wx - HW; if (wx + HW > mxX) mxX = wx + HW;
+      if (wy - HH < mnY) mnY = wy - HH; if (wy + HH > mxY) mxY = wy + HH;
+    };
+    for (const a of c.anchors) {
+      const ax = a % MAP, ay = (a / MAP) | 0;
+      for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
+        const wx = worldX(ax + dx, ay + dy), wy = worldY(ax + dx, ay + dy);
+        ghostDiamond(aP, wx, wy); grow(wx, wy);
+      }
+    }
+    // (b) the ghost fill — exactly the tiles the stamp would write nonzero
+    // to (tile diamonds never overlap, so one nonzero-winding fill of the
+    // batched path covers the identical pixels). At funding 0 the set is
+    // empty: only the footprint + dimmed stations render — an honest
+    // "this stamps nothing" preview.
+    const fP = new Path2D();
+    for (const j of c.tiles) {
+      const wx = worldX(j % MAP, (j / MAP) | 0), wy = worldY(j % MAP, (j / MAP) | 0);
+      ghostDiamond(fP, wx, wy); grow(wx, wy);
+    }
+    // (c) the honest rim (per-subpath strokes are independent — one stroke
+    // of the batch draws the same outlines as stroking each diamond)
+    const rP = new Path2D();
+    for (const j of c.rim)
+      ghostDiamond(rP, worldX(j % MAP, (j / MAP) | 0), worldY(j % MAP, (j / MAP) | 0));
+    c.camR = cam.r; c.camZ = cam.z; c.rs = RS;
+    c.has = mnX < Infinity;
+    if (c.has) {
+      const pad = 2 / cam.z; // covers the 1.5/z rim stroke overhang + AA
+      c.lx = mnX - pad; c.ly = mnY - pad;
+      c.lw = mxX - mnX + 2 * pad; c.lh = mxY - mnY + 2 * pad;
+      const sc = cam.z * RS;
+      const pw = Math.max(1, Math.ceil(c.lw * sc)), ph = Math.max(1, Math.ceil(c.lh * sc));
+      if (!svcGhostLayer) svcGhostLayer = document.createElement("canvas");
+      if (svcGhostLayer.width !== pw) svcGhostLayer.width = pw;
+      if (svcGhostLayer.height !== ph) svcGhostLayer.height = ph;
+      const g = svcGhostLayer.getContext("2d");
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, pw, ph);
+      g.setTransform(sc, 0, 0, sc, -c.lx * sc, -c.ly * sc);
+      const colr = SVC_GHOST_COL[def.dept];
+      g.fillStyle = "rgba(10,12,20,0.45)";
+      g.fill(aP);
+      g.fillStyle = colr;
+      g.globalAlpha = 0.10;
+      g.fill(fP);
+      g.strokeStyle = colr;
+      g.globalAlpha = 0.8;
+      g.lineWidth = 1.5 / cam.z;
+      g.stroke(rP);
+      g.globalAlpha = 1;
     }
   }
-  // (b) the ghost fill — exactly the tiles the stamp would write nonzero to.
-  // At funding 0 the set is empty: only the footprint + dimmed stations
-  // render — an honest "this stamps nothing" preview.
-  ctx.fillStyle = colr;
-  ctx.globalAlpha = 0.10;
-  for (const j of c.tiles) {
-    ghostDiamond(worldX(j % MAP, (j / MAP) | 0), worldY(j % MAP, (j / MAP) | 0));
-    ctx.fill();
+  if (c.has) {
+    // exact 1:1 device-scale blit (dest = source px / bake scale) with
+    // smoothing off: nearest sampling is identical at 1:1 and markedly
+    // cheaper than bilinear on the software rasterizer
+    const inv = 1 / (c.camZ * c.rs), sm = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(svcGhostLayer, 0, 0, svcGhostLayer.width, svcGhostLayer.height,
+      c.lx, c.ly, svcGhostLayer.width * inv, svcGhostLayer.height * inv);
+    ctx.imageSmoothingEnabled = sm;
   }
-  ctx.globalAlpha = 1;
-  // (c) the honest rim
-  ctx.strokeStyle = colr;
-  ctx.globalAlpha = 0.8;
-  ctx.lineWidth = 1.5 / cam.z;
-  for (const j of c.rim) {
-    ghostDiamond(worldX(j % MAP, (j / MAP) | 0), worldY(j % MAP, (j / MAP) | 0));
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
 }
 
 function drawCursor(city, uiState) {

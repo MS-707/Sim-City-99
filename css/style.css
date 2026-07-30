@@ -164,6 +164,12 @@ input[type=range]::-moz-range-thumb {
   padding: 4px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto;
 }
 .fs95 { border: 1px solid #808080; box-shadow: 1px 1px 0 #fff inset; padding: 5px; }
+/* GP5a fix: Chromium gives fieldsets min-inline-size:min-content, so a wide
+   grandchild (the 7-column mode grid, min-content 244px) blows the Map
+   fieldset past the 184px sidepanel, stretches the minimap and pushes the
+   last button columns off-screen instead of engaging #mapmodes overflow-x.
+   Zeroing the intrinsic floor keeps every sidepanel fieldset caged. */
+#sidepanel .fs95 { min-width: 0; min-inline-size: 0; }
 .fs95 legend { font-size: 11px; padding: 0 4px; }
 
 #rci { display: flex; justify-content: space-around; height: 78px; }
@@ -214,6 +220,7 @@ input[type=range]::-moz-range-thumb {
 #mapmodes {
   display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto);
   grid-auto-columns: minmax(34px, 1fr); gap: 1px; margin-top: 3px;
+  width: 160px; /* hard cap = minimap width: the strip scrolls, never grows */
   overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin;
 }
 #mapmodes .mm { padding: 1px 0; min-width: 0; }

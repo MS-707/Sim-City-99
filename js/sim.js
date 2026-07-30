@@ -1648,7 +1648,11 @@ const APPROVAL_TERMS = Object.freeze([
 
   { id: "disaster", label: "The city is under siege", w: 2,
     pen: (c) => c.disaster ? 1 : 0, mode: "all", dlg: null,
-    focus: (c) => c.disaster ? { x: c.disaster.x, y: c.disaster.y } : null,
+    // The tornado/ufo/monster kinds carry FRACTIONAL x/y (they drift a
+    // sub-tile step per tick), so the focus is floored to the tile the head
+    // is standing on — every other row hands back a tile index and the
+    // camera jump + every test compare tiles.
+    focus: (c) => c.disaster ? { x: c.disaster.x | 0, y: c.disaster.y | 0 } : null,
     blurb: (c) => c.disaster
       ? `A ${c.disaster.kind} is loose in the city right now. Everything else can wait.`
       : `No disaster is in progress.` },

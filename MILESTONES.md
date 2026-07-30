@@ -6,9 +6,47 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- **GP6 — Citizen Opinion Poll**: the headline "how am I doing" number stops
-  being a tax readout in costume and becomes a ranked, clickable to-do list
-  pointing at the city's actual worst block.
+- **GP6 — Citizen Opinion Poll** *(gameplay roadmap 10/14, implemented
+  2026-07-30 — LIVE in the tree, verify + panel pass still open, so NOT yet
+  marked done)*: the headline "how am I doing" number stops being a tax
+  readout in costume. The cosmetic `70 - taxRate*2.4 + (demand.r>0?10:-8)`
+  is **gone**; approval is now computed by the sim from live state — one
+  frozen table, `APPROVAL_TERMS`, of **15 weighted grievances whose weights
+  sum to exactly 100** (pollution, power, congestion 12 each; tax 10; police
+  and fire coverage 9 each; unemployment and crime 8; commute 5; water 4;
+  schools and clinics 3; rubble and disaster 2; treasury 1), so
+  `target = 100 - Σ w·p` is an exact percentage with no normalisation fudge.
+  The published number is a **mood**: a 1/4-rate EMA of that target, moved
+  once per month rollover, path-dependent by construction — which is exactly
+  why the carry, the two streaks and the recall latch all serialize.
+  The Vitals approval cell is now a button into a new **City Survey**
+  dialog: headline %, a mood band, and the **top 5 problems ranked by
+  weighted severity**, each with a severity bar, a "% of citizens name this"
+  figure, a plain-language blurb carrying the proving number, and a **Show
+  me** button that switches the minimap to that grievance's documented mode
+  and swings the camera onto its worst cluster (continuous rows jump to the
+  plane's argmax; indicator rows to the 5×5 window with the greatest sum —
+  both pure, deterministic and rotation-invariant). The two aspatial rows
+  (tax rate, treasury) open the budget instead, because a tax RATE has no
+  argmax tile. The whole O(MAP²) census runs at rollover and at dialog-open
+  **only** — `refreshHUD` is a pure read of the serialized scalar.
+  Sustained collapse (under 25% for six straight months) files a
+  **recall petition** front page, exactly once per city, latched on a
+  serialized flag so a save/load cannot republish it. And the ladder finally
+  grows a rung above Metropolis: **Megalopolis**, gated on 12,000 residents
+  **and** approval held at or above 65% for 24 straight months **and** a
+  city that either moves (avg commute ≤ 12) or breathes (smog ≤ 55).
+  `tierForPop` skips every gated row, so the pop-only ladder is unchanged
+  for tiers 0–4 and 12,000 residents alone can never buy the rung; the
+  existing `nt > tier` ratchet keeps it monotonic once earned.
+  **Approval gates nothing** — no demand term, no growth fit, no gate table
+  reads it (charging crime, pollution, tax and coverage twice would break the
+  causal chain this milestone exists to make legible; GP8 owns the riot
+  coupling). Zero RNG on the whole path. Save v17: four scalars appended
+  after `eduLevel` plus the `approv` history series, with `normaliseHistory`
+  **and** its second copy in `collectBudget`'s 240-cap trim loop both
+  extended; a v16 save loads with approval seeded from its first computed
+  target and the series recording forward.
 
 ## Open
 

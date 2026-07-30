@@ -205,12 +205,24 @@ input[type=range]::-moz-range-thumb {
   width: 11px; height: 8px; border: 1px solid #404040;
 }
 #mm-legend i.grad { flex: 1 1 auto; }
-/* G8: seven mode buttons in an equal-width 4-per-row grid; the active
+/* GP5a: the mode buttons pack column-major into a scrollable two-row cluster
+   (13 buttons → 7 columns; roadmap growth just adds columns to scroll) so the
+   strip never grows taller than two rows inside the 160px sidebar; the active
    mode wears the sunken pressed-toggle dither like the toolbar */
 #viewrot { display: flex; gap: 3px; justify-content: center; margin-top: 3px; }
 #viewrot .btn95 { flex: 1; padding: 1px 0; font-size: 14px; line-height: 1; }
-#mapmodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 3px; }
+#mapmodes {
+  display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto);
+  grid-auto-columns: minmax(34px, 1fr); gap: 1px; margin-top: 3px;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin;
+}
 #mapmodes .mm { padding: 1px 0; min-width: 0; }
+/* GP5a: legend mode name + budget strain meters */
+.mm-name { font-weight: bold; margin-right: 3px; }
+.strain { margin-left: 4px; font-size: 9px; }
+.strain.ok { color: #0a6a30; }
+.strain.warn { color: #8a5a00; }
+.strain.crit { color: #b00020; }
 #mapmodes .mm.active {
   border-color: #404040 #fff #fff #404040;
   background-color: #c0c0c0;

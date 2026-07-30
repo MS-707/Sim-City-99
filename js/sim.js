@@ -1354,6 +1354,34 @@ function xpRampSides(c, i) {
   return { xway, road };
 }
 
+/* GP5a: the coverage-service registry — ONE frozen table the placement ghost
+   (serviceGhost), the budget strain meters (deptStrain) and the thin-coverage
+   advisories all read, so they can never disagree about a radius or a funding
+   slider. `radius` mirrors the stampCoverage call-site literals in
+   recomputeMaps (12/12/14/14) byte-for-byte; `cap` is the load one POWERED
+   anchor carries at 100% funding — a DISPLAY-ONLY constant in GP5a (nothing
+   in the sim reads it; GP5b re-pins these when strain starts scaling stamps). */
+const SVC_DEF = Object.freeze({
+  [OV.POLICE]:   { dept: "police", radius: 12, cap: 320,  label: "Police" },
+  [OV.FIRESTA]:  { dept: "fire",   radius: 12, cap: 240,  label: "Fire" },
+  [OV.SCHOOL]:   { dept: "edu",    radius: 14, cap: 900,  label: "Schools" },
+  [OV.HOSPITAL]: { dept: "health", radius: 14, cap: 1100, label: "Health" },
+});
+// GP5a: per-tile "genuinely low" coverage line for the THIN advisories —
+// deliberately under advisors.js's citywide report thresholds (48/64), so the
+// chip only fires where the map is plainly thin, never on a borderline block.
+const SVC_LOW = 40;
+// GP5a: strain-meter bands (display only): <WARN ok, WARN..CRIT warn, >CRIT crit
+const STRAIN_WARN = 0.8, STRAIN_CRIT = 1.0;
+// GP5a: stampCoverage's effective-radius formula, hoisted so serviceGhost
+// replays the IDENTICAL arithmetic (single Math.round of the same FP product).
+const covR = (radius, f) => Math.round(radius * (0.4 + 0.6 * f));
+// GP5a: linear/debris overlays — everything in over[] that is NOT a structure
+// for the fire-load census in deptStrain (roads, wires, pipes carry no
+// combustible building; rubble is already burnt).
+const SVC_LINEAR = new Set([OV.ROAD, OV.WIREROAD, OV.XWAY, OV.RAMP,
+  OV.WIRE, OV.PIPE, OV.RUBBLE]);
+
 /* GP3a: ADVISORY verdicts — a SEPARATE table walked ONLY by diagnoseTile
    (the gridlock-escalation precedent: a panel annotation, never a growth row).
    CRITICAL DISCIPLINE: these rows must NEVER join GROWTH_GATES — firstGate is
@@ -1373,6 +1401,27 @@ const ADVISORY_GATES = Object.freeze([
       `over the streets you built — commutes here bind growth.`,
     evid: (c, i) => [["Jobs reachable", c.jobAccess[i]], ["Citywide", c.jobs],
                      ["Healthy line", jaHealthy(c)]] },
+
+  /* GP5a: thin-coverage advisories — the SAME advisory-only discipline as
+     JOB_ACCESS_LOW (walked by _attachAdvisories alone, NEVER a GROWTH_GATES
+     row — that walk spends the growth RNG cursor). The predicate is the exact
+     machine-checkable definition of "genuinely low": a developed zone tile
+     whose coverage plane reads under SVC_LOW. Pure reads only. */
+  { code: "POLICE_THIN", sev: "warn", label: "Thin police coverage", advisory: true,
+    test: (c, i) => (c.over[i] === OV.ZR || c.over[i] === OV.ZC || c.over[i] === OV.ZI) &&
+                    c.lvl[i] > 0 && c.polCov[i] < SVC_LOW,
+    text: (c, i) => `Police coverage here reads ${c.polCov[i]} at ${c.funding.police}% funding — ` +
+      `crime bites hardest where patrols are thin.`,
+    evid: (c, i) => [["Police coverage", c.polCov[i]], ["Healthy line", SVC_LOW],
+                     ["Funding", c.funding.police + "%"]] },
+
+  { code: "FIRE_THIN", sev: "warn", label: "Thin fire coverage", advisory: true,
+    test: (c, i) => (c.over[i] === OV.ZR || c.over[i] === OV.ZC || c.over[i] === OV.ZI) &&
+                    c.lvl[i] > 0 && c.fireCov[i] < SVC_LOW,
+    text: (c, i) => `Fire coverage here reads ${c.fireCov[i]} at ${c.funding.fire}% funding — ` +
+      `a spark outside the engine's reach burns to rubble.`,
+    evid: (c, i) => [["Fire coverage", c.fireCov[i]], ["Healthy line", SVC_LOW],
+                     ["Funding", c.funding.fire + "%"]] },
 ]);
 
 // short label for a verdict code (status-bar hover readout) — a pure lookup, so
@@ -3325,7 +3374,7 @@ class City {
   stampCoverage(type, out, radius, f = 1) {
     out.fill(0);
     if (f <= 0) return; // 0% funding: the documented floor — zero coverage
-    const R = Math.round(radius * (0.4 + 0.6 * f));
+    const R = covR(radius, f); // GP5a: hoisted formula, identical arithmetic
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] !== type || this.anc[i] !== i) continue;
       if (!this.powered[i]) continue; // stations need power
@@ -3339,6 +3388,34 @@ class City {
         out[j] = Math.max(out[j], Math.min(255, Math.round((R - d) * 18 * f)));
       }
     }
+  }
+
+  /* GP5a: placement-preview ghost — the exact tile set a station of `type`
+     anchored at (ax, ay) would stamp NONZERO coverage onto, at the dept's
+     CURRENT funding. Replays stampCoverage's loop shape (same covR radius,
+     same inMap clip, same manhattan cut) but keeps a tile only when the
+     potency expression Math.round((R-d)*18*f) is > 0: the d === R rim writes
+     max(v, 0) = 0 — observationally identical to no write — and showing that
+     rim would lie to the player ("covered" at zero potency). So the ghost
+     equals exactly { j : stamp value > 0 }. PURE read: no plane writes, no
+     RNG, never reads the view. Returns a plain ascending Array of tile
+     indices (the dy/dx walk emits them already sorted). */
+  serviceGhost(type, ax, ay) {
+    const def = SVC_DEF[type];
+    if (!def) return [];
+    const f = this.funding[def.dept] / 100;
+    if (f <= 0) return []; // the documented 0%-funding floor: stamps nothing
+    const R = covR(def.radius, f);
+    const out = [];
+    for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+      const X = ax + dx, Y = ay + dy;
+      if (!this.inMap(X, Y)) continue;
+      const d = Math.abs(dx) + Math.abs(dy);
+      if (d > R) continue;
+      if (Math.round((R - d) * 18 * f) <= 0) continue; // the zero-potency rim
+      out.push(this.idx(X, Y));
+    }
+    return out;
   }
 
   /* M28: wonder-landmark "civic pride" land-value stamp. Mirrors stampCoverage's
@@ -4430,6 +4507,55 @@ class City {
       // ridership AND cost monotonically — a genuine tradeoff (police/fire idiom).
       transit: Math.round((surface * 0.3 + subway * 0.5 + stations * 20) * f.transit / 100),
     };
+  }
+
+  /* GP5a: per-department load vs. capacity — the budget strain meters. PURE
+     read (same one-O(n)-scan-on-demand discipline as deptCosts above; called
+     ONLY from UI paths, never from tick/growthPass, never cached on the city).
+     Documented census, per dept of SVC_DEF:
+       load: police = popLoad + jobLoad   (people AND workplaces draw patrols)
+             fire   = structures          (every combustible structure tile:
+                       developed ZR/ZC/ZI, plus every building overlay — over
+                       !== NONE and not in SVC_LINEAR and not an undeveloped
+                       zone tile)
+             edu    = popLoad             health = popLoad
+       cap  = round(poweredAnchors * SVC_DEF cap * funding / 100)
+       strain = load / cap, or null when cap is 0 (never NaN/Infinity).
+     DISPLAY-ONLY in GP5a: nothing in the sim reads the result. */
+  deptStrain() {
+    let popLoad = 0, jobLoad = 0, structures = 0;
+    const anchors = { police: 0, fire: 0, edu: 0, health: 0 };
+    const lit = { police: 0, fire: 0, edu: 0, health: 0 };
+    for (let i = 0; i < this.over.length; i++) {
+      const t = this.over[i];
+      if (t === OV.NONE) continue;
+      if (t === OV.ZR || t === OV.ZC || t === OV.ZI) {
+        const l = this.lvl[i];
+        if (!l) continue; // an undeveloped zone tile is a painted lot, not a structure
+        structures++;
+        if (t === OV.ZR) popLoad += RES_POP[l];
+        else if (t === OV.ZC) jobLoad += COM_JOB[l];
+        else jobLoad += IND_JOB[l];
+        continue;
+      }
+      if (SVC_LINEAR.has(t)) continue; // roads/wires/pipes/rubble: nothing to protect
+      structures++;
+      const def = SVC_DEF[t];
+      if (def && this.anc[i] === i) {
+        anchors[def.dept]++;
+        if (this.powered[i]) lit[def.dept]++;
+      }
+    }
+    const out = {};
+    for (const k in SVC_DEF) {
+      const def = SVC_DEF[k];
+      const load = def.dept === "fire" ? structures
+        : def.dept === "police" ? popLoad + jobLoad : popLoad;
+      const cap = Math.round(lit[def.dept] * def.cap * this.funding[def.dept] / 100);
+      out[def.dept] = { anchors: anchors[def.dept], powered: lit[def.dept],
+        load, cap, strain: cap > 0 ? load / cap : null };
+    }
+    return out;
   }
 
   // ---------- budget (monthly) ----------

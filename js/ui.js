@@ -742,6 +742,11 @@ const MM_LEGENDS = {
   crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#8c285a,#ff60be)"></i>safe / lawless',
   traffic: '<i class="grad" style="background:linear-gradient(90deg,#46dc3c,#eba028,#8c101c)"></i>free / jammed',
   svc:     '<i class="sw" style="background:#288cfa"></i>edu <i class="sw" style="background:#fc8c32"></i>health <i class="sw" style="background:#fcf0fa"></i>both',
+  // GP5a: police / fire coverage — swatches/gradients echo the exact
+  // renderMinimap branch colors (station white, unpowered dead-slate, and the
+  // MM_POLCOV / MM_FIRECOV ramp endpoints), per the G8 contract
+  pol:     '<i class="sw" style="background:#fff"></i>station <i class="sw" style="background:#78808c"></i>no power <i class="grad" style="background:linear-gradient(90deg,#101834,#7ddcff)"></i>thin / strong',
+  fire:    '<i class="sw" style="background:#fff"></i>station <i class="sw" style="background:#78808c"></i>no power <i class="grad" style="background:linear-gradient(90deg,#32140c,#ffd07a)"></i>thin / strong',
   // M24: water network — providers, dry pipe, and a served-pressure gradient
   water:   '<i class="sw" style="background:#0cf"></i>tower/pump <i class="sw" style="background:#234"></i>dry pipe <i class="grad" style="background:linear-gradient(90deg,#146078,#28c8f0)"></i>served',
   // M25: rail network — track, subway, live/dead station, and the ridership
@@ -755,14 +760,26 @@ const MM_LEGENDS = {
   dist:    '<i class="sw" style="background:#e84448"></i>neighborhoods — paint with the 🏘️ tool',
 };
 
+// GP5a: legend mode names — with 13 map modes the abbreviated buttons alone
+// no longer identify the view, so every non-"City" legend leads with its name
+const MM_NAMES = { all: "City", power: "Power", poll: "Pollution",
+  value: "Land value", crime: "Crime", traffic: "Traffic",
+  svc: "Schools & health", pol: "Police", fire: "Fire", water: "Water",
+  transit: "Rail", commute: "Commute", dist: "Neighborhoods" };
+
 function updateMapLegend(mode) {
   const el = document.getElementById("mm-legend");
   if (mode === "all") { el.classList.add("hidden"); return; }
+  // GP5a: mode name prepended before the swatches, every non-"all" mode
+  const name = `<b class="mm-name">${MM_NAMES[mode]}</b>`;
   if (mode === "dist") {
     // build live swatches from DISTRICT_COLS via DOM nodes so user names are
     // inserted as text (never HTML) — safe against name injection
     el.innerHTML = "";
     if (city && city.districts.length) {
+      const nb = document.createElement("b");
+      nb.className = "mm-name"; nb.textContent = MM_NAMES.dist;
+      el.appendChild(nb);
       for (const d of city.districts) {
         const sw = document.createElement("i");
         sw.className = "sw"; sw.style.background = DISTRICT_COLS[d.col];
@@ -770,12 +787,12 @@ function updateMapLegend(mode) {
         el.appendChild(document.createTextNode(d.name + " "));
       }
     } else {
-      el.innerHTML = MM_LEGENDS.dist;
+      el.innerHTML = name + MM_LEGENDS.dist;
     }
     el.classList.remove("hidden");
     return;
   }
-  el.innerHTML = MM_LEGENDS[mode];
+  el.innerHTML = name + MM_LEGENDS[mode];
   el.classList.remove("hidden");
 }
 
@@ -1061,13 +1078,28 @@ function fillBudgetTable() {
   const dc = city.deptCosts();
   const fd = city.funding;
   const f = (n) => (n < 0 ? "-§" : "§") + Math.abs(n).toLocaleString();
+  // GP5a: strain meters — one deptStrain() scan per fill (fillBudgetTable is
+  // already re-run live on every funding-slider drag, so the meters track the
+  // sliders with no new plumbing). Zero-cap rows render words, never NaN/∞.
+  const ds = city.deptStrain();
+  const meter = (dept) => {
+    const s = ds[dept];
+    if (s.cap <= 0) {
+      const word = s.anchors > 0 ? "no powered stations" : "no stations";
+      return ` <small class="strain ${s.load > 0 ? "crit" : "ok"}">${word}</small>`;
+    }
+    const cls = s.load === 0 || s.strain < STRAIN_WARN ? "ok"
+      : s.strain <= STRAIN_CRIT ? "warn" : "crit";
+    return ` <small class="strain ${cls}">${s.anchors} stn &middot; ` +
+      `${s.load.toLocaleString()} / ${s.cap.toLocaleString()}</small>`;
+  };
   document.getElementById("budget-table").innerHTML = `
     <tr><td>Tax revenue</td><td>${f(b.taxes)}</td></tr>
     <tr><td>Roads &amp; wires (${fd.roads}%)</td><td>${f(-dc.roads)}</td></tr>
-    <tr><td>Police (${fd.police}%)</td><td>${f(-dc.police)}</td></tr>
-    <tr><td>Fire (${fd.fire}%)</td><td>${f(-dc.fire)}</td></tr>
-    <tr><td>Education (${fd.edu}%)</td><td>${f(-dc.edu)}</td></tr>
-    <tr><td>Health (${fd.health}%)</td><td>${f(-dc.health)}</td></tr>
+    <tr><td>Police (${fd.police}%)${meter("police")}</td><td>${f(-dc.police)}</td></tr>
+    <tr><td>Fire (${fd.fire}%)${meter("fire")}</td><td>${f(-dc.fire)}</td></tr>
+    <tr><td>Education (${fd.edu}%)${meter("edu")}</td><td>${f(-dc.edu)}</td></tr>
+    <tr><td>Health (${fd.health}%)${meter("health")}</td><td>${f(-dc.health)}</td></tr>
     <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
     <tr><td>Water system</td><td>${f(-dc.water)}</td></tr>
     <tr><td>Transit (${fd.transit}%)</td><td>${f(-dc.transit)}</td></tr>
@@ -1771,7 +1803,9 @@ function renderQuery() {
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
     <tr><td>Crime</td><td>${city.crime[i]}</td></tr>
     <tr><td>Education</td><td>${city.eduCov[i]}</td></tr>
-    <tr><td>Health</td><td>${city.medCov[i]}</td></tr>`;
+    <tr><td>Health</td><td>${city.medCov[i]}</td></tr>
+    <tr><td>Police</td><td>${city.polCov[i]}</td></tr>
+    <tr><td>Fire</td><td>${city.fireCov[i]}</td></tr>`;
 
   if (pin) {
     const now = dlgEl.getBoundingClientRect();
@@ -2035,8 +2069,10 @@ function hoverReadout() {
   const v = city.diagnoseTile(i);
   const mark = v ? ({ crit: "⛔", warn: "⚠️", ok: "✅" }[v.severity] || "") + " " + (GATE_LABEL[v.code] || v.code) : "";
   // GP3a: the advisory rides the SAME memoized per-(tile, tickCount) verdict —
-  // zero extra diagnoseTile calls.
-  const advis = v && v.advisories && v.advisories.length ? " ⚠ Few jobs in reach" : "";
+  // zero extra diagnoseTile calls. GP5a: generalized to every advisory row via
+  // the GATE_LABEL lookup (character-identical for the JOB_ACCESS_LOW case).
+  const advis = v && v.advisories && v.advisories.length
+    ? v.advisories.map(a => " ⚠ " + GATE_LABEL[a.code]).join("") : "";
   const text = `(${h.x}, ${h.y}) ${what}${lvl}${mark ? " — " + mark : ""}${advis}`;
   hoverMemo = { key, text, city };
   return text;

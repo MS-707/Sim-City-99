@@ -1903,6 +1903,86 @@ function drawDisaster(city) {
   }
 }
 
+/* GP5a: service-placement coverage ghost. For the four coverage tools the
+   cursor pass previews EXACTLY the tile set stampCoverage would write nonzero
+   potency to (city.serviceGhost — the honesty contract), plus a dim over the
+   existing same-type stations so overlap reads at a glance. All model reads
+   are memoized on (city object, tool, hover x/y, dept funding, tickCount):
+   hover moves and slider drags are event-rate, not frame-rate, so a static
+   hover pays ZERO serviceGhost calls and ZERO over[] scans per frame. The
+   bright ghost color is the dept ramp's top stop (pol/fire) or the svc-mode
+   legend pair (edu/health). No RNG anywhere — the ghost draws zero jitter. */
+const SVC_TOOL_TYPE = { police: OV.POLICE, firesta: OV.FIRESTA,
+  school: OV.SCHOOL, hospital: OV.HOSPITAL };
+const SVC_GHOST_COL = { police: "#7ddcff", fire: "#ffd07a",   // = ramp top stops
+  edu: "#288cfa", health: "#fc8c32" };                        // = svc legend pair
+let svcGhostCache = { city: null, tool: "", x: -1, y: -1, f: -1, tick: -1,
+  tiles: null, rim: null, anchors: null };
+
+function ghostDiamond(wx, wy) {
+  ctx.beginPath();
+  ctx.moveTo(wx, wy - HH); ctx.lineTo(wx + HW, wy);
+  ctx.lineTo(wx, wy + HH); ctx.lineTo(wx - HW, wy);
+  ctx.closePath();
+}
+
+function drawServiceGhost(city, tool, x, y) {
+  const type = SVC_TOOL_TYPE[tool];
+  if (type === undefined) return;
+  const def = SVC_DEF[type];
+  const f = city.funding[def.dept];
+  let c = svcGhostCache;
+  if (c.city !== city || c.tool !== tool || c.x !== x || c.y !== y ||
+      c.f !== f || c.tick !== city.tickCount) {
+    // memo miss (hover moved / slider dragged / tick advanced): one O(R^2)
+    // ghost replay + one over[] pass collecting the same-type anchors
+    const tiles = city.serviceGhost(type, x, y);
+    let dMax = -1;
+    for (const j of tiles) {
+      const d = Math.abs(j % MAP - x) + Math.abs(((j / MAP) | 0) - y);
+      if (d > dMax) dMax = d;
+    }
+    // the rim derives from the SET, not an idealized diamond, so it outlines
+    // the map-clipped reach honestly (edge placements included)
+    const rim = tiles.filter(j =>
+      Math.abs(j % MAP - x) + Math.abs(((j / MAP) | 0) - y) === dMax);
+    const anchors = [];
+    for (let i = 0; i < city.over.length; i++)
+      if (city.over[i] === type && city.anc[i] === i) anchors.push(i);
+    c = svcGhostCache = { city, tool, x, y, f, tick: city.tickCount, tiles, rim, anchors };
+  }
+  const colr = SVC_GHOST_COL[def.dept];
+  // (a) dim the existing same-type stations, full footprint, rotation-aware
+  ctx.fillStyle = "rgba(10,12,20,0.45)";
+  const s = sizeOf(type);
+  for (const a of c.anchors) {
+    const ax = a % MAP, ay = (a / MAP) | 0;
+    for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
+      ghostDiamond(worldX(ax + dx, ay + dy), worldY(ax + dx, ay + dy));
+      ctx.fill();
+    }
+  }
+  // (b) the ghost fill — exactly the tiles the stamp would write nonzero to.
+  // At funding 0 the set is empty: only the footprint + dimmed stations
+  // render — an honest "this stamps nothing" preview.
+  ctx.fillStyle = colr;
+  ctx.globalAlpha = 0.10;
+  for (const j of c.tiles) {
+    ghostDiamond(worldX(j % MAP, (j / MAP) | 0), worldY(j % MAP, (j / MAP) | 0));
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // (c) the honest rim
+  ctx.strokeStyle = colr;
+  ctx.globalAlpha = 0.8;
+  ctx.lineWidth = 1.5 / cam.z;
+  for (const j of c.rim) {
+    ghostDiamond(worldX(j % MAP, (j / MAP) | 0), worldY(j % MAP, (j / MAP) | 0));
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawCursor(city, uiState) {
   const { x, y } = uiState.hover;
   if (!city.inMap(x, y)) return;
@@ -1910,6 +1990,8 @@ function drawCursor(city, uiState) {
   const s = tool === "bulldoze" || tool === "tree" ? 1 : sizeOf(toolOverlay(tool));
   const ok = tool === "bulldoze" ? true :
     city.canPlace(tool, x, y) && city.funds >= city.toolCost(tool, x, y);
+  // GP5a: coverage ghost UNDER the footprint cursor (no-op for other tools)
+  drawServiceGhost(city, tool, x, y);
   ctx.strokeStyle = ok ? "rgba(80,255,120,.95)" : "rgba(255,70,70,.95)";
   ctx.fillStyle = ok ? "rgba(80,255,120,.16)" : "rgba(255,70,70,.16)";
   ctx.lineWidth = 2 / cam.z;
@@ -2081,6 +2163,13 @@ const MM_CRIME = [[34, 18, 30], [140, 40, 90], [255, 96, 190]];     // safe dark
 // GP3b: commute distance — near (bright green) → amber → far (dark red);
 // lightness falls monotonically with hops (GQ11 contract, same slope as traffic)
 const MM_COMMUTE = [[70, 220, 60], [235, 160, 40], [140, 16, 28]];
+// GP5a: police / fire coverage ramps — both monotone-RISING CIE-L* (strong
+// coverage = bright, per the GQ11 contract), hues distinct from every shipped
+// ramp under a deutan simulation (fire's base is far redder than MM_POLL's
+// olive so poll/fire can never confuse). Verified: L* strictly increasing,
+// end-to-end dL* > 74, worst semantic-pair deutan dE 24.
+const MM_POLCOV = [[16, 24, 52], [40, 110, 190], [125, 220, 255]];   // dark navy → bright cyan-blue
+const MM_FIRECOV = [[50, 20, 12], [190, 95, 32], [255, 208, 122]];   // dark ember → bright amber-gold
 function mmRamp(t, s) {
   const u = t <= 0 ? 0 : t >= 1 ? 1 : t;
   const k = u < 0.5 ? 0 : 1, f = (u - k * 0.5) * 2;
@@ -2181,6 +2270,20 @@ function renderMinimap(city, mode) {
       } else if (t === OV.ZR && city.lvl[i]) {
         col = city.jobAccess[i] >= jaHealthy(city) ? "#25e8a8" : "#e08030";
       } else col = minimapDim(minimapCityCol(city, i), 0.35); // G8: keep district context
+    } else if (mode === "pol") {
+      // GP5a: police coverage — station anchors bright (unpowered drops to the
+      // transit dead-slate idiom: lightness, not hue), covered tiles ride the
+      // monotone-rising MM_POLCOV ramp scaled by the f=1 stamp max 216
+      // ((R=12)*18), everything else keeps dimmed City-mode context (G8).
+      // Reads planes only — north-up, never cam.r.
+      if (city.over[i] === OV.POLICE) col = city.powered[i] ? "#fff" : "#78808c";
+      else if (city.polCov[i]) col = mmRamp(Math.min(1, city.polCov[i] / 216), MM_POLCOV);
+      else col = minimapDim(minimapCityCol(city, i), 0.35);
+    } else if (mode === "fire") {
+      // GP5a: fire coverage — identical shape on the fire plane/ramp
+      if (city.over[i] === OV.FIRESTA) col = city.powered[i] ? "#fff" : "#78808c";
+      else if (city.fireCov[i]) col = mmRamp(Math.min(1, city.fireCov[i] / 216), MM_FIRECOV);
+      else col = minimapDim(minimapCityCol(city, i), 0.35);
     } else if (mode === "dist") {
       const dc = city.district[i];
       // districted tiles paint their palette color; everything else keeps the

@@ -6,7 +6,9 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- *(nothing — GP5b shipped; next up: GP6 — Citizen Opinion Poll)*
+- **GP5b — Service Strain & the Education Payoff** (behavior half of GP5):
+  strain coupling + eduLevel slow stock — implement pass checkpointed at
+  08d94c9, UNDER VERIFICATION by workflow wf_aa86ee7d-fe4, NOT shipped.
 
 ## Open
 
@@ -79,34 +81,6 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
-
-- [x] **GP5b — Service Strain & the Education Payoff** *(gameplay roadmap
-  9/13, behavior half of the GP5 split — declared re-pin, save v16)*: the
-  strain the GP5a meters display finally **bites**. recomputeMaps derives
-  `svcStrain` (min(1, cap/load)) from ONE call to the same certified
-  `deptStrain()` census the budget meters read, and each coverage stamp's
-  potency scales by its department's multiplier (radius untouched; `s === 1`
-  is an IEEE754 byte-identical fast path, and the placement ghost reads the
-  same cached value so it stays exactly `{stamp > 0}` under strain).
-  Education and health split mechanically: gFit weighs `medCov`/`eduCov`
-  separately (0.75/0.35, sum preserves the old 1.1 ceiling), the old SVC_CAP
-  OR-gate becomes HEALTH_CAP (ZR/ZC towers need health 8) + EDU_CAP (big ZI
-  plants need education 8) in the same apply:null slot, and demand carries
-  weighted `healthMod`/`eduMod` pairs summing to the old coefficients — with
-  separate Schools/Hospitals RCI-breakdown rows preserving raw === Σ parts.
-  The payoff: `eduLevel`, a monthly-EWMA slow stock of RES_POP-weighted
-  attainment (EDU_RATE 1/120 ≈ 10-year time constant) — crossing 0.5 flips
-  the industrial mix to **clean high-tech**: ZI smog ×0.45 (dirty path
-  byte-identical), a 9% high-tech tax premium on industrial jobs
-  (`lastBudget.cleanTax`), cool glass i1c/i2c/i3c sprite families baked
-  under forked seeds APPENDED after every shipped bake (all facings/seasons/
-  night byte-identical), smokeless ZI plumes at every rotation, and budget/
-  query-panel readouts. Save v16 appends `eduLevel` (4 dp, exact round-trip)
-  after strandedShare; pre-v16 saves seed it deterministically from restored
-  coverage. S6 deviations: SVC_DEF caps stay the GP5a-certified
-  320/240/900/1100 (the draft's ~500/800/1200/1500 would re-scale certified
-  meters); funding-slider commits now refresh recomputeMaps live so meters,
-  stamps and ghosts track the slider.
 
 - [x] **GP5a — Coverage Previews & Strain Meters** *(gameplay roadmap 8/13,
   certified 2026-07-30)*: the two services you sited **blind** for the whole

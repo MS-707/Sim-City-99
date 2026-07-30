@@ -309,7 +309,7 @@
       "effort_1_5": 4,
       "priority_rank": 9,
       "touches_save_format": true,
-      "status": "done",
+      "status": "todo",
       "split_of": "GP5 (behavior half; read half is GP5a)",
       "shipped": "2026-07-30",
       "ship_note": "Strain coupling live: svcStrain = min(1, cap/load) derived at the top of recomputeMaps from the ONE GP5a-certified deptStrain() census and multiplied into stampCoverage potency (radius untouched; s===1 is a byte-identical fast path, serviceGhost reads the same cache). Education/health split: gFit weighs medCov/eduCov 0.75/0.35 (sum 1.1 preserves the old ceiling); SVC_CAP replaced in-slot by HEALTH_CAP (ZR/ZC, medCov<8) + EDU_CAP (ZI, eduCov<8), both apply:null; demand svcMod split into healthMod/eduMod weight pairs summing to the old coefficients, with separate Schools/Hospitals breakdown rows (raw===sum-of-parts preserved). eduLevel slow stock (monthly EWMA, EDU_RATE 1/120, threshold EDU_T 0.5) gates clean high-tech industry: ZI smog x0.45 (dirty path byte-identical), CLEAN_TAX_RATE 0.09 premium recorded as lastBudget.cleanTax, forked-seed i1c/i2c/i3c sprite families appended after every shipped bake, smoke gated off, budget/query readouts. Save v16 appends eduLevel (4dp) after strandedShare; pre-v16 saves seed it from eduAttain() post-cascade (idempotent extra recomputeMaps iff it seeds clean). S6 deviations: SVC_DEF caps kept at the GP5a-certified 320/240/900/1100 (draft ~500/800/1200/1500 would silently re-scale certified meters); coverage-department funding-slider commits now run recomputeMaps live so meters/stamps/ghosts track the slider."

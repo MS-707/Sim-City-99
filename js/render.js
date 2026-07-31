@@ -997,6 +997,13 @@ function renderFrame(city, uiState, clearBG) {
             // G3: burning buildings char — darkened while city.fire[i] is
             // set, reverting the moment the fire ends
             if (city.fire[i]) drawChar(spr, wx, wy);
+            // GP10a: the blight wash — a lot that has been failing for months
+            // grimes over. FIRE DOMINATES (an `else`): a burning building must
+            // keep the char as its single unambiguous read. Skipped at level 0
+            // (nothing built to grime) and free at every rotation, since it is
+            // a pure function of city.distress[i].
+            else if (city.lvl[i] && city.distress[i])
+              drawBlight(spr, wx, wy, distressBand(city.distress[i]));
             // G9: mast-bearing C3 towers blink their aircraft beacon live,
             // each tower phase-offset by its tile index — the baked red tip
             // is only the lit state, overdrawn dark on the off half-cycle
@@ -1332,6 +1339,40 @@ function drawChar(spr, wx, wy) {
   }
   ctx.globalAlpha = FIRE_CHAR_ALPHA;
   ctx.drawImage(spr.char, wx - spr.ox, wy - spr.oy);
+  ctx.globalAlpha = 1;
+}
+
+/* GP10a S4: the BLIGHT WASH — the drawChar idiom above, verbatim, with a rust
+   grime colour instead of char-black and a per-band alpha instead of one
+   constant. The sprite's own silhouette is refilled (source-in) into a canvas
+   cached on the sprite object at first use and blitted over the PRISTINE
+   sprite, so a lot that recovers simply stops being washed and reverts to the
+   exact pixels it had before.
+
+   WHY THIS AND NOT A NEW BAKE, which is the whole reason it is written this
+   way: a new sprite bake would consume ART_RNG/R() draws and re-pin every
+   frozen sprite anchor downstream of it. This path bakes nothing, draws no
+   random numbers and is a pure function of distress[i] — so all four camera
+   rotations are free (M32a/b) and the shipped sprite set is byte-unchanged.
+   It is also DAY-LAYER ONLY: it never touches nightAdd/nightPunch or spr.night,
+   so G1/G2 night legibility and the night-layer cache key are untouched.
+   Three alphas, one per readout band — measured to differ from the unwashed
+   sprite and from each other across the sprite bbox by well over the 2% bar,
+   because the silhouette covers ~18% of the bbox on an r2. */
+const BLIGHT_ALPHA = [0.16, 0.28, 0.42];
+function drawBlight(spr, wx, wy, band) {
+  if (!spr.blight) {
+    const c = document.createElement("canvas");
+    c.width = spr.c.width; c.height = spr.c.height;
+    const g = c.getContext("2d");
+    g.drawImage(spr.c, 0, 0);
+    g.globalCompositeOperation = "source-in";
+    g.fillStyle = "#6b4526";           // rust/sepia grime
+    g.fillRect(0, 0, c.width, c.height);
+    spr.blight = c;
+  }
+  ctx.globalAlpha = BLIGHT_ALPHA[band];
+  ctx.drawImage(spr.blight, wx - spr.ox, wy - spr.oy);
   ctx.globalAlpha = 1;
 }
 
@@ -2300,6 +2341,25 @@ const RISK_BANDS = ["#243a2a", "#2f7e78", "#e0a028", "#ffd2e0"];
    #ffd2e0 severe. */
 const MM_WASTE_BANDS = ["#14240f", "#7a4a12", "#a08a52", "#e39a5e", "#f0e4c0"];
 
+/* GP10a S4: the BLIGHT overlay's four zone swatches — index 0 is the healthy
+   zoned lot, indices 1..3 are sim.js's distressBand() shifted by one
+   (strained / at risk / critical). Everything that is not a zoned tile takes
+   the SAME two-value background the garbage branch established: `#013` water,
+   `#111` empty land — so the map has exactly two background values and every
+   other value on it means "a lot the mayor zoned is failing".
+   THE HEALTHY SWATCH IS DELIBERATELY COOL and the three distress bands are
+   deliberately warm: on this overlay any warm pixel is a grievance, which is
+   the read a player should get before they parse the ladder at all.
+   MEASURED. Rec.709 luminance strictly rising 56.2 / 96.0 / 146.4 / 220.3 —
+   steps 39.8 / 50.4 / 73.9, every one over this codebase's 25 bar — and >= 50
+   apart in at least one channel between adjacent bands (R 92, R 70, G 78), so
+   the ladder survives deuteranopia on luminance alone. The water base sits
+   40.3 luminance below the healthy swatch, so a zoned coastline still reads as
+   coastline. NO BAND IS PURE #ffffff, deliberately: the rotation gate masks the
+   union of pure-white pixels (the camera-viewport stroke), and a white band
+   would be eaten by that mask. */
+const MM_BLIGHT_BANDS = ["#2e3a44", "#8a5a20", "#d08a30", "#ffd8a0"];
+
 /* GP8a: the Risk band buffer, memoised in MODULE scope — deliberately NOT a
    field on City. That is what makes GP8a's read-only proof structural: the
    milestone adds ZERO keys to the City object and ZERO keys to the save.
@@ -2497,6 +2557,20 @@ function renderMinimap(city, mode) {
          or screenToTile — it is a pure function of the sim planes (G10(b)). */
       const wb = wasteBand(city.wasteRateAt(i));
       col = wb < 0 ? (city.terr[i] === TERR.WATER ? "#013" : "#111") : MM_WASTE_BANDS[wb];
+    } else if (mode === "blight") {
+      /* GP10a: the DISTRESS LEDGER made visible — consecutive failing months
+         per zoned lot, banded. A PURE PLANE READ of city.distress[i]: this
+         branch allocates no buffer, memoises nothing and calls no sim method,
+         so it is literally the `mode==="garbage"` idiom one step simpler.
+         The zoned footprint is the subject (level 0 included — it is the
+         denominator the ledger publishes its share against), and everything
+         else takes the standard two-value background. Strictly north-up:
+         nothing here reads cam, rot4 or screenToTile, so all four rotations
+         paint the identical minimap (G10(b)). */
+      const dn = city.distress[i];
+      col = dn > 0 ? MM_BLIGHT_BANDS[1 + distressBand(dn)]
+        : apxZone(city, i) ? MM_BLIGHT_BANDS[0]
+        : (city.terr[i] === TERR.WATER ? "#013" : "#111");
     } else if (mode === "dist") {
       const dc = city.district[i];
       // districted tiles paint their palette color; everything else keeps the

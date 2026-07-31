@@ -6,6 +6,27 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
+- **GP10a — The Distress Ledger** *(built, awaiting verification)*: the RULER
+  half of GP10. A deterministic O(n) monthly sweep (`distressTick`, slotted
+  between `approvalTick` and `collectBudget` and never to move) walks the new
+  frozen `DISTRESS_CAUSES` table — DARK / CRIME / SLUMP / GRIDLOCK, first
+  match — over every zoned lot and counts **consecutive failing months** into
+  two new Uint8 planes (`distress`, `distressCause`, save **v20**, packU8,
+  appended after `recallDone`). It changes **nothing**: zero RNG, zero
+  `Math.random`, no growth/demand/budget coupling, and a byte-identical sim on
+  20 of 20 corpus seeds. Readouts: a `BLOCK_DISTRESS` advisory row (free in
+  the hover line and the query verdict box via `GATE_LABEL`), the **Blight**
+  minimap mode — the *sixteenth* — with legend and chip, a `history.blight`
+  graph series, an almanac line, a district "Distressed lots" row, a day-layer
+  silhouette wash on the tile itself (the `drawChar` cache idiom — no new
+  sprite bake, night layer untouched), and a citizen complaint ranked **last**
+  so it can never displace a shipped grievance. Every constant is a shipped
+  number re-read (`CRIME_BAD/2`, the 0.8 eviction line, the −0.25 DECLINE
+  test). Pre-measurement, four pinned fixtures and every HEAD number live in
+  `docs/gp10a-distress-pre.json`; two gate clauses were **refuted by
+  measurement** and recorded there rather than quietly satisfied. No
+  abandonment, no decay, no countdown copy anywhere — that is GP10b.
+
 - **Three milestones built, awaiting adjudication**: GP6 (9/10 gates), GP7a
   (15/16) and GP8a (18/21 then fix-pass green) are implemented and live in the
   tree but NOT shipped — every blocker is a gate *clause* that proved

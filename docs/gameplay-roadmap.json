@@ -1210,7 +1210,14 @@
       "priority_rank": 17,
       "touches_save_format": true,
       "status": "todo",
-      "split_of": "GP10 (preflight-authored S3 split, grounded against the live source 2026-07-30)"
+      "split_of": "GP10 (preflight-authored S3 split, grounded against the live source 2026-07-30)",
+      "implementation_record": "2026-07-31 implemented in the working tree against baseline 80b8957 (save v19 -> v20). SHIPPED: DISTRESS_T/DISTRESS_MAX/DISTRESS_BANDS/DISTRESS_BAND_NAMES/DISTRESS_ABAND_W_FLOOR + distressBand() beside CRIME_BAD; the frozen ordered DISTRESS_CAUSES table (DARK/CRIME/SLUMP/GRIDLOCK, first match, placed AFTER ADVISORY_GATES and walked ONLY by distressTick and the one new advisory row \u2014 never GROWTH_GATES, whose firstGate walk spends rng.growth); the two Uint8 planes distress/distressCause beside unpow; distressTick() slotted between approvalTick() and collectBudget() and NEVER to move; distressAt() as the O(1) UI read; the BLOCK_DISTRESS ADVISORY_GATES row (advisory-only, lvl>0, names the cause and the month count and NOTHING about what happens next); a `distress` complaint kind ranked LAST at flat 30; history.blight (both key lists extended); districtStats distressed/distressedDev/dominantCause; save v20 with the two packU8 planes appended after recallDone and no version-equality test; the ten-site clear audit; the Blight minimap mode (the SIXTEENTH) + legend + chip + graph series; the drawBlight day-layer silhouette wash (drawChar cache idiom, no new bake, never touches nightAdd/nightPunch); the almanac blight line and the district Distressed-lots row. MEASURED THIS PASS (full numbers in docs/gp10a-distress-pre.json): byte-identical sim on 20 of 20 corpus seeds; complaint tally unchanged at {unpowered:40} on seeds 4242 and 1 over 120 rollovers; distressVisits 6400 / zero RNG / zero Math.random on 120 of 120; FX-DARK 504-tile footprint exact at every k=1..18 with the zoned denominator constant and count(DARK)===approvalCensus().zUnpow 18 of 18; warm sweep 0.481 ms/rollover (0.58% of a 600-tick run); save +3.54% loaded / +0.155% clean; distress[] hash identical on 3 of 3 unstubbed runs. TWO GATE CLAUSES REFUTED BY MEASUREMENT, recorded rather than quietly satisfied: (1) C3's 'max over[] index visit === 1' cannot hold, because the GRIDLOCK row calls the shipped trafficNear() whose 5x5 probe the design itself mandates \u2014 measured min 1 / max 73, of which exactly 6400 reads are the sweep's own; (2) C6's 'every tile that regains power resets to 0' held on 275 of 279, the residual 4 being tiles that regained power and immediately failed the GRIDLOCK row \u2014 the counter means 'consecutive months failing', not 'consecutive months dark'. PROCESS DEVIATION: the pre-measurement artifact could NOT be split into its own commit (the pass ran under an explicit do-not-commit instruction), so unlike GP9a there is no git boundary proving it predates the code. Recorded in the artifact's own process_deviation field.",
+      "design_decisions_resolved": {
+        "D1": "DISTRESS_ABAND_W_FLOOR = 15 pinned in GP10a's scope (declared, never read by GP10a) so GP10b cannot pick ABAND_W <= 12 and make the critical band unreachable state. The alternative (bands as fractions of ABAND_W) stays open and is the user's call.",
+        "D2": "The distress complaint ranks LAST at flat 30, below crime/poll's 40 floor, as an `else if` after the unpowered branch. Measured basis: all 40 complaints on the pinned corpus are `unpowered` at flat 150, so any higher score starves the only kind that fires.",
+        "D3": "Distress is scored on EVERY zoned tile (the approvalCensus denominator discipline); the tile wash, the BLOCK_DISTRESS advisory and the complaint are restricted to lvl > 0; distressCensus publishes BOTH share (zoned) and devShare (built).",
+        "D4": "The Blight chip is 0 px visible at the 1280x800 default (host 160 px vs scrollWidth 279 px). That is the pending strip-overflow decision, not a GP10a defect; the mode is exercised through setMapMode()+renderMinimap()."
+      }
     },
     {
       "id": "GP10b",
@@ -1342,7 +1349,19 @@
       "priority_rank": 18,
       "touches_save_format": true,
       "status": "todo",
-      "split_of": "GP10 (preflight-authored S3 split, grounded against the live source 2026-07-30)"
+      "split_of": "GP10 (preflight-authored S3 split, grounded against the live source 2026-07-30)",
+      "gate_respecs_from_GP10a": {
+        "note": "Authored during GP10a from measurements on 80b8957. These replace the corresponding GP10b gate clauses; each one is either unmeasurable as written or refuted by measurement.",
+        "[0] crime annulus": "UNREACHABLE AS WRITTEN. Only poll, landv and traffic are diffused (three diffuse() calls in recomputeMaps); crime is a pure per-tile formula, so it has no annulus to measure. Re-specify as: measure CRIME on the abandoned cluster itself, and LANDV on the annulus.",
+        "[2] hysteresis": "VACUOUS AS WRITTEN. Replace with the exact identity plus the comparative designated-vs-undesignated clause.",
+        "[4] powerDemand -N": "Precondition it on a POWERED abandonment path with pdMult === 1 and no active regional trade \u2014 the demand loop counts only powered tiles, so an unpowered path measures nothing.",
+        "[5] spiral": "Keep only the comparative clause and DEFINE the success predicate explicitly.",
+        "[6] bounded re-pin": "Require >= 6 of 20 corpus seeds to actually abandon, or FAIL. An unreached fixture is not a pass.",
+        "[7] ABAND_W": "Pinned by GP10a decision D1 at a floor of 15 (DISTRESS_ABAND_W_FLOOR), and the lvl > 0 guard is declared by D3 \u2014 a level-0 zoned lot is counted in the census but has no building to abandon and no derelict sprite size.",
+        "[8] campaign": "Fix the horizon at H = 120 rollovers with explicit censoring of runs that never reach the state.",
+        "[10] census identity": "State the ARCO_POP / ARCO_JOB terms explicitly and run the identity on a fixture that actually contains an arcology.",
+        "[14] -15 landv": "Pilot-derive the figure, or state it comparatively rather than as an absolute."
+      }
     }
   ],
   "reconcile_changelog": [
@@ -1380,9 +1399,10 @@
       "save_version": 19,
       "certified_through": "GP9a (waste ledger, read half) \u2014 BUT note three earlier layers remain live-but-uncertified below; GP9a itself is certified against them as its baseline",
       "live_but_uncertified": [
-        "GP6 citizen-opinion-poll (save v17 layer) \u2014 9/10 gates; blocked on 2 user decisions (GP6.blocker). NOT shipped.",
-        "GP7a assessed-value shadow ledger (save v18 layer) \u2014 15/16 gates; blocked on the C2 provenance clause (orchestrator-caused; property independently re-verified 7/7) + decision U2. NOT shipped.",
-        "GP8a civil-defense risk ruler (save-neutral) \u2014 18/21 then fix-pass green; blocked on design decision D1 and the C14 memo-hit-rate clause. NOT shipped."
+        "GP6 citizen-opinion-poll (approval composite layer) \u2014 9/10 gates; blocked on 2 user decisions (GP6.blocker). NOT shipped.",
+        "GP7a assessed-value shadow ledger \u2014 15/16 gates; blocked on the C2 provenance clause (orchestrator-caused; property independently re-verified 7/7) + decision U2. NOT shipped.",
+        "GP8a civil-defense risk ruler (save-neutral) \u2014 18/21 then fix-pass green; blocked on design decision D1 and the C14 memo-hit-rate clause. NOT shipped.",
+        "GP10a distress ledger implement pass (DISTRESS_CAUSES sweep, per-tile verdict + month counter, Blight minimap, graph series, save v20; sim.js/ui.js/render.js/index.html) \u2014 checkpointed mid-workflow, NOT shipped; certified or fixed/reverted by running workflow wf_cfebfb35-b7c. Its pinned pre-measurement landed FIRST and alone at the preceding commit, js/ tree identical to baseline."
       ],
       "artifact_reflects": "this ship (bundle rebuilt at GP9a close) \u2014 CONTAINS the three uncertified layers above, disclosed rather than presented as certified"
     }

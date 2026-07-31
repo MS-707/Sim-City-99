@@ -58,10 +58,17 @@ function setMapSize(n) { MAP = n; }
 // MATURE pre-v19 save (L > 0) loads with history.waste === L nulls, NOT [] —
 // only a save with no history at all loads []. SECOND LIST WARNING: the key
 // list below is mirrored by collectBudget's >240 trim loop — extend BOTH.
+// GP10a (save v20): "blight" joins as the THIRTEENTH key, appended LAST under
+// the same ladder rule — the distress ledger's share of ZONED lots currently
+// failing, as a whole percent (0..100). Identical compatibility contract: a
+// mature pre-v20 save loads with history.blight === L nulls (never []), and
+// both key lists — this one and collectBudget's trim mirror — are extended
+// together, or the series is silently dropped on load / drifts out of
+// month-alignment with the other twelve.
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
-  const keys = ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess", "waste"];
+  const keys = ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess", "waste", "blight"];
   for (const k of keys) out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
   let L = 0;
   for (const k of keys) if (out[k].length > L) L = out[k].length;
@@ -1033,6 +1040,9 @@ const COMPLAINT_TEXT = {
   traffic: (n) => `📠 Angry fax from ${n}: gridlock so bad the Macarena played twice before the light changed. Fix this road!`,
   unpowered: (n) => `📠 Angry fax from ${n}: still no power — the Tamagotchi is dead and the VCR won't even blink 12:00!`,
   rubble: (n) => `📠 Angry fax from ${n}: the rubble next door is still there! Clean it up before property values go full Titanic.`,
+  // GP10a: the distress fax. Names the block's decline and NOTHING about what
+  // happens next — the ledger counts, it does not threaten.
+  distress: (n) => `📠 Angry fax from ${n}: this block has been going downhill for months and nobody at city hall has noticed. Come look at it yourself!`,
 };
 
 // panicked wire chatter while the Y2K effect is active (Dec 1999 only)
@@ -1819,6 +1829,37 @@ const RECALL_T = 40, RECALL_MONTHS = 6;
 const POLL_BAD = 60, CRIME_BAD = 100;
 const TRAFFIC_JAM = 80, JAM_OK = 0.10, JAM_BAD = 0.35;
 
+/* ============ GP10a: THE DISTRESS LEDGER — the thresholds ============
+   A RULER, not a rule: nothing below feeds growth, demand, RNG or the budget.
+   Every number is a SHIPPED number re-read, never a new magic constant:
+     crime  CRIME_BAD/2 — the same "competently run city" anchor the GP8a
+            hazard weight uses (hzResp(..., CRIME_BAD/2, CRIME_BAD)) and the
+            same anchor APPROVAL_TERMS scores crimeLocal against. CRIME_BAD
+            itself is UNREACHABLE as a per-tile line: measured max crime on the
+            pinned reference city is 73, and 74 even at 0% police funding, so a
+            row at 100 would be dead state that never fires.
+     cong   0.8 — the literal eviction line growthPass already sheds levels at
+            (`gCong(this, i, k) > 0.8` in growthPass, mirrored by diagnoseTile).
+     dem    -0.25 — the literal DECLINE test in GROWTH_GATES. At this line the
+            shipped sim ALREADY takes levels off the lot; the ledger just
+            counts how many months it has been true.
+   DISTRESS_MAX mirrors unpow's own min(250, ...) clamp, so both counters
+   saturate identically and both stay inside a Uint8 plane.
+   DISTRESS_BANDS are the two READOUT edges (at-risk / critical) — they gate
+   copy, colour and the complaint, never a consequence.
+   DISTRESS_ABAND_W_FLOOR is a DECLARED FORWARD CONSTRAINT (roadmap decision
+   D1), pinned here so GP10b cannot pick an abandonment window <= 12 and make
+   the critical band a state the player can never observe. GP10a itself never
+   reads it — it exists to be read by the milestone that adds the consequence. */
+const DISTRESS_T = Object.freeze({ crime: CRIME_BAD / 2, cong: 0.8, dem: -0.25 });
+const DISTRESS_MAX = 250;               // saturation, mirroring unpow's clamp
+const DISTRESS_BANDS = Object.freeze([6, 12]); // months: at-risk / critical
+const DISTRESS_BAND_NAMES = Object.freeze(["Strained", "At risk", "Critical"]);
+const DISTRESS_ABAND_W_FLOOR = 15;      // forward constraint for GP10b (D1)
+// -1 = healthy (never a band), 0..2 = the three readout bands
+const distressBand = (n) => n <= 0 ? -1
+  : n >= DISTRESS_BANDS[1] ? 2 : n >= DISTRESS_BANDS[0] ? 1 : 0;
+
 // GP6: argmax of a plane, lowest-index tie-break, optionally restricted to an
 // eligible set. Returns null when nothing eligible carries a positive value.
 function apxArgmax(a, ok) {
@@ -2100,6 +2141,88 @@ const ADVISORY_GATES = Object.freeze([
                      ["Dept potency", hzPct(hzPotency(c, "fire")) + "%"],
                      ["Aged plant within 2", hzAgedPlantNear(c, i) ? "yes" : "no"],
                      ["Exposure band", HAZARD_BAND_NAMES[hazardTileBand(c, i)]]] },
+
+  /* GP10a: the DISTRESS row — the ledger's own tile readout. Same
+     advisory-only discipline as its four siblings (walked by _attachAdvisories
+     alone, NEVER a GROWTH_GATES row — that walk is what spends the growth RNG
+     cursor). Strictly O(1): two plane reads plus the ONE cause row the sweep
+     already resolved and stored in distressCause[i], so the panel can never
+     disagree with the sweep about WHY. Restricted to developed lots (roadmap
+     decision D3) — a level-0 zoned lot is counted in the census but has no
+     building to describe. HONESTY CONSTRAINT (the whole milestone rides on
+     it): this copy names the observed cause and the month count and NOTHING
+     else. GP10a has no consequence to promise, so it must never imply a
+     countdown, an eviction date or an abandonment. */
+  { code: "BLOCK_DISTRESS", sev: "warn", label: "Block in distress", advisory: true,
+    test: (c, i) => apxDevZone(c, i) && c.distress[i] > 0,
+    text: (c, i) => {
+      // Defensive on `cause`: the two planes are written and cleared on the
+      // same lines, so distress > 0 always carries a row — but a hand-edited
+      // or truncated save must degrade to a true sentence, not a throw.
+      const d = c.distressAt(i);
+      return `This block has been failing for ${d.n} straight month${d.n === 1 ? "" : "s"} — ` +
+        `${d.cause ? d.cause.toLowerCase() + ", " : ""}${(d.bandName || "strained").toLowerCase()}.` +
+        `${d.row >= 0 ? " " + DISTRESS_CAUSES[d.row].fix : ""}`;
+    },
+    evid: (c, i) => {
+      const d = c.distressAt(i);
+      return [["Months failing", d.n], ["Cause", d.cause || "unrecorded"],
+              ["Band", d.bandName || "Strained"]];
+    } },
+]);
+
+/* ============ GP10a: THE DISTRESS LEDGER — the cause table ============
+   An ORDERED, FIRST-MATCH table in the GROWTH_GATES / ADVISORY_GATES house
+   style, and the ONE definition of "what is wrong with this block". It is
+   walked by exactly two callers: distressTick() (the monthly sweep) and the
+   BLOCK_DISTRESS advisory row above.
+
+   CRITICAL DISCIPLINE, copied verbatim in spirit from the ADVISORY_GATES
+   comment: these rows must NEVER join GROWTH_GATES. firstGate is the
+   UNFILTERED walk growthPass uses to pick the row whose `apply` spends
+   this.rng.growth, so any row inserted there shifts the RNG stream by
+   construction (an S3 violation) — and GP10a's whole promise is that the
+   simulation behaves EXACTLY as it did before. Every `test` here is a pure
+   read of powered/crime/demand/commuterBias/traffic: no RNG, no writes, no
+   recompute*, no camera.
+
+   ROW ORDER IS LOAD-BEARING TWICE OVER. It is the reported cause (first match
+   wins, so a dark block reads DARK even while it is also jammed), and it is
+   the COST ORDER: the three O(1) tests are paid by every zoned tile, and the
+   O(25) trafficNear() probe is paid only by the tiles that survived them
+   (measured 0.48 ms per rollover on the 2140-zoned-tile reference city).
+
+   `test` takes the tile's over[] value as a THIRD argument so the sweep can
+   read over[i] exactly once per tile (the sweep-honesty gate counts index
+   visits); callers outside the sweep pass c.over[i] explicitly.
+   `fix` is the one-clause remedy the advisory copy appends — a description of
+   the cause, never a promise about what happens if it is ignored. */
+const distressDem = (c, i, t) =>
+  (t === OV.ZR ? c.demand.r : t === OV.ZC ? c.demand.c : c.demand.i) + c.commuterBias[i];
+
+const DISTRESS_CAUSES = Object.freeze([
+  { code: "DARK", label: "No power",
+    test: (c, i, t) => !c.powered[i],
+    fix: "Run a line from a plant with capacity to spare.",
+    evid: (c, i) => [["Powered", "no"], ["Dark growth checks", c.unpow[i]]] },
+
+  { code: "CRIME", label: "Crime",
+    test: (c, i, t) => c.crime[i] >= DISTRESS_T.crime,
+    fix: `Crime reads past the ${DISTRESS_T.crime} a working city sits under — patrols reach here thinly.`,
+    evid: (c, i) => [["Crime", c.crime[i]], ["Line", DISTRESS_T.crime],
+                     ["Police coverage", c.polCov[i]]] },
+
+  { code: "SLUMP", label: "No demand",
+    test: (c, i, t) => distressDem(c, i, t) < DISTRESS_T.dem,
+    fix: `Demand for this sector sits under ${DISTRESS_T.dem} — the city has more of this zone than it has use for.`,
+    evid: (c, i) => [["Sector demand", distressDem(c, i, c.over[i]).toFixed(2)],
+                     ["Line", DISTRESS_T.dem]] },
+
+  { code: "GRIDLOCK", label: "Gridlock",
+    test: (c, i, t) => c.trafficNear(i) / 255 > DISTRESS_T.cong,
+    fix: `The streets serving this lot run past ${Math.round(DISTRESS_T.cong * 100)}% congestion.`,
+    evid: (c, i) => [["Congestion", Math.round((c.trafficNear(i) / 255) * 100) + "%"],
+                     ["Line", Math.round(DISTRESS_T.cong * 100) + "%"]] },
 ]);
 
 /* ================= GP8a: CIVIL DEFENSE — the honest risk ruler =================
@@ -2520,6 +2643,16 @@ class City {
     this.access  = new Uint8Array(n);   // 1 = road within reach
     this.fire    = new Uint8Array(n);   // burning ticks remaining
     this.unpow   = new Uint8Array(n);   // consecutive unpowered growth passes
+    /* GP10a (save v20): the DISTRESS LEDGER's two planes, declared here beside
+       unpow because they are the same kind of thing — a per-tile count of
+       consecutive failing checks — and serialized the same way (packU8, whose
+       sparse mode-3 is exactly this mostly-zero small-valued workload).
+       distress[i]      consecutive FAILING month rollovers, 0..DISTRESS_MAX
+       distressCause[i] 1 + the DISTRESS_CAUSES row that bound last sweep (0 = none)
+       Both are AUTHORED STATE, not derived: the load cascade restores them and
+       must NOT re-run distressTick (that would double-count a month). */
+    this.distress      = new Uint8Array(n);
+    this.distressCause = new Uint8Array(n);
     this.poll    = new Uint8Array(n);   // pollution 0..255
     this.landv   = new Uint8Array(n);   // land value 0..255
     this.crime   = new Uint8Array(n);   // crime 0..255
@@ -2652,6 +2785,14 @@ class City {
     this.recallStreak = 0;
     this.recallDone = false;
     this.megaOk = false;
+    /* GP10a: the two DERIVED publications of the distress sweep. Never
+       serialized (they are recomputed from the restored planes the first time
+       distressTick runs), but seeded here so every UI surface that reads them
+       — the almanac line, the district panel, the graph — has a well-formed
+       object to read on a city that has not rolled a month yet. */
+    this.distressVisits = 0;
+    this.distressCensus = { zoned: 0, distressed: 0, share: 0,
+      dev: 0, devDistressed: 0, devShare: 0, byCause: [0, 0, 0, 0] };
     this.traffic = new Uint8Array(n);   // road congestion 0..255 (roads only)
     // M19: build year of the power plant anchored at each tile (0 = no plant
     // here). Only meaningful at anchor tiles; drives the aging capacity curve.
@@ -2694,7 +2835,7 @@ class City {
     // ruler's monthly figure — appended LAST after approv under the ladder rule.
     // GP9a (save v19): waste samples wasteCensus().total — the monthly garbage
     // tonnage — appended LAST after assess under the same ladder rule.
-    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [], approv: [], assess: [], waste: [] };
+    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [], approv: [], assess: [], waste: [], blight: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       cleanTax: 0, // GP5b: the high-tech premium folded into taxes this month
@@ -2935,6 +3076,8 @@ class City {
       const i = this.idx(x, y);
       this.terr[i] = TERR.WATER; this.over[i] = OV.NONE; // clears rubble
       this.lvl[i] = 0; this.anc[i] = -1; this.varnt[i] = 0;
+      // GP10a clear site 1/10 (waterfill): a drowned lot carries no ledger.
+      this.distress[i] = 0; this.distressCause[i] = 0;
       if (this.rail[i] !== RL.NONE) { this.rail[i] = RL.NONE; this.railDirty = true; } // M25: flooding leaves no ghost line
       this.funds -= cost;
       this.powerDirty = true; // water blocks conduction & road access
@@ -2952,6 +3095,10 @@ class City {
       if (tool === "wire" && this.over[i] === OV.ROAD) put = OV.WIREROAD;
       else if (tool === "road" && this.over[i] === OV.WIRE) put = OV.WIREROAD;
       this.over[i] = put; this.lvl[i] = 0; this.anc[i] = a;
+      // GP10a clear site 2/10 (place footprint): re-zoning or building over a
+      // tile starts its ledger at zero — otherwise a fresh lot inherits a
+      // stale month count from whatever failed here before.
+      this.distress[i] = 0; this.distressCause[i] = 0;
       // GP1b: the sprite variant is stamped at BUILD time, so it rides the
       // `build` cursor stream — required, not optional: byte-identical varnt[]
       // across two runs of the same input script is a hard determinism gate.
@@ -3002,6 +3149,9 @@ class City {
       const j = this.idx(ax + dx, ay + dy);
       this.over[j] = OV.NONE; this.lvl[j] = 0; this.anc[j] = -1;
       this.fire[j] = 0; this.unpow[j] = 0;
+      // GP10a clear site 3/10 (bulldoze): rides beside the fire/unpow clear
+      // that has always lived on this line, for the same reason.
+      this.distress[j] = 0; this.distressCause[j] = 0;
       this.plantYear[j] = 0; // M19: demolishing a plant clears its build year
     }
     delete this.warnedPlants[a];
@@ -4334,6 +4484,12 @@ class City {
       this.roadWear[i] = Math.max(0, Math.min(255, this.roadWear[i] + delta));
       if (F === 0 && this.roadWear[i] >= 255 && rh.chance(0.35)) {
         this.over[i] = OV.RUBBLE; this.lvl[i] = 0; this.anc[i] = -1;
+        // GP10a clear site 4/10 (road crumble). DEFENSIVE ONLY: this loop
+        // `continue`s on anything that is not ROAD/WIREROAD, and a road tile
+        // is never zoned, so it can never carry a nonzero distress byte. It is
+        // written anyway so the ten destruction sites are one uniform rule
+        // rather than nine plus an exception nobody re-checks after a refactor.
+        this.distress[i] = 0; this.distressCause[i] = 0;
         this.roadWear[i] = 0;
         crumbled++;
       }
@@ -5334,6 +5490,7 @@ class City {
           for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
             const j = this.idx(ax + dx, ay + dy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 5/10 (fire burnout)
           }
           this.powerDirty = true;
         } else if (this.terr[i] === TERR.FOREST) {
@@ -5519,6 +5676,7 @@ class City {
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
             const j = this.idx(ax + ddx, ay + ddy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 6/10 (tornado)
           }
           this.powerDirty = true;
         } else if (this.terr[i] === TERR.FOREST && rh.chance(0.4)) {
@@ -5545,6 +5703,7 @@ class City {
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
             const j = this.idx(ax + ddx, ay + ddy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 7/10 (quake)
           }
           this.powerDirty = true;
         }
@@ -5579,6 +5738,7 @@ class City {
             for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
               const j = this.idx(ax + ddx, ay + ddy);
               this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+              this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 8/10 (flood)
               if (d.flooded.indexOf(j) === -1) d.flooded.push(j);
             }
             this.powerDirty = true;
@@ -5607,6 +5767,7 @@ class City {
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
             const j = this.idx(ax + ddx, ay + ddy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 9/10 (riot)
           }
           this.powerDirty = true;
         }
@@ -5630,6 +5791,7 @@ class City {
           for (let ddy2 = 0; ddy2 < s; ddy2++) for (let ddx2 = 0; ddx2 < s; ddx2++) {
             const j = this.idx(ax + ddx2, ay + ddy2);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
+            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 10/10 (monster)
           }
           this.powerDirty = true;
         }
@@ -6059,6 +6221,91 @@ class City {
       (this.avgCommute <= MEGA_COMMUTE || this.cityIndex(this.poll) <= MEGA_POLL);
   }
 
+  /* ---------- GP10a: THE DISTRESS LEDGER — the monthly sweep ----------
+     ONE ascending pass over every tile, once per month rollover, that COUNTS
+     decline and changes nothing else. It is the ruler GP10b's abandonment
+     will be built on; on its own it has no consequence at all.
+
+     THE CONTRACT, and every clause of it is a gate:
+       * ZERO RNG. It draws from none of the four cursor streams and calls no
+         Math.random. Adding a row to GROWTH_GATES instead would have shifted
+         this.rng.growth by construction (firstGate is the unfiltered walk
+         whose apply() spends the cursor), which is exactly why DISTRESS_CAUSES
+         is a separate table.
+       * ZERO WRITES outside its own two planes and two published scalars.
+         It calls no recompute*, reads no camera, allocates nothing inside the
+         loop, and is a pure function of serialized state — so two runs of the
+         same script produce a byte-identical distress[].
+       * EXACTLY ONE VISIT PER TILE, ascending, and exactly one read of over[i]
+         per tile (which is why DISTRESS_CAUSES.test takes the type as its
+         third argument rather than re-reading the plane).
+       * ITS SLOT IS FIXED FOREVER: inside tick()'s %24 block, AFTER
+         approvalTick() and BEFORE collectBudget(). collectBudget pushes
+         history.blight from the census this sweep just published, so a later
+         slot silently lags the graph by a month — and GP10b needs abandonment
+         to land in the same month's taxes.
+
+     A zoned tile (ZR/ZC/ZI at ANY level) walks DISTRESS_CAUSES first-match:
+     a hit increments the counter (saturating at DISTRESS_MAX) and records the
+     row; a clean walk resets BOTH planes to 0, so recovery is immediate and
+     the counter always means "consecutive months, ending now". Anything not
+     zoned is reset unconditionally.
+
+     THE CENSUS DENOMINATOR IS THE ZONED FOOTPRINT AT ANY LEVEL — the exact
+     population approvalCensus uses, for the exact reason recorded there: a
+     share measured over DEVELOPED lots SELF-HEALS, because the blocks a
+     failure drives into abandonment leave both sides of the ratio (measured on
+     the shipped approval poll: unpowShare decayed 0.309 -> 0.000 over 20
+     months with the wire still cut). The zoned footprint is the commitment the
+     mayor made and it does not shrink. BOTH counts are published (roadmap
+     decision D3): `share` over zoned tiles is the honest citywide number, and
+     `devShare` over built lots is what the tile wash, the advisory and the
+     complaint are restricted to, because a level-0 lot has no building to
+     describe. */
+  distressTick() {
+    const n = this.over.length;
+    let zoned = 0, distressed = 0, dev = 0, devDistressed = 0;
+    const byCause = [0, 0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      const t = this.over[i];               // the ONE over[] read per tile
+      if (t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) {
+        this.distress[i] = 0; this.distressCause[i] = 0;
+        continue;
+      }
+      zoned++;
+      const lv = this.lvl[i];
+      if (lv > 0) dev++;
+      let row = -1;
+      for (let g = 0; g < DISTRESS_CAUSES.length; g++)
+        if (DISTRESS_CAUSES[g].test(this, i, t)) { row = g; break; }
+      if (row < 0) { this.distress[i] = 0; this.distressCause[i] = 0; continue; }
+      const v = this.distress[i] + 1;
+      this.distress[i] = v > DISTRESS_MAX ? DISTRESS_MAX : v;
+      this.distressCause[i] = row + 1;
+      distressed++; byCause[row]++;
+      if (lv > 0) devDistressed++;
+    }
+    // the sweep-honesty observable: every tile on the map, every rollover
+    this.distressVisits = n;
+    this.distressCensus = {
+      zoned, distressed, share: zoned ? distressed / zoned : 0,
+      dev, devDistressed, devShare: dev ? devDistressed / dev : 0,
+      byCause,
+    };
+  }
+
+  /* O(1) pure read of the ledger at one tile, for the UI and the render wash.
+     Never allocates a plane, never calls a recompute*, never sweeps. `row` is
+     the DISTRESS_CAUSES index (-1 when healthy) and `band` is the readout band
+     (-1 healthy, 0 strained, 1 at risk, 2 critical). */
+  distressAt(i) {
+    const n = this.distress[i], row = this.distressCause[i] - 1;
+    const b = distressBand(n);
+    const r = row >= 0 && row < DISTRESS_CAUSES.length ? DISTRESS_CAUSES[row] : null;
+    return { n, row, code: r ? r.code : null, cause: r ? r.label : null,
+             band: b, bandName: b >= 0 ? DISTRESS_BAND_NAMES[b] : null };
+  }
+
   /* ---------- civil defense (GP8a) ----------
      hazardCensus(): EXACTLY ONE O(MAP*MAP) scan producing every aggregate the
      HAZARD_TERMS drivers need, modelled line for line on approvalCensus().
@@ -6326,13 +6573,21 @@ class City {
     // growthPass / recomputeMaps, and it draws no random numbers, so it cannot
     // perturb the growth cursor scanComplaints reads later in this same block.
     this.history.waste.push(this.wasteCensus().total);
-    // trim all TWELVE in lockstep under the one existing >240 guard so every
+    /* GP10a (save v20): the blight series, pushed LAST (after waste) so the
+       v19 keys keep their serialized order. O(1) — distressTick ran earlier in
+       this same %24 block and PUBLISHED distressCensus, so this reads a number
+       rather than recomputing one, and it describes exactly this month. The
+       share is over the ZONED footprint (see distressTick's comment on why the
+       developed denominator self-heals), stored as a whole percent so it plots
+       on the same 0..100 axis the approval series uses. */
+    this.history.blight.push(Math.round(this.distressCensus.share * 100));
+    // trim all THIRTEEN in lockstep under the one existing >240 guard so every
     // array stays the same length and month-aligned.
     // SECOND LIST WARNING: this key list is the mirror of normaliseHistory()'s
     // (js/sim.js, top of file) — extend BOTH or the new series is silently
     // dropped on load / drifts out of month-alignment with the others.
     if (this.history.pop.length > 240)
-      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess", "waste"])
+      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess", "waste", "blight"])
         this.history[k].shift();
   }
 
@@ -6384,6 +6639,19 @@ class City {
       } else if ((t === OV.ZR || t === OV.ZC || t === OV.ZI) &&
                  this.lvl[i] > 0 && !this.powered[i]) {
         kind = "unpowered"; score = 150;
+      } else if ((t === OV.ZR || t === OV.ZC || t === OV.ZI) &&
+                 this.lvl[i] > 0 && this.distress[i] >= DISTRESS_BANDS[0]) {
+        /* GP10a: the distress grievance, RANKED LAST at a flat 30 — below the
+           40 floor crime/poll can reach and far below rubble/unpowered
+           (roadmap decision D2). MEASURED before it shipped: on the pinned
+           corpus (seeds 4242 and 1, 120 rollovers past tick 600) ALL 40
+           complaints that fire are `unpowered` at a flat 150, so any score
+           above that would have taken every one of them and starved the only
+           kind the corpus actually produces. At 30 the fax appears only where
+           no shipped grievance qualifies at all, which is what keeps GP10a's
+           "behaves exactly as before" promise literally true. `else if` after
+           unpowered, so a dark lot still complains about the dark. */
+        kind = "distress"; score = 30;
       }
       if (this.crime[i] >= COMPLAINT_T.crime && 40 + this.crime[i] - COMPLAINT_T.crime > score) {
         kind = "crime"; score = 40 + this.crime[i] - COMPLAINT_T.crime;
@@ -6558,6 +6826,12 @@ class City {
       this.plantAgingTick();  // power plant aging notices (M19) — rollover only
       this.eduTick();         // GP5b: education slow-stock EWMA — rollover only, zero RNG
       this.approvalTick();    // GP6: citizen approval EMA + streaks — rollover only, zero RNG
+      // GP10a: the distress ledger — rollover only, zero RNG, read-only outside
+      // its own two planes. THIS SLOT IS FIXED: after approvalTick and BEFORE
+      // collectBudget, whose history.blight push reads the census published
+      // here (a later slot lags the graph by a month), and which is the slot
+      // GP10b needs so abandonment lands in the same month's taxes.
+      this.distressTick();
       this.collectBudget();
       this.updateRecords();   // City Hall records (M17) — rollover only
       this.scanComplaints();  // citizen complaints (M17) — rollover only
@@ -6644,10 +6918,20 @@ class City {
     let sumEdu = 0, sumMed = 0, sumPol = 0, sumFire = 0;
     let sumTraffic = 0, roadTiles = 0;
     let zr = 0, zc = 0, zi = 0;
+    // GP10a: the distress ledger folded into the EXISTING single pass — two
+    // counters and a 4-slot cause tally, all pure plane reads.
+    let distressed = 0, distressedDev = 0;
+    const causeN = [0, 0, 0, 0];
     for (let i = 0; i < this.district.length; i++) {
       if (this.district[i] !== id) continue;
       tiles++;
       const ov = this.over[i], lv = this.lvl[i];
+      if (this.distress[i] > 0) {
+        distressed++;
+        if (lv > 0) distressedDev++;
+        const cr = this.distressCause[i] - 1;
+        if (cr >= 0 && cr < causeN.length) causeN[cr]++;
+      }
       sumLv += this.landv[i]; sumPoll += this.poll[i]; sumCrime += this.crime[i];
       sumEdu += this.eduCov[i]; sumMed += this.medCov[i];
       sumPol += this.polCov[i]; sumFire += this.fireCov[i];
@@ -6662,8 +6946,14 @@ class City {
       dominant = (zr >= zc && zr >= zi) ? "Residential"
         : (zc >= zi) ? "Commercial" : "Industrial";
     }
+    // GP10a: the district's own worst cause — argmax of the tally, lowest-index
+    // tie-break (the apxArgmax idiom), "None" when nothing here is failing.
+    let dominantCause = "None", cBest = 0;
+    for (let k = 0; k < causeN.length; k++)
+      if (causeN[k] > cBest) { cBest = causeN[k]; dominantCause = DISTRESS_CAUSES[k].label; }
     return {
       tiles, developed, pop, jobs,
+      distressed, distressedDev, dominantCause,
       landv: avg(sumLv), poll: avg(sumPoll), crime: avg(sumCrime),
       edu: avg(sumEdu), med: avg(sumMed), pol: avg(sumPol), fire: avg(sumFire),
       traffic: roadTiles ? Math.round(sumTraffic / roadTiles) : 0,
@@ -6731,9 +7021,25 @@ class City {
        defensive Array.isArray guard and its null LEFT PAD, so a mature pre-v19
        save loads with history.waste padded to L nulls — month-aligned to its
        eleven siblings, plotted as nothing — and a save with no history at all
-       loads waste === []. No v===19 test anywhere in deserialize. */
+       loads waste === []. No v===19 test anywhere in deserialize.
+       GP10a (save v20): THREE new pieces of state — the two DISTRESS LEDGER
+       planes (`distress`, `distressCause`, both packU8, APPENDED strictly
+       after recallDone so the whole v19 prefix stays character-stable) and the
+       `history.blight` series appended LAST inside the existing history object
+       (normaliseHistory AND collectBudget's trim list both extended — see the
+       warnings there). The planes MUST persist: they are authored state, not a
+       derivation, so the load cascade restores them and deliberately does NOT
+       re-run distressTick — recomputing on load would double-count a month and
+       a rebuild-from-scratch would erase every month of neglect the player
+       actually accrued. distressCensus/distressVisits are DERIVED and never
+       serialized (the megaOk / svcStrain policy). Both planes are mostly-zero
+       small-valued Uint8 — packU8's sparse mode-3 workload — measured at
+       +3.45% of the save on a heavily-distressed reference city and +0.13% on
+       a clean one. No v===20 test anywhere in deserialize: a pre-v20 save
+       simply carries neither key, unpackU8 no-ops, and the city loads with an
+       all-zero ledger that starts counting at its next rollover. */
     return JSON.stringify({
-      v: 19, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 20, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -6827,6 +7133,9 @@ class City {
          round4-stored, so serialize→deserialize→serialize is byte-stable. */
       approval: round4(this.approval), approvalStreak: this.approvalStreak,
       recallStreak: this.recallStreak, recallDone: this.recallDone,
+      /* ---- GP10a (save v20) ---- appended AFTER recallDone (ladder rule), so
+         every byte of the v19 serialization above is character-stable. */
+      distress: packU8(this.distress), distressCause: packU8(this.distressCause),
     });
   }
 
@@ -7008,6 +7317,18 @@ class City {
     unpackU8(d.traffic, c.traffic);
     unpackU8(d.unpow, c.unpow);
     unpackU8(d.fire, c.fire);
+    /* GP10a (save v20): the distress ledger's two planes, restored beside the
+       three accumulators above and under the same defensive contract —
+       unpackU8 REJECTS a malformed/absent pack and leaves the ctor's zeroed
+       plane standing, so a pre-v20 save loads with an all-zero ledger and no
+       v===20 test is needed anywhere. Deliberately a plain overlay and NOT a
+       rebuild: distressTick is never called from the load cascade, because the
+       counters are authored state (re-running the sweep here would count the
+       loaded month twice, and rebuilding from scratch would erase the neglect
+       the player accrued). distressCensus/distressVisits stay at their ctor
+       defaults until the first post-load rollover republishes them. */
+    unpackU8(d.distress, c.distress);
+    unpackU8(d.distressCause, c.distressCause);
     /* GP3b (save v14): overlay the two commute scalars the cascade's
        recomputeTraffic just re-derived — its rebuild ran against lvl[] that
        may sit up to 4 ticks past trafficEpoch, so the recomputed values can

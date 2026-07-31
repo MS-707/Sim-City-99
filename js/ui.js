@@ -52,6 +52,13 @@ const UI = {
     // branch falls through to the monthly tail and the right-edge span label
     // must still divide the point count by 12.
     waste: { on: false, color: "#7a5c2e", key: "waste", label: "Garbage (t/mo)", idx: true, monthly: true },
+    // GP10a: the blight share (history.blight) — the distress ledger's
+    // published number, percent of ZONED lots currently failing. OFF by
+    // default so the shipped default render stays pixel-identical. `idx`
+    // because a percent is a raw number, not §; `monthly` because there is no
+    // annual record store, so seriesData's 100yr branch falls through to the
+    // monthly tail and the right-edge span label must still divide by 12.
+    blight: { on: false, color: "#c07030", key: "blight", label: "Blight (% of lots)", idx: true, monthly: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
   // GP1a: the open Tile Info target ({x, y, at}) — null whenever the dialog is
@@ -823,20 +830,26 @@ const MM_LEGENDS = {
   // words sim.js's WASTE_BAND_EDGES block documents), measured at 23px — the
   // exact two-row height of value/risk/svc/transit/commute.
   garbage: '<i class="sw" style="background:#14240f"></i>trace <i class="sw" style="background:#7a4a12"></i>light <i class="sw" style="background:#a08a52"></i>mid <i class="sw" style="background:#e39a5e"></i>heavy <i class="sw" style="background:#f0e4c0"></i>peak <i class="sw" style="background:#013"></i>water',
+  // GP10a: five categories — the healthy zoned lot, the three distress bands
+  // (sim.js DISTRESS_BAND_NAMES, short-cased to match the garbage ladder's
+  // one-word style) and the standard water swatch. Five swatch/label pairs is
+  // the same load the `garbage` row above measures at the house two-row 23px.
+  blight: '<i class="sw" style="background:#2e3a44"></i>healthy <i class="sw" style="background:#8a5a20"></i>strained <i class="sw" style="background:#d08a30"></i>at risk <i class="sw" style="background:#ffd8a0"></i>critical <i class="sw" style="background:#013"></i>water',
 };
 
 // GP5a: legend mode names — with 15 map modes the abbreviated buttons alone
 // no longer identify the view, so every non-"City" legend leads with its name.
 // GP8a: MM_NAMES, MM_LEGENDS and the updateMapLegend walk are extended in ONE
 // edit — the GP6 fix-pass comment below documents what a half-extension does.
-// GP9a: `garbage` joins under that same one-edit rule. MM_NAMES is read
+// GP9a: `garbage` joins under that same one-edit rule; GP10a: so does
+// `blight`, the SIXTEENTH mode. MM_NAMES is read
 // UNCONDITIONALLY below, so a mode with a legend row but no name row captions
 // itself with the literal string "undefined".
 const MM_NAMES = { all: "City", power: "Power", poll: "Pollution",
   value: "Land value", crime: "Crime", traffic: "Traffic",
   svc: "Schools & health", pol: "Police", fire: "Fire", water: "Water",
   transit: "Rail", commute: "Commute", dist: "Neighborhoods", risk: "Risk",
-  garbage: "Garbage" };
+  garbage: "Garbage", blight: "Blight" }; // GP10a: the sixteenth mode
 
 function updateMapLegend(mode) {
   const el = document.getElementById("mm-legend");
@@ -1469,6 +1482,11 @@ function fillDistrictStats() {
     `<tr><td>Avg crime</td><td>${s.crime}</td></tr>` +
     `<tr><td>Avg traffic</td><td>${s.traffic}</td></tr>` +
     `<tr><td>Powered</td><td>${s.powered}%</td></tr>` +
+    // GP10a: the distress ledger's district cut — failing lots out of the
+    // built ones, plus the neighbourhood's own worst cause. Reads the counters
+    // districtStats accumulates in its existing single pass.
+    `<tr><td>Distressed lots</td><td>${s.distressedDev} of ${s.developed} developed` +
+    `${s.distressed ? ` · ${s.dominantCause}` : ""}</td></tr>` +
     `<tr class="total"><td colspan="2" class="dim">${quip}</td></tr>`;
 }
 
@@ -1581,7 +1599,17 @@ function buildAlmanacRows() {
     // near-jobs percentage (em-dash while the city has no residents)
     `<tr><td colspan="5">Commute: avg ${city.avgCommute} hops · ` +
     `${Math.round(city.strandedShare * 100)}% stranded · ` +
-    `${city.commutePct < 0 ? "—" : city.commutePct + "%"} of residents near jobs</td></tr>`;
+    `${city.commutePct < 0 ? "—" : city.commutePct + "%"} of residents near jobs</td></tr>` +
+    // GP10a: the live blight line, read field-for-field off the census
+    // distressTick published at the last rollover (never recomputed here — the
+    // GP3b commute line above is the exact precedent). Both denominators are
+    // printed because they answer different questions: the zoned share is the
+    // commitment the mayor made, the developed share is what is standing.
+    `<tr><td colspan="5">Blight: ${city.distressCensus.distressed} of ` +
+    `${city.distressCensus.zoned} zoned lots failing ` +
+    `(${Math.round(city.distressCensus.share * 100)}%) · ` +
+    `${city.distressCensus.devDistressed} of ${city.distressCensus.dev} built ` +
+    `(${Math.round(city.distressCensus.devShare * 100)}%)</td></tr>`;
 }
 
 function openAlmanac() {

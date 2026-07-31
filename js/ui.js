@@ -1164,13 +1164,29 @@ function fillPowerMix() {
     return `<tr><td><i class="sw" style="background:${t.col}"></i>${t.label}</td>` +
            `<td>${mw} MW (${pct}%)</td></tr>`;
   }).join("");
-  // GP9a: the signed regional-trade line. Printed ONLY when the net is non-zero
-  // (no deal, no row — the pre-GP9a legend is unchanged on a city that trades
-  // nothing), with an explicit leading sign so an EXPORT reads as the debit it
-  // is. Σ slices + this row === the footer, exactly.
+  /* GP9a: the signed regional-trade line. Printed ONLY when the net is non-zero
+     (no deal, no row — the pre-GP9a legend is unchanged on a city that trades
+     nothing), with an explicit leading sign so an EXPORT reads as the debit it
+     is. Σ slices + this row === the footer, exactly.
+     FIX PASS, two panel findings, both about the legend READING wrong while the
+     arithmetic was right:
+     (a) THE PERCENT COLUMN AND THE FOOTER HAD DIFFERENT DENOMINATORS. Each
+         plant row's % is a share of the PLANT MIX, but the footer states
+         city.powerSupply, so a 4-coal city buying 200 MW rendered "Coal 1200 MW
+         (100%) … Total supply 1400 MW" — a row claiming 100% of a stated 1400.
+         The `Plant output` subtotal now states the percent column's denominator
+         explicitly, immediately under the rows it divides, so the reader can
+         follow plants -> trade -> supply as one arithmetic column. It rides the
+         SAME non-zero-net condition, so a city with no deal is unchanged.
+     (b) THE TRADE ROW WORE A PIE-SLICE SWATCH (#8d6bb0) THOUGH NO PURPLE WEDGE
+         CAN EXIST — a trade is not a generator and an export is negative. The
+         swatch was a false affordance; the row is now typographically distinct
+         (a signed ± marker, no <i class="sw">), so every swatch in this legend
+         still maps 1:1 onto a wedge in the pie beside it. */
   const net = led.tradeIn - led.tradeOut;
   const tradeRow = net !== 0
-    ? `<tr><td><i class="sw" style="background:#8d6bb0"></i>Regional trade</td>` +
+    ? `<tr><td>Plant output</td><td>${total} MW</td></tr>` +
+      `<tr><td><em>&plusmn; Regional trade</em></td>` +
       `<td>${net < 0 ? "-" : "+"}${Math.abs(net)} MW</td></tr>`
     : "";
   document.getElementById("powermix-legend").innerHTML =

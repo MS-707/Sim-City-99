@@ -462,32 +462,57 @@ const IND_JOB = [0, 8, 22, 48];
    the curb, indexed [level] with index 0 unused (an undeveloped, painted lot
    makes no garbage at all). Sited beside RES_POP/COM_JOB/IND_JOB because it is
    the same shape of per-tile-per-level yield table and is read the same way.
-   Industry is heaviest per the M31 design — a level-3 factory block (26 t) puts
-   out nearly three times a level-3 residential tower (9 t).
+   Industry is heaviest per the M31 design — a level-3 factory block (140 t)
+   puts out nearly three times a level-3 residential tower (52 t), and a level-1
+   factory (36 t) already outweighs a level-2 shop (32 t).
+
+   EVERY ENTRY IS A MULTIPLE OF 4, DELIBERATELY, AND THIS IS A CORRECTNESS
+   CONSTRAINT, NOT A ROUNDING OF CONVENIENCE. wasteRateAt() rounds PER TILE
+   (Math.round(row[l] * ordMods.wasteMul)), so with the recycling ordinance's
+   K = 0.75 a rate that is NOT a multiple of 4 rounds unevenly: the fix pass
+   measured an earlier 2/5/9 · 3/7/12 · 6/14/26 table dropping 0% on a level-1
+   house (round(2*0.75) = 2), 33.3% on a level-1 shop and 16.7% on a level-1
+   factory, so the citywide aggregate landed wherever the city's zone mix
+   happened to put it (-15.3% on the reference city) instead of at the -25%
+   the ordinance blurb promises the mayor. On a quarter-grid table the per-tile
+   round is EXACT at K = 0.75, so every tile — and therefore every city, at
+   every zone mix — drops by exactly a quarter, the map response is graded
+   rather than a rounding artifact, and the aggregate bar is falsifiable.
+   ANY D1 RETUNE MUST KEEP THE MULTIPLE-OF-4 PROPERTY.
+
    READ-ONLY IN GP9a: nothing in the sim consumes these numbers. The only
    consumers are wasteRateAt()/wasteCensus() (both pure reads), the monthly
    history.waste sample, the Garbage overlay and the tile query row. */
 const WASTE_RATE = Object.freeze({
-  [OV.ZR]: Object.freeze([0, 2, 5, 9]),
-  [OV.ZC]: Object.freeze([0, 3, 7, 12]),
-  [OV.ZI]: Object.freeze([0, 6, 14, 26]),
+  [OV.ZR]: Object.freeze([0, 8, 24, 52]),
+  [OV.ZC]: Object.freeze([0, 12, 32, 68]),
+  [OV.ZI]: Object.freeze([0, 36, 76, 140]),
 });
 
 /* GP9a: the Garbage overlay's four band EDGES, derived FROM the table above so
    a D1 retune of WASTE_RATE cannot leave the map's ladder describing a rate
-   scale that no longer exists. Each edge is a recognisable tile archetype, so
-   the overlay answers "how does this block compare to a house / a tower / a
-   factory", the same question the query row is asked:
-     < ZR[1]+1   trace     — lighter than a single level-1 house block
-     >= ZR[1]+1  light     — more than one house block, less than a tower
-     >= ZR[3]    moderate  — a level-3 residential tower's load
-     >= ZI[2]    heavy     — a level-2 factory's load
-     >= ZI[3]    extreme   — a level-3 factory, the heaviest single tile
+   scale that no longer exists. Each edge IS a recognisable tile archetype's
+   exact rate, so the overlay answers "how does this block compare to a shop /
+   a factory / a shopping tower", the same question the query row is asked:
+     < ZC[1]    trace     — lighter than a single level-1 shop block
+     >= ZC[1]   light     — a shop block's load, up to a factory's
+     >= ZI[1]   moderate  — a level-1 factory's load or more
+     >= ZC[3]   heavy     — a level-3 shopping tower's load or more
+     >= ZI[3]   extreme   — a level-3 factory, the heaviest single tile
+   THE LADDER IS CALIBRATED TO WHAT THE SIM ACTUALLY GROWS, which the fix pass
+   found the first ladder was not: a naturally grown city is overwhelmingly
+   level-1, and the earlier edges [ZR[1]+1, ZR[3], ZI[2], ZI[3]] put every
+   level-1 tile in the bottom TWO bands, so the bright half of the ramp painted
+   zero pixels on ten separate grown cities. These edges split the three
+   level-1 archetypes across three DIFFERENT bands (house 8 -> trace, shop 12 ->
+   light, factory 36 -> moderate), so an ordinary city lights bands 0..2 and a
+   dense one reaches 3 and 4. Any retune must preserve the ordering the edges
+   assume: ZR[1] < ZC[1] <= ZC[2] < ZI[1] <= ZR[3] < ZC[3] <= ZI[2] < ZI[3].
    wasteBand returns -1 for a tile that makes NO garbage, which the minimap
    paints as dimmed City-mode context rather than as a band. */
 const WASTE_BAND_EDGES = Object.freeze([
-  WASTE_RATE[OV.ZR][1] + 1, WASTE_RATE[OV.ZR][3],
-  WASTE_RATE[OV.ZI][2], WASTE_RATE[OV.ZI][3],
+  WASTE_RATE[OV.ZC][1], WASTE_RATE[OV.ZI][1],
+  WASTE_RATE[OV.ZC][3], WASTE_RATE[OV.ZI][3],
 ]);
 const wasteBand = (v) => {
   if (v <= 0) return -1;
@@ -1617,6 +1642,33 @@ const covR = (radius, f) => Math.round(radius * (0.4 + 0.6 * f));
 // combustible building; rubble is already burnt).
 const SVC_LINEAR = new Set([OV.ROAD, OV.WIREROAD, OV.XWAY, OV.RAMP,
   OV.WIRE, OV.PIPE, OV.RUBBLE]);
+
+/* GP9a (fix pass): deptStrain's fire-load census runs over EVERY tile, and it
+   is the one hoisted predicate that sits in a per-tile loop hot enough to
+   measure — swapping the baseline's single inline `SVC_LINEAR.has(t)` for two
+   arrow calls (ovIsZone + ovIsStructure, the latter itself calling ovIsZone
+   again) cost a REPRODUCIBLE ~7-8% on a 128x128 city, which is over gate 8's
+   5% bar even though the absolute cost is a tenth of a millisecond.
+   These two Uint8Arrays are MEMOISED LOOKUPS GENERATED FROM THE PREDICATES
+   THEMSELVES, once, at module-evaluation time: the arrows stay the single
+   source of truth (change one and the table changes with it — there is no
+   second copy of the rule to forget), the crosstalk audit still asserts
+   against the arrows, and the loop pays one typed-array index per tile, which
+   is cheaper than the Set lookup the baseline paid. Built HERE rather than
+   beside the arrows because ovIsStructure dereferences SVC_LINEAR, which is
+   declared immediately above. OV ids are a contiguous 0..33 run in a
+   Uint8Array; the +1 sizes the table by the last id, and a hypothetical
+   out-of-range byte reads `undefined` -> falsy, exactly as the arrows do. */
+const OV_IS_ZONE = (() => {
+  const a = new Uint8Array(OV.RAMP + 1);
+  for (let t = 0; t < a.length; t++) a[t] = ovIsZone(t) ? 1 : 0;
+  return a;
+})();
+const OV_IS_STRUCTURE = (() => {
+  const a = new Uint8Array(OV.RAMP + 1);
+  for (let t = 0; t < a.length; t++) a[t] = ovIsStructure(t) ? 1 : 0;
+  return a;
+})();
 
 /* GP5b: strain coupling + the education/health split — calibration knobs (S6:
    tune these constants, never the gate bars).
@@ -5688,8 +5740,11 @@ class City {
       // overlay byte. The control flow is unchanged statement for statement:
       // OV.NONE still short-circuits BEFORE the SVC_LINEAR test, and the zone
       // branch still `continue`s after accumulating its pop/job load.
+      // The per-tile tests read the OV_IS_ZONE / OV_IS_STRUCTURE lookups that
+      // are GENERATED FROM those same arrows (see their declaration beside
+      // SVC_LINEAR) — identical answers, no call per tile in the hot census.
       if (t === OV.NONE) continue;
-      if (ovIsZone(t)) {
+      if (OV_IS_ZONE[t]) {
         const l = this.lvl[i];
         if (!ovZoneIsStructure(t, l)) continue; // an undeveloped zone tile is a painted lot, not a structure
         structures++;
@@ -5698,7 +5753,7 @@ class City {
         else jobLoad += IND_JOB[l];
         continue;
       }
-      if (!ovIsStructure(t)) continue; // roads/wires/pipes/rubble: nothing to protect
+      if (!OV_IS_STRUCTURE[t]) continue; // roads/wires/pipes/rubble: nothing to protect
       structures++;
       const def = SVC_DEF[t];
       if (def && this.anc[i] === i) {

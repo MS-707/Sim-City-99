@@ -2251,6 +2251,46 @@ const MM_FIRECOV = [[50, 20, 12], [190, 95, 32], [255, 208, 122]];   // dark emb
    exactly, so the ramp still reads as one ladder. */
 const MM_VALUE_BANDS = ["#3f2f22", "#2b5a55", "#3d8c6e", "#6adabb", "#ffe066"];
 
+/* GP8a S4: the four CIVIL DEFENSE exposure bands the "risk" overlay paints,
+   indexed by sim.js's hazardTileBand() — the ONE band definition the Risk map,
+   the FIRE_RISK_HIGH inspector row and the Civil Defense panel all share, so
+   the map and the tile readout can never disagree.
+   Strictly rising in Rec.709 luminance (52.2 / 108.8 / 164.9 / 220.6 — steps
+   56.6 / 56.2 / 55.6, every one well over the 25 bar) and >= 50 apart in at
+   least one channel between adjacent bands (68 / 177 / 184), so the ladder
+   survives deuteranopia on luminance alone. Worst pair among all five declared
+   categories (4 bands + the standard water swatch #013) is CIEDE2000 24.2, and
+   24.1 under a simulated deuteranope — both far over this codebase's 13 bar.
+   SEVERE IS DELIBERATELY NOT GOLD: the land-value ramp already owns #ffe066 at
+   its top, and a mayor switching between "value" and "risk" must never read
+   "prime real estate" as "about to burn". #ffd2e0 is a hot blown-out pink,
+   dE 37.4 from the amber below it (29.5 deutan) and dE 30+ from every band of
+   the value ramp. */
+const RISK_BANDS = ["#243a2a", "#2f7e78", "#e0a028", "#ffd2e0"];
+
+/* GP8a: the Risk band buffer, memoised in MODULE scope — deliberately NOT a
+   field on City. That is what makes GP8a's read-only proof structural: the
+   milestone adds ZERO keys to the City object and ZERO keys to the save.
+   The key is every sim revision counter that can move a band, plus the
+   recomputeMaps period (14 ticks — the coverage planes cannot change faster
+   than that), so the buffer is rebuilt at most once per plane refresh and never
+   twice for the same state. `riskBuf` stays at module scope so a rotation gate
+   can hash the BUFFER: hashing the minimap canvas is invalid, because the
+   camera-viewport rect below routes four screen corners through the
+   rotation-aware screenToTileF and therefore differs at every rotation. */
+let riskBuf = null, riskKey = "";
+function riskBands(city) {
+  const key = `${city.devRev}|${city.terrRev}|${city.powerEpoch}|${city.trafficEpoch}|` +
+    `${(city.tickCount / 14) | 0}|${city.funding.fire},${city.funding.police}|` +
+    `${city.disastersEnabled ? 1 : 0}|${city.year}`;
+  if (riskBuf && riskKey === key && riskBuf.length === city.over.length) return riskBuf;
+  const n = city.over.length;
+  if (!riskBuf || riskBuf.length !== n) riskBuf = new Uint8Array(n);
+  for (let i = 0; i < n; i++) riskBuf[i] = hazardTileBand(city, i);
+  riskKey = key;
+  return riskBuf;
+}
+
 function mmRamp(t, s) {
   const u = t <= 0 ? 0 : t >= 1 ? 1 : t;
   const k = u < 0.5 ? 0 : 1, f = (u - k * 0.5) * 2;
@@ -2275,6 +2315,9 @@ function renderMinimap(city, mode) {
   // M21: id->color lookup precomputed ONCE (not an O(#districts) find() per
   // tile) for the "dist" mode; stays north-up like every other minimap mode.
   const distCol = mode === "dist" ? distColLookup(city) : null;
+  // GP8a: the exposure band buffer, resolved ONCE per repaint off the module
+  // memo above (never per tile, never per frame when nothing has changed).
+  const riskB = mode === "risk" ? riskBands(city) : null;
   for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
     const i = y * MAP + x;
     let col = null;
@@ -2377,6 +2420,12 @@ function renderMinimap(city, mode) {
       if (city.over[i] === OV.FIRESTA) col = city.powered[i] ? "#fff" : "#78808c";
       else if (city.fireCov[i]) col = mmRamp(Math.min(1, city.fireCov[i] / 216), MM_FIRECOV);
       else col = minimapDim(minimapCityCol(city, i), 0.35);
+    } else if (mode === "risk") {
+      /* GP8a: disaster EXPOSURE, banded. Water takes the standard `#013` branch
+         the poll/crime/svc/power modes already use; every land tile paints the
+         band sim.js's hazardTileBand() puts it in, read straight out of the
+         memoised buffer. Strictly north-up: nothing in this branch reads the camera at all. */
+      col = city.terr[i] === TERR.WATER ? "#013" : RISK_BANDS[riskB[i]];
     } else if (mode === "dist") {
       const dc = city.district[i];
       // districted tiles paint their palette color; everything else keeps the

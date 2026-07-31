@@ -262,6 +262,32 @@ function adviseSafety() {
       "We need more fire houses.");
   else
     out.push("Fire crews are well placed — response faster than a 56k handshake.");
+  /* GP8a: the Chief's first CIVIL DEFENSE lines. One hazardReport() per advisor
+     fill — the panel is opened on demand, never per frame, exactly like the
+     ordinance lines below. The Chief quotes the ruler rather than a second
+     opinion: the same band, the same named driver, the same words the Civil
+     Defense panel prints, because they are the same computation. */
+  {
+    const hz = city.hazardReport();
+    const worst = hz.rows[0];
+    out.push("Civil Defense puts our worst exposure at " + worst.label.toLowerCase() +
+      " — " + worst.bandName.toLowerCase() + " band, driven by " + worst.topDriver.label +
+      ". Open Civil Defense and I'll show you the block, Mayor.");
+    if (!city.disastersEnabled)
+      out.push("Random disasters are switched off, so the published odds are all " +
+        "zero. The exposure is still real — turn them back on and the city " +
+        "collects on it.");
+    else
+      out.push("Across all seven kinds we're looking at about " +
+        (hz.pYearAgg * 100).toFixed(1) + "% odds of SOMETHING in a given year. " +
+        "That number is the same for every city in the region — what's ours to " +
+        "change is how much is standing in the way.");
+    const fireRow = hz.rows.find((r) => r.id === "fire");
+    if (fireRow && fireRow.band >= 2)
+      out.push("The fire row alone reads " + fireRow.bandName.toLowerCase() +
+        ". " + fireRow.topDriver.blurb.charAt(0).toUpperCase() +
+        fireRow.topDriver.blurb.slice(1) + ". Fix that before anything else.");
+  }
   // M23: the Chief champions BOTH uniformed budgets — police and fire
   out.push(deptFundingLine("police"));
   out.push(deptFundingLine("fire"));

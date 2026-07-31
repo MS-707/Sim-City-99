@@ -493,6 +493,38 @@ input[type=range]::-moz-range-thumb {
 .survey-pct { font-size: 10px; color: #404040; }
 .survey-blurb { font-size: 11px; color: #202020; margin-top: 2px; }
 .survey-foot { font-size: 10px; color: #444; margin-top: 6px; text-align: center; }
+/* GP8a: Civil Defense — the same shapes as the survey rows above, plus a band
+   chip. The four chip fills ARE render.js's RISK_BANDS, so the panel, the Risk
+   minimap and its legend all quote one palette; the text colour flips at the
+   two bright bands so every chip stays legible on its own fill. */
+#dlg-civdef { min-width: 380px; }
+#dlg-civdef .dlg-body { max-width: 440px; max-height: 68vh; overflow-y: auto; }
+.civdef-num { font-size: 18px; font-weight: bold; }
+.civdef-sub { font-size: 12px; font-weight: normal; color: #303030; margin-left: 6px; }
+.civdef-note { font-size: 10px; color: #444; margin-top: 2px; }
+#civdef-table td { vertical-align: top; }
+#civdef-table td:last-child { text-align: right; font-family: Tahoma, sans-serif; }
+#civdef-table tr + tr td { border-top: 1px solid #b0b0b0; padding-top: 5px; }
+.civdef-rank { font-weight: bold; width: 12px; }
+.civdef-chip {
+  display: inline-block; font-size: 9px; font-weight: bold; letter-spacing: .04em;
+  padding: 0 4px; border: 1px solid #404040; vertical-align: 1px;
+}
+.civdef-b0 { background: #243a2a; color: #e8f0e8; }
+.civdef-b1 { background: #2f7e78; color: #f0fffc; }
+.civdef-b2 { background: #e0a028; color: #201400; }
+.civdef-b3 { background: #ffd2e0; color: #400010; }
+.civdef-bar {
+  display: block; width: 140px; height: 8px; margin: 2px 0;
+  background: #1e283c; border: 1px solid #404040;
+}
+.civdef-bar > i { display: block; height: 100%; background: #243a2a; }
+.civdef-f1 > i { background: #2f7e78; }
+.civdef-f2 > i { background: #e0a028; }
+.civdef-f3 > i { background: #ffd2e0; }
+.civdef-pct { font-size: 10px; color: #404040; }
+.civdef-blurb { font-size: 11px; color: #202020; margin-top: 2px; }
+.civdef-foot { font-size: 10px; color: #444; margin-top: 6px; text-align: center; }
 /* municipal bonds panel (M13) */
 .bondbox { margin-top: 10px; }
 .bondbox .dlg-buttons { margin-top: 6px; }

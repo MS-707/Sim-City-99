@@ -1886,7 +1886,338 @@ const ADVISORY_GATES = Object.freeze([
                      ["Band", `${landvBand(c.landv[i])} — ${LANDV_BAND_NAMES[landvBand(c.landv[i])]}`],
                      ["Headcount bill", "§" + tileHeadTake(c, i)],
                      ["Would-be assessed", "§" + tileAssessedTake(c, i)]] },
+
+  /* GP8a: the COMPOUND fire-exposure row. Deliberately NARROWER than the
+     FIRE_THIN sibling above, which fires on any developed lot whose fireCov
+     reads under SVC_LOW — this one fires only where hazardTileScore() reaches
+     the SEVERE band, and that band is unreachable unless the engines are out
+     of range (fireCov < SVC_LOW) AND the block is either dense (level 2+) or
+     standing inside the 5x5 stamp of a plant past PLANT_WARN_AGE. So the two
+     rows are a ladder ("thin" then "exposed"), never two names for one fact.
+     Same advisory-only discipline as its three siblings: walked by
+     _attachAdvisories alone, NEVER a GROWTH_GATES row (that walk is what
+     spends the growth RNG cursor). Strictly O(1) — planes plus a fixed 5x5
+     window, no citywide call, no allocation, no RNG, no writes. It reads the
+     SAME hazardTileBand() the Risk minimap paints with, so the map and the
+     tile readout can never disagree. */
+  { code: "FIRE_RISK_HIGH", sev: "warn", label: "High fire exposure", advisory: true,
+    test: (c, i) => apxDevZone(c, i) && hazardTileBand(c, i) === HAZARD_BANDS.length,
+    text: (c, i) => `Fire coverage here reads ${c.fireCov[i]} against the ${SVC_LOW} ` +
+      `that already marks a block as thin, at ${c.funding.fire}% funding` +
+      `${hzAgedPlantNear(c, i) ? ", and an aging plant sits within two blocks" : ""}. ` +
+      `This lot sits in the worst exposure band the city has — ` +
+      `${HAZARD_BAND_NAMES[HAZARD_BANDS.length]}.`,
+    evid: (c, i) => [["Fire coverage", c.fireCov[i]], ["Thin line", SVC_LOW],
+                     ["Funding", c.funding.fire + "%"],
+                     ["Density", "level " + c.lvl[i]],
+                     ["Dept potency", hzPct(c.svcStrain.fire) + "%"],
+                     ["Aged plant within 2", hzAgedPlantNear(c, i) ? "yes" : "no"],
+                     ["Exposure band", HAZARD_BAND_NAMES[hazardTileBand(c, i)]]] },
 ]);
+
+/* ================= GP8a: CIVIL DEFENSE — the honest risk ruler =================
+   The whole panel publishes TWO different quantities per hazard, and says so.
+
+   ODDS (pYear) is a pure function of the SHIPPED spawn model, never of policy.
+   The per-tick gate is 0.0009 (the misfortune roll in tick()) over 288 ticks a
+   year, split by the verbatim kind ladder beside it (fire .55, tornado .13,
+   ufo .10, quake .08, flood .07, riot .055, monster .015 — they sum to 1).
+   EXACTLY three city facts move it, and each is a fact of the shipped code
+   rather than a model:
+     * disastersEnabled === false  -> every row publishes exactly 0, because the
+       guard short-circuits before the draw is spent.
+     * a landlocked map (coast front empty) -> the FLOOD row publishes exactly 0
+       and the other six are NOT renormalised, because startDisaster("flood")
+       aborts before counting, before setting this.disaster and WITHOUT spending
+       a hazard draw or re-rolling. The aggregate honestly falls to 0.93x.
+     * pop <= 200 is a STATED APPROXIMATION, not modelled: measured on the
+       pinned corpus it costs a handful of ticks in 14,400 on a living city.
+   ODDS therefore cannot move with coverage, and any panel that claimed
+   otherwise would be lying about a sim GP8a provably does not touch.
+
+   EXPOSURE (exp, 0..2, banded Low/Elevated/High/Severe) is what the city
+   actually IS: coverage, funding, department strain, plant age, crime,
+   unemployment, pollution, density and coastline. It is never presented as a
+   frequency. exp reads EXACTLY 1.000 on a city sitting on every documented
+   neutral anchor, which is an arithmetic identity of hzResp below rather than a
+   fitted constant — so the calibration point needs no soak to prove. NOTE the
+   zero point: 1.000 lands in ELEVATED. The ruler's neutral is a COMPETENTLY RUN
+   city, not a risk-free one; LOW is reserved for cities measurably better than
+   the anchor, which is the only reading that leaves the top two bands room to
+   mean something.
+
+   Everything here is a PURE READ: no writes, no RNG, no camera read, no field on
+   City and no new save key. The Risk minimap's band buffer is memoised in
+   render.js MODULE scope for exactly that reason. */
+
+// The ONE definition of the exposure band edges — hazardBand() is indexed by
+// the Risk minimap, the FIRE_RISK_HIGH inspector row and the panel's per-hazard
+// chip alike, exactly the landvBand() precedent, so no two surfaces can
+// disagree about which band a number is in.
+const HAZARD_BANDS = [0.75, 1.15, 1.35];
+const HAZARD_BAND_NAMES = ["Low", "Elevated", "High", "Severe"];
+function hazardBand(v) {
+  for (let b = 0; b < HAZARD_BANDS.length; b++) if (v < HAZARD_BANDS[b]) return b;
+  return HAZARD_BANDS.length;
+}
+
+/* The ONE driver response curve. Every driver declares a NEUTRAL anchor (what a
+   well-run city sits on) and a BAD anchor (the value that doubles the row's
+   exposure). resp reads exactly 1.000 at the neutral anchor, exactly 2.000 at
+   the bad anchor and 0 at the mirror point, clamped to [0,2]. Direction is
+   carried by the anchor pair, not by a sign flag — a coverage driver simply
+   declares bad < anchor. */
+const hzResp = (v, anchor, bad) => bad === anchor ? 1
+  : Math.max(0, Math.min(2, 1 + (v - anchor) / (bad - anchor)));
+const hzClamp2 = (v) => Math.max(0, Math.min(2, v));
+const hzPct = (v) => Math.round(v * 100);
+
+// The shipped spawn model, quoted — NOT re-derived. 0.0009 is the per-tick gate
+// in tick()'s random-misfortune block and 288 = 24 ticks/month * 12 months. The
+// roll site itself is deliberately left untouched by GP8a.
+const HZ_PTICK = 0.0009;
+const HZ_TICKS_PER_YEAR = 288;
+const HZ_PYEAR = 1 - Math.pow(1 - HZ_PTICK, HZ_TICKS_PER_YEAR);
+
+// The coast front, per-tile: a LAND tile orthogonally adjacent to water — the
+// same predicate startDisaster("flood") builds its front array from, so the
+// panel and the sim agree about which maps can flood.
+const hzCoastal = (c, i) => {
+  if (c.terr[i] === TERR.WATER) return false;
+  const x = i % MAP, y = (i / MAP) | 0;
+  return (x > 0 && c.terr[i - 1] === TERR.WATER) ||
+         (x < MAP - 1 && c.terr[i + 1] === TERR.WATER) ||
+         (y > 0 && c.terr[i - MAP] === TERR.WATER) ||
+         (y < MAP - 1 && c.terr[i + MAP] === TERR.WATER);
+};
+
+/* O(1): the fixed 5x5 stamp around a tile, tested for a PLANT ANCHOR aged past
+   PLANT_WARN_AGE. Same age arithmetic as the M19 PLANT_AGED advisory row
+   (year - (plantYear || year)), so the two can never disagree about "old". */
+function hzAgedPlantNear(c, i) {
+  const x = i % MAP, y = (i / MAP) | 0;
+  for (let dy = -2; dy <= 2; dy++) {
+    const Y = y + dy; if (Y < 0 || Y >= MAP) continue;
+    for (let dx = -2; dx <= 2; dx++) {
+      const X = x + dx; if (X < 0 || X >= MAP) continue;
+      const j = Y * MAP + X;
+      if (isPlant(c.over[j]) && c.anc[j] === j &&
+          c.year - (c.plantYear[j] || c.year) >= PLANT_WARN_AGE) return true;
+    }
+  }
+  return false;
+}
+
+/* hazardTileScore(c,i): the per-tile exposure figure, strictly O(1) — planes
+   only, one fixed window, zero allocation, and it NEVER calls a citywide
+   census. This is the ONE definition the Risk minimap, the FIRE_RISK_HIGH
+   inspector row and the panel's per-tile focus all share.
+   Water and bare ground score 0: nothing built is nothing to lose. */
+const HZ_TILE_W = { fire: 6, dens: 3, aged: 2, crime: 1, poll: 1, coast: 1 };
+const HZ_TILE_WSUM = HZ_TILE_W.fire + HZ_TILE_W.dens + HZ_TILE_W.aged +
+                     HZ_TILE_W.crime + HZ_TILE_W.poll + HZ_TILE_W.coast;
+function hazardTileScore(c, i) {
+  if (c.terr[i] === TERR.WATER || c.over[i] === OV.NONE) return 0;
+  const aged = hzAgedPlantNear(c, i); // evaluated ONCE — the compound test reuses it
+  const s = (HZ_TILE_W.fire  * hzResp(c.fireCov[i], SVC_OK, 0) +
+             HZ_TILE_W.dens  * hzResp(c.lvl[i], 1, 3) +
+             HZ_TILE_W.aged  * hzResp(aged ? 1 : 0, 0, 1) +
+             HZ_TILE_W.crime * hzResp(c.crime[i], CRIME_BAD / 2, CRIME_BAD) +
+             HZ_TILE_W.poll  * hzResp(c.poll[i], POLL_BAD / 2, POLL_BAD) +
+             HZ_TILE_W.coast * hzResp(hzCoastal(c, i) ? 1 : 0, 0, 1)) / HZ_TILE_WSUM;
+  /* The SEVERE band is a COMPOUND claim, never merely a high average: a block
+     earns it only when the engines cannot reach it (fireCov under SVC_LOW) AND
+     it is either dense (level 2+) or inside the stamp of an aged plant.
+     Everything else is held one hair under the top edge. That is precisely what
+     makes FIRE_RISK_HIGH strictly narrower than the shipped FIRE_THIN row. */
+  if (c.fireCov[i] < SVC_LOW && (c.lvl[i] >= 2 || aged)) return hzClamp2(s);
+  return Math.min(hzClamp2(s), HAZARD_BANDS[HAZARD_BANDS.length - 1] - 1e-6);
+}
+function hazardTileBand(c, i) { return hazardBand(hazardTileScore(c, i)); }
+
+/* HAZARD_TERMS — one frozen ordered table, shaped exactly like APPROVAL_TERMS.
+     id/label     the row
+     base         the SHIPPED ladder constant, verbatim; the seven sum to 1
+     live         false -> this row's odds are exactly 0 (flood on a dry map)
+     drivers[]    each with w (weight inside the row), val (raw, for DISPLAY —
+                  0..255 coverage, shares, years: incommensurable on purpose),
+                  anchor/bad (the documented neutral & doubling points) and a
+                  plain-English blurb. `contrib` (the row's own normalised
+                  share, summing to 1) is what the named-contributor argmax
+                  runs on — never the raw val.
+     tail         the row's in-fiction closing clause
+     mode/focus   what "Show me" switches to and where it lands
+   WEIGHT INVARIANT, and it is load-bearing: inside any one row no weight may be
+   as much as TWICE any other. A driver sitting on its bad anchor scores 2w
+   while every neutral driver scores 1w, so w_max < 2*w_min is exactly the
+   condition under which a SINGLE-CAUSE city (one driver moved, everything else
+   on its anchor) is guaranteed to name the driver that moved. Widen the spread
+   and the panel starts blaming the heaviest row for somebody else's failure. */
+const HAZARD_TERMS = Object.freeze([
+  { id: "fire", label: "Fire", base: 0.55, mode: "fire",
+    live: () => true,
+    tail: "The spark is the same everywhere; how far it gets is up to your engines.",
+    drivers: [
+      { id: "cov", label: "fire coverage", w: 5, unit: "/255",
+        val: (c, cen) => cen.covFire, anchor: SVC_OK, bad: 0,
+        blurb: (c, cen) => `engines reach your zoned blocks at an average ` +
+          `${Math.round(cen.covFire)} of a healthy ${SVC_OK}, at ${c.funding.fire}% funding` },
+      { id: "strain", label: "department strain", w: 3, unit: "% potency",
+        val: (c, cen) => cen.strainFire, anchor: 1, bad: 0.5,
+        blurb: (c, cen) => `the fire service is running at ${hzPct(cen.strainFire)}% ` +
+          `of its rated potency against the buildings it has to protect` },
+      { id: "plants", label: "aging power plants", w: 3, unit: "% of plants",
+        val: (c, cen) => cen.agedShare, anchor: 0, bad: 0.5,
+        blurb: (c, cen) => `${cen.agedPlants} of your ${cen.plantAnchors} power plants ` +
+          `are past ${PLANT_WARN_AGE} years old and overdue for a rebuild` },
+      { id: "season", label: "the season", w: 3, unit: "",
+        val: (c, cen) => cen.season === "summer" ? 1 : 0, anchor: 0, bad: 1,
+        blurb: (c, cen) => `it is ${cen.season}` +
+          (cen.season === "summer" ? " — dry timber, long afternoons" : "") },
+    ],
+    focus: (c) => apxWin5((i) => apxZone(c, i) ? Math.max(0, SVC_OK - c.fireCov[i]) : 0) },
+
+  { id: "tornado", label: "Tornado", base: 0.13, mode: "risk",
+    live: () => true,
+    tail: "A twister picks its own path — low-rise blocks are simply what it can flatten.",
+    drivers: [
+      { id: "lowrise", label: "low-rise sprawl", w: 3, unit: "% of built lots",
+        val: (c, cen) => cen.lowShare, anchor: 0.35, bad: 0.85,
+        blurb: (c, cen) => `${hzPct(cen.lowShare)}% of your ${cen.devTiles} built lots ` +
+          `are still level 1 — the ones a twister takes out whole` },
+      { id: "season", label: "the season", w: 2, unit: "",
+        val: (c, cen) => cen.season === "spring" ? 1 : 0, anchor: 0, bad: 1,
+        blurb: (c, cen) => `it is ${cen.season}` +
+          (cen.season === "spring" ? " — twister season" : "") },
+    ],
+    focus: (c) => apxWin5((i) => (apxZone(c, i) && c.lvl[i] === 1) ? 1 : 0) },
+
+  { id: "ufo", label: "UFO", base: 0.10, mode: "all",
+    live: () => true,
+    tail: "Nothing you build changes this one. Chip has offered to line the mansion in foil.",
+    drivers: [
+      { id: "nothing", label: "nothing you build", w: 1, unit: "",
+        val: () => 1, anchor: 1, bad: 2,
+        blurb: () => `no coverage, budget or zoning figure moves this row at all — ` +
+          `it is pinned at the neutral anchor by design` },
+    ],
+    focus: () => null },
+
+  { id: "quake", label: "Earthquake", base: 0.08, mode: "risk",
+    live: () => true,
+    tail: "The fault does not care how you zoned; what falls down does.",
+    drivers: [
+      { id: "density", label: "unreinforced density", w: 1, unit: "% of built lots",
+        val: (c, cen) => cen.denseShare, anchor: 0.25, bad: 0.75,
+        blurb: (c, cen) => `${hzPct(cen.denseShare)}% of your ${cen.devTiles} built lots ` +
+          `stand at level 2 or higher — the taller they are, the further they fall` },
+    ],
+    focus: (c) => apxWin5((i) => (apxZone(c, i) && c.lvl[i] >= 2) ? c.lvl[i] : 0) },
+
+  { id: "flood", label: "Flood", base: 0.07, mode: "risk",
+    live: (c, cen) => cen.frontTiles > 0,
+    tail: "Odds are the same for every city on the coast — how badly it lands is up to you.",
+    drivers: [
+      { id: "front", label: "what you built on the shore", w: 1, unit: "% of the front",
+        val: (c, cen) => cen.frontShare, anchor: 0, bad: 0.60,
+        blurb: (c, cen) => cen.frontTiles
+          ? `${cen.frontDeveloped} of your ${cen.frontTiles} shoreline tiles carry ` +
+            `something worth losing (${hzPct(cen.frontShare)}%)`
+          : `this map has no shoreline at all` },
+    ],
+    focus: (c) => apxWin5((i) => (hzCoastal(c, i) && c.over[i] !== OV.NONE &&
+                                  c.over[i] !== OV.RUBBLE) ? 1 : 0) },
+
+  { id: "riot", label: "Riot", base: 0.055, mode: "crime",
+    live: () => true,
+    tail: "Riots start where the city already stopped showing up.",
+    drivers: [
+      { id: "crime", label: "street crime", w: 5, unit: "/255",
+        val: (c, cen) => cen.crimeLocal, anchor: CRIME_BAD / 2, bad: CRIME_BAD,
+        blurb: (c, cen) => `crime over the blocks people live and work on averages ` +
+          `${Math.round(cen.crimeLocal)} against the ${CRIME_BAD} at which residents ` +
+          `start faxing city hall` },
+      { id: "cov", label: "police coverage", w: 4, unit: "/255",
+        val: (c, cen) => cen.covPol, anchor: SVC_OK, bad: 0,
+        blurb: (c, cen) => `patrols reach your zoned blocks at an average ` +
+          `${Math.round(cen.covPol)} of a healthy ${SVC_OK}, at ${c.funding.police}% funding` },
+      { id: "jobs", label: "unemployment", w: 4, unit: "% short",
+        val: (c, cen) => cen.unempShare, anchor: 0, bad: 0.25,
+        blurb: (c, cen) => `${hzPct(cen.unempShare)}% of the residents who want work ` +
+          `cannot find it — ${c.pop.toLocaleString()} people, ${c.jobs.toLocaleString()} jobs` },
+      { id: "strain", label: "department strain", w: 3, unit: "% potency",
+        val: (c, cen) => cen.strainPol, anchor: 1, bad: 0.5,
+        blurb: (c, cen) => `the police department is running at ` +
+          `${hzPct(cen.strainPol)}% of its rated potency` },
+    ],
+    focus: (c) => apxArgmax(c.crime) },
+
+  { id: "monster", label: "Monster", base: 0.015, mode: "poll",
+    live: () => true,
+    tail: "It comes for the smoke. It always comes for the smoke.",
+    drivers: [
+      { id: "poll", label: "pollution", w: 1, unit: "/255",
+        val: (c, cen) => cen.pollLocal, anchor: POLL_BAD / 2, bad: POLL_BAD,
+        blurb: (c, cen) => `smog over the blocks people actually live on averages ` +
+          `${Math.round(cen.pollLocal)} of a filthy ${POLL_BAD}` },
+    ],
+    focus: (c) => apxArgmax(c.poll) },
+]);
+
+/* GP8a: the seven Bugle front pages — one per BUILT disaster kind, pushed from
+   inside each SUCCESSFUL startDisaster branch beside the pushMsg that was
+   already there. Save-neutral by construction: newsQueue is initialised in the
+   constructor, appears nowhere in serialize() and is reset to [] on load.
+   ENTRIES ARE OBJECTS, NEVER NUMBERS — newsFrame dispatches a numeric queue
+   entry to showNewspaper (the tier-promotion front page), so a bare number here
+   would print a promotion nobody earned. Seven distinct headlines, checked by
+   eye and by the gate: no two kinds share a string. */
+const DISASTER_EDITIONS = Object.freeze({
+  fire: Object.freeze({
+    headline: "BLAZE BREAKS OUT DOWNTOWN",
+    sub: "Engines scrambled; neighbours hosing their own roofs",
+    body: "The call came in as smoke over the rooftops and turned into a working " +
+      "fire before the second engine cleared the house. Crews are cutting a break " +
+      "at the block line. The chief's statement was four words long: \"Coverage, " +
+      "Mayor. Or rubble.\"" }),
+  tornado: Object.freeze({
+    headline: "TWISTER TEARS THROUGH TOWN",
+    sub: "Funnel sighted on the ground; sirens across every district",
+    body: "Witnesses describe a wall of debris moving at the speed of a car. " +
+      "Low-rise blocks in its path came apart; the taller frames along the avenue " +
+      "held. Nobody schedules a tornado — you only decide what it finds." }),
+  ufo: Object.freeze({
+    headline: "UNIDENTIFIED CRAFT OVER THE CITY",
+    sub: "Roswell was fifty years ago. Coincidence? The Bugle asks the questions",
+    body: "A silent disc has been hovering above the skyline since dawn, ignoring " +
+      "the control tower and, apparently, gravity. City hall urges calm. The " +
+      "Bugle urges you to buy tomorrow's edition." }),
+  quake: Object.freeze({
+    headline: "EARTHQUAKE! THE GROUND BUCKLES",
+    sub: "Towers crack across the city as the fault lets go",
+    body: "The shaking lasted under a minute and rearranged the skyline anyway. " +
+      "Engineers are walking the taller blocks floor by floor. The fault did not " +
+      "care how the city was zoned; what fell down did." }),
+  flood: Object.freeze({
+    headline: "FLOOD BREACHES THE COASTLINE",
+    sub: "Water in the streets as the shore gives way",
+    body: "The tide came over the front and kept coming, and everything built on " +
+      "the shore is now standing in it. Pumps are running. The water will find " +
+      "the low ground whatever the mayor's office says." }),
+  riot: Object.freeze({
+    headline: "RIOTS ERUPT IN THE WORST NEIGHBORHOODS",
+    sub: "Store fronts in, patrol cars out; the mayor asks for calm",
+    body: "It started outside a shuttered plant and was three blocks wide by " +
+      "nightfall. Residents interviewed said the same two things: nobody is " +
+      "hiring, and nobody comes when you call. Riots start where the city " +
+      "already stopped showing up." }),
+  monster: Object.freeze({
+    headline: "COLOSSAL MONSTER RISES FROM THE DEPTHS",
+    sub: "Kaiju ashore; smokestack district first on its route",
+    body: "It came out of the water at the industrial front and has been walking " +
+      "inland since. Every sighting puts it on the smoke. Scientists offer no " +
+      "explanation; the Bugle offers a poster of it in Sunday's edition." }),
+});
 
 /* GP7a: the three O(1) per-tile figures the LANDV_BAND row prints. They are the
    SINGLE-TILE terms of exactly the two sums assessedLedger() reports citywide —
@@ -4820,6 +5151,7 @@ class City {
                             : rh.pick(this.over.length);
       this.ignite(i % MAP, (i / MAP) | 0);
       this.pushMsg("🔥 FIRE breaks out downtown! Firefighters scramble.");
+      this.newsQueue.push(DISASTER_EDITIONS.fire); // GP8a: front page, inside the SUCCESSFUL branch
       return;
     }
     if (kind === "tornado" || kind === "ufo") {
@@ -4834,6 +5166,7 @@ class City {
       this.pushMsg(kind === "ufo"
         ? "👽 UNIDENTIFIED FLYING OBJECT over the city! (Roswell was 50 years ago... coincidence?)"
         : "🌪️ TORNADO WARNING! A twister is tearing through town!");
+      this.newsQueue.push(DISASTER_EDITIONS[kind]); // GP8a: two distinct front pages, chosen by kind
       return;
     }
     // ---- M29 expanded roster: earthquake, flood, riot, monster ----
@@ -4847,6 +5180,7 @@ class City {
         ticks: 24, r: 0,
       };
       this.pushMsg("🌎 EARTHQUAKE! The ground buckles and towers crack across the city!");
+      this.newsQueue.push(DISASTER_EDITIONS.quake); // GP8a
       return;
     }
     if (kind === "flood") {
@@ -4872,6 +5206,9 @@ class City {
         flooded: [seed], frontier: [seed], depth: 0,
       };
       this.pushMsg("🌊 FLOOD! Rising water breaches the coastline!");
+      // GP8a: AFTER the `if (!front.length) return` abort above, so a landlocked
+      // map publishes no front page for a flood that never happened (M29).
+      this.newsQueue.push(DISASTER_EDITIONS.flood);
       return;
     }
     if (kind === "riot") {
@@ -4886,6 +5223,7 @@ class City {
         ticks: 30,
       };
       this.pushMsg("🔥 RIOTS erupt in the worst neighborhoods! Send in the police!");
+      this.newsQueue.push(DISASTER_EDITIONS.riot); // GP8a
       return;
     }
     if (kind === "monster") {
@@ -4899,6 +5237,7 @@ class City {
         ticks: 110,
       };
       this.pushMsg("🦖 A colossal MONSTER rises from the depths and rampages!");
+      this.newsQueue.push(DISASTER_EDITIONS.monster); // GP8a
       return;
     }
   }
@@ -5389,6 +5728,131 @@ class City {
     }
     this.megaOk = this.pop >= MEGA_POP && this.approvalStreak >= MEGA_MONTHS &&
       (this.avgCommute <= MEGA_COMMUTE || this.cityIndex(this.poll) <= MEGA_POLL);
+  }
+
+  /* ---------- civil defense (GP8a) ----------
+     hazardCensus(): EXACTLY ONE O(MAP*MAP) scan producing every aggregate the
+     HAZARD_TERMS drivers need, modelled line for line on approvalCensus().
+     PURE read — writes nothing, draws nothing, never reads the camera, never
+     calls deptStrain() (the strain figures are READ off this.svcStrain, which
+     recomputeMaps already derives from ONE deptStrain census every 14 ticks;
+     re-running it here would be a second computation of a published number,
+     which is the one thing this milestone is not allowed to do).
+     The census population is the ZONED FOOTPRINT for every coverage / air /
+     crime mean, exactly as in approvalCensus and for exactly the same reason:
+     measured over DEVELOPED zones every share is self-healing, because the
+     blocks a failure drives into abandonment leave both sides of the ratio.
+       zoneZ                 zoned tiles (the mean population)
+       devTiles/dev1/dev2plus built lots, and the level-1 / level-2+ split
+       frontTiles            coast front — LAND tiles orthogonally adjacent to
+                             water, the SAME predicate startDisaster("flood")
+                             builds its front from, so a map that cannot flood
+                             reads frontTiles 0 on both sides
+       frontDeveloped        of those, how many carry something worth losing
+       plantAnchors/agedPlants  power plants, and how many are past PLANT_WARN_AGE
+       covFire/covPol/pollLocal/crimeLocal   means over the zoned footprint
+     With nothing zoned the two coverage means read SVC_OK ("nothing to cover is
+     not a coverage failure") and every share reads 0, so an empty map scores
+     the neutral anchor rather than every hazard at once. */
+  hazardCensus() {
+    let zoneZ = 0, devTiles = 0, dev1 = 0, dev2plus = 0;
+    let sFire = 0, sPol = 0, sPoll = 0, sCrime = 0;
+    let frontTiles = 0, frontDeveloped = 0, plantAnchors = 0, agedPlants = 0;
+    for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+      const i = y * MAP + x;
+      const t = this.over[i];
+      if (this.terr[i] !== TERR.WATER &&
+          ((x > 0 && this.terr[i - 1] === TERR.WATER) ||
+           (x < MAP - 1 && this.terr[i + 1] === TERR.WATER) ||
+           (y > 0 && this.terr[i - MAP] === TERR.WATER) ||
+           (y < MAP - 1 && this.terr[i + MAP] === TERR.WATER))) {
+        frontTiles++;
+        if (t !== OV.NONE && t !== OV.RUBBLE) frontDeveloped++;
+      }
+      if (t === OV.ZR || t === OV.ZC || t === OV.ZI) {
+        zoneZ++;
+        sFire += this.fireCov[i]; sPol += this.polCov[i];
+        sPoll += this.poll[i]; sCrime += this.crime[i];
+        const l = this.lvl[i];
+        if (l > 0) { devTiles++; if (l === 1) dev1++; else dev2plus++; }
+        continue;
+      }
+      if (isPlant(t) && this.anc[i] === i) {
+        plantAnchors++;
+        if (this.year - (this.plantYear[i] || this.year) >= PLANT_WARN_AGE) agedPlants++;
+      }
+    }
+    const need = this.pop * 0.62;
+    return {
+      zoneZ, devTiles, dev1, dev2plus, frontTiles, frontDeveloped,
+      plantAnchors, agedPlants,
+      covFire: zoneZ ? sFire / zoneZ : SVC_OK, covPol: zoneZ ? sPol / zoneZ : SVC_OK,
+      pollLocal: zoneZ ? sPoll / zoneZ : POLL_BAD / 2,
+      crimeLocal: zoneZ ? sCrime / zoneZ : CRIME_BAD / 2,
+      lowShare: devTiles ? dev1 / devTiles : 0.35,
+      denseShare: devTiles ? dev2plus / devTiles : 0.25,
+      frontShare: frontTiles ? frontDeveloped / frontTiles : 0,
+      agedShare: plantAnchors ? agedPlants / plantAnchors : 0,
+      unempShare: need > 0 ? Math.max(0, need - this.jobs) / need : 0,
+      strainFire: this.svcStrain.fire, strainPol: this.svcStrain.police,
+      season: seasonOf(this.month),
+    };
+  }
+
+  /* hazardReport(): the whole Civil Defense readout, PURE — no writes, no RNG,
+     no camera read. Calls hazardCensus() EXACTLY ONCE and walks HAZARD_TERMS off that
+     one object, so the odds, the exposure, the named contributor and the
+     sentence are all the same computation rather than four agreeing ones: the
+     row's `topDriver` is the very object in its own `drivers` array (identity,
+     not a copy), and the sentence quotes that object's label verbatim.
+       { census, pTick, pYearAll, pYearAgg, rows: [...] }
+     rows sorted by exp descending, id ascending on ties. Called once per panel
+     open and once per advisor fill — NEVER per frame, never per tick. */
+  hazardReport() {
+    const cen = this.hazardCensus();
+    const rows = [];
+    let agg = 0;
+    for (const t of HAZARD_TERMS) {
+      const coastal = t.live(this, cen);
+      const live = this.disastersEnabled && coastal;
+      const drivers = [];
+      let wsum = 0, ssum = 0;
+      for (const d of t.drivers) {
+        const val = d.val(this, cen);
+        const resp = hzResp(val, d.anchor, d.bad);
+        wsum += d.w; ssum += d.w * resp;
+        drivers.push({ id: d.id, label: d.label, w: d.w, unit: d.unit,
+          val, resp, contrib: 0, blurb: d.blurb(this, cen) });
+      }
+      // contrib is the driver's share of the row's OWN score — dimensionless,
+      // summing to 1 across the row. The named-contributor argmax runs on THIS
+      // and never on `val`, whose units (0..255 coverage, shares, seasons) are
+      // incommensurable by construction. A row whose every driver responds 0
+      // splits its attention evenly rather than dividing by zero.
+      for (const d of drivers)
+        d.contrib = ssum > 0 ? (d.w * d.resp) / ssum : 1 / drivers.length;
+      let top = drivers[0];
+      for (const d of drivers)
+        if (d.contrib > top.contrib ||
+            (d.contrib === top.contrib && d.id < top.id)) top = d;
+      const exp = hzClamp2(wsum ? ssum / wsum : 1);
+      const band = hazardBand(exp);
+      const pYear = live ? t.base * HZ_PYEAR : 0;
+      agg += pYear;
+      const head = live
+        ? `${HAZARD_BAND_NAMES[band]} exposure, at ${(pYear * 100).toFixed(1)}% a year.`
+        : !this.disastersEnabled
+          ? `Random disasters are switched off: the odds are exactly 0% a year.`
+          : `This map has no shoreline, so the odds are exactly 0% a year — ` +
+            `and the other six rows are NOT reweighted, because the sim does ` +
+            `not re-roll an impossible flood.`;
+      rows.push({ id: t.id, label: t.label, base: t.base, live, pYear, exp, band,
+        bandName: HAZARD_BAND_NAMES[band], drivers, topDriver: top,
+        sentence: `${head} The biggest single factor is ${top.label} — ${top.blurb}. ${t.tail}`,
+        mode: t.mode, focus: t.focus });
+    }
+    rows.sort((a, b) => (b.exp - a.exp) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return { census: cen, pTick: HZ_PTICK, pYearAll: HZ_PYEAR, pYearAgg: agg, rows };
   }
 
   /* ---------- GP7a: the ONE arithmetic site for the monthly tax bill ----------

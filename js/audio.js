@@ -67,6 +67,42 @@ const Snd = {
   ufo() {
     for (let k = 0; k < 6; k++) this.tone(900 + k * 120, 0.1, "sine", 0.1, k * 0.08, 300);
   },
+  /* GP8a: four more disaster voices, so the seven BUILT kinds have seven
+     DISTINCT voices instead of three shared ones. Same tone/noise house style,
+     zero Math.random (SFX are off the determinism surface, but the four new
+     voices stay free of it for hygiene — the ambience voices below are the only
+     place Math.random is allowed to live). Each differs from all six siblings in
+     at least two of {waveform set, base frequency, total duration, tone/noise
+     call mix}:
+       quake   sub-bass sine sweep under a long low-passed rumble (0.0 s start,
+               1.6 s tail, 34 Hz base — an octave below boom's 60)
+       flood   NO tone at all: three overlapping filtered-noise swells rising in
+               cutoff, the only pure-noise voice in the palette
+       riot    clustered detuned square shouts, 8 hits, mid register (330 Hz)
+       monster a descending sawtooth roar (110 Hz, -70 slide) over a noise growl */
+  quake() {
+    this.noise(1.6, 0.4, 140);
+    this.noise(0.9, 0.22, 90, 0.5);
+    this.tone(34, 1.4, "sine", 0.4, 0, -12);
+    this.tone(48, 0.8, "sine", 0.22, 0.35, -16);
+  },
+  flood() {
+    this.noise(1.2, 0.16, 300);
+    this.noise(1.1, 0.22, 700, 0.35);
+    this.noise(1.0, 0.26, 1500, 0.7);
+  },
+  riot() {
+    for (let k = 0; k < 8; k++) {
+      this.tone(330 + (k % 3) * 40, 0.09, "square", 0.11, k * 0.13);
+      this.tone(337 + (k % 3) * 40, 0.09, "square", 0.09, k * 0.13 + 0.01);
+    }
+    this.noise(1.1, 0.07, 1800);
+  },
+  monster() {
+    this.tone(110, 0.9, "sawtooth", 0.3, 0, -70);
+    this.tone(82, 1.1, "sawtooth", 0.2, 0.4, -46);
+    this.noise(1.3, 0.18, 420);
+  },
   monthChime() { this.tone(1046, 0.08, "sine", 0.07); },
 
   // ---- zoom-level ambience (scheduled by ambienceFrame in ambience.js) ----

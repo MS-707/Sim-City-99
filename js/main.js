@@ -68,6 +68,7 @@ function loop(now) {
   tickerFrame();
   refreshHUD();
   newsFrame();
+  disasterFocusFrame(); // GP8a: opt-in pause+jump watcher (pure read; default off)
   advisorsFrame();
   if (++mmCounter % 15 === 0) renderMinimap(city, UI.mapMode);
 

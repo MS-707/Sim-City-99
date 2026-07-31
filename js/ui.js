@@ -64,7 +64,11 @@ const PREFS_KEY = "simcity99.prefs";
 function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch (e) {}
-  return Object.assign({ autoBudget: false, dayNight: true, viewRot: 0 }, p);
+  // GP8a: disasterFocus defaults to FALSE — with the flag off a disaster start
+  // leaves UI.speed and all four cam fields byte-identical, so the running
+  // session is untouched unless the mayor opts in.
+  return Object.assign({ autoBudget: false, dayNight: true, viewRot: 0,
+    disasterFocus: false }, p);
 }
 function savePrefs() {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(UI.prefs)); } catch (e) {}
@@ -382,10 +386,19 @@ const MENUS = {
     [`${UI.prefs.dayNight ? "✓ " : ""}Day/Night Cycle`,
       () => { UI.prefs.dayNight = !UI.prefs.dayNight; savePrefs(); }],
   ],
+  /* GP8a: all SEVEN built kinds are reachable from the menu (quake/flood/riot/
+     monster already spawned from the random ladder — they were simply
+     unreachable by hand), and each gets its OWN Snd voice: seven kinds, seven
+     distinct function references, no two sharing. Byte-neutral: a menu closure
+     only runs on a click. Final shape is 9 rows = 8 arrays + 1 separator. */
   disasters: () => [
     ["Start Fire 🔥", () => { city.startDisaster("fire"); Snd.siren(); }],
     ["Tornado 🌪️", () => { city.startDisaster("tornado"); Snd.boom(); }],
     ["UFO Visit 👽", () => { city.startDisaster("ufo"); Snd.ufo(); }],
+    ["Earthquake 🌎", () => { city.startDisaster("quake"); Snd.quake(); }],
+    ["Flood 🌊", () => { city.startDisaster("flood"); Snd.flood(); }],
+    ["Riot 🔥", () => { city.startDisaster("riot"); Snd.riot(); }],
+    ["Monster 🦖", () => { city.startDisaster("monster"); Snd.monster(); }],
     "-",
     [`${city.disastersEnabled ? "✓ " : ""}Random Disasters`,
       () => { city.disastersEnabled = !city.disastersEnabled; }],
@@ -397,8 +410,12 @@ const MENUS = {
     ["Districts… 🏘️", openDistricts],
     [`${UI.prefs.autoBudget ? "✓ " : ""}Budget Report Monthly`,
       () => { UI.prefs.autoBudget = !UI.prefs.autoBudget; savePrefs(); }],
+    // GP8a: opt-in only. Off by default; see disasterFocusFrame.
+    [`${UI.prefs.disasterFocus ? "✓ " : ""}Pause & Jump On Disaster 🚨`,
+      () => { UI.prefs.disasterFocus = !UI.prefs.disasterFocus; savePrefs(); }],
     ["Graphs…", openGraphs],
     ["City Hall Records… 📜", openAlmanac],
+    ["Civil Defense… 🚨", openCivDef],
     ["Advisors…", openAdvisors],
     ["Trophy Shelf… 🏆", openTrophies],
     "-",
@@ -783,14 +800,20 @@ const MM_LEGENDS = {
   // M21: static fallback string (satisfies "MM_LEGENDS.dist is a non-empty
   // string"); updateMapLegend swaps in live per-district swatches when any exist.
   dist:    '<i class="sw" style="background:#e84448"></i>neighborhoods — paint with the 🏘️ tool',
+  // GP8a: disaster exposure — the four bands renderMinimap paints (render.js
+  // RISK_BANDS, indexed by sim.js's hazardTileBand()), plus the standard water
+  // swatch, per the G8 contract that the strip echoes the exact branch colours.
+  risk:    '<i class="sw" style="background:#243a2a"></i>low <i class="sw" style="background:#2f7e78"></i>elevated <i class="sw" style="background:#e0a028"></i>high <i class="sw" style="background:#ffd2e0"></i>severe <i class="sw" style="background:#013"></i>water',
 };
 
-// GP5a: legend mode names — with 13 map modes the abbreviated buttons alone
-// no longer identify the view, so every non-"City" legend leads with its name
+// GP5a: legend mode names — with 14 map modes the abbreviated buttons alone
+// no longer identify the view, so every non-"City" legend leads with its name.
+// GP8a: MM_NAMES, MM_LEGENDS and the updateMapLegend walk are extended in ONE
+// edit — the GP6 fix-pass comment below documents what a half-extension does.
 const MM_NAMES = { all: "City", power: "Power", poll: "Pollution",
   value: "Land value", crime: "Crime", traffic: "Traffic",
   svc: "Schools & health", pol: "Police", fire: "Fire", water: "Water",
-  transit: "Rail", commute: "Commute", dist: "Neighborhoods" };
+  transit: "Rail", commute: "Commute", dist: "Neighborhoods", risk: "Risk" };
 
 function updateMapLegend(mode) {
   const el = document.getElementById("mm-legend");
@@ -2091,6 +2114,94 @@ function openSurvey() {
       }
     }));
   showDlg("dlg-survey");
+}
+
+/* ================= GP8a: Civil Defense ================= */
+/* openCivDef(): ONE city.hazardReport() at open time only — the openSurvey /
+   openTrafficReport contract. Never called from refreshHUD, never per frame.
+   Each row prints THREE things and keeps them separate on purpose:
+     the BAND   what this city is exposed to (moves with what you build)
+     the ODDS   the published frequency of the disaster itself (a pure function
+                of the shipped spawn model — it does NOT move with coverage,
+                and a panel that claimed otherwise would be lying)
+     the DRIVER the row's own normalised argmax, in plain English
+   "Show me" reuses the shipped path verbatim: setMapMode (the ONE code path a
+   human minimap click also goes through) plus the survey's camera jump. */
+function openCivDef() {
+  const rep = city.hazardReport();          // one scan, at open time only
+  const head = document.getElementById("civdef-head");
+  const agg = (rep.pYearAgg * 100).toFixed(1);
+  head.innerHTML = city.disastersEnabled
+    ? `<div class="civdef-num">${agg}%<span class="civdef-sub">chance of SOMETHING, per year</span></div>` +
+      `<div class="civdef-note">The odds below are the city's actual spawn model: ` +
+      `a ${(rep.pTick * 100).toFixed(2)}% roll every tick, ${HZ_TICKS_PER_YEAR} ticks a year, ` +
+      `split by kind. <b>Nothing you build changes them.</b> What you build changes ` +
+      `the <b>band</b> — how much of the city is standing in the way when one lands.</div>`
+    : `<div class="civdef-num">0.0%<span class="civdef-sub">random disasters are OFF</span></div>` +
+      `<div class="civdef-note">Random Disasters is switched off in the Disasters menu, ` +
+      `so every published figure below is exactly zero. The <b>bands</b> are still real — ` +
+      `they say what this city would be exposed to if you turned it back on.</div>`;
+
+  const tbl = document.getElementById("civdef-table");
+  tbl.innerHTML = rep.rows.map((r, k) => {
+    const bar = Math.max(2, Math.min(100, Math.round(r.exp / 2 * 100)));
+    return `<tr><td class="civdef-rank">${k + 1}</td>` +
+      `<td><b>${r.label}</b> <span class="civdef-chip civdef-b${r.band}">${r.bandName}</span>` +
+      `<div class="civdef-bar civdef-f${r.band}"><i style="width:${bar}%"></i></div>` +
+      `<div class="civdef-pct">${(r.pYear * 100).toFixed(1)}% a year ` +
+      `(${Math.round(r.base * 100)}% of every disaster this city has) — exposure ` +
+      `${r.exp.toFixed(2)} of 2.00</div>` +
+      `<div class="civdef-blurb">${r.sentence}</div></td>` +
+      `<td><button class="btn95 tiny civdef-show" data-id="${r.id}">Show me</button></td></tr>`;
+  }).join("");
+
+  tbl.querySelectorAll(".civdef-show").forEach((b) =>
+    b.addEventListener("click", () => {
+      Snd.click();
+      const row = rep.rows.find((r) => r.id === b.dataset.id);
+      if (!row) return;
+      setMapMode(row.mode); // ONE code path, shared with a human minimap click
+      const f = row.focus(city, rep.census);
+      if (f) {
+        zoomAnim.active = false; // a Civil Defense jump cancels a pending cursor-zoom
+        cam.x = worldX(f.x, f.y); cam.y = worldY(f.x, f.y);
+        clampCam();
+        setStatus(`🚨 ${row.label} — worst around ${streetNameFor(f.x, f.y)}.`);
+      } else {
+        setStatus(`🚨 ${row.label} — citywide, with no single worst block.`);
+      }
+    }));
+  showDlg("dlg-civdef");
+}
+
+/* GP8a: the OPT-IN auto-pause + camera jump, default OFF (UI.prefs.disasterFocus).
+   A pure READ of the sim — it writes only UI and cam, never city. The edge it
+   watches is recCur.disasters, which RESETS to 0 at the year rollover, so a
+   changed year is treated as "any nonzero count is new" rather than as a drop.
+   The bookkeeping runs even with the flag off, so switching the pref on
+   mid-game cannot fire on a disaster that already started. Exactly one pause
+   and one jump PER START — never per tick of a 90-tick tornado. */
+let dfYear = -1, dfSeen = 0;
+function disasterFocusFrame() {
+  if (!city || !city.recCur) return;
+  const y = city.year, n = city.recCur.disasters;
+  const started = dfYear < 0 ? false : (y !== dfYear ? n > 0 : n > dfSeen);
+  dfYear = y; dfSeen = n;
+  if (!started || !UI.prefs.disasterFocus) return;
+  setSpeed(0);
+  // The moving/stationary kinds carry the head position; a fire sets no
+  // this.disaster at all (it is the 55%-likeliest kind), so fall back to the
+  // first burning tile — ascending order, lowest index, exactly like apxWin5.
+  let fx = -1, fy = -1;
+  if (city.disaster) { fx = city.disaster.x | 0; fy = city.disaster.y | 0; }
+  else for (let i = 0; i < city.fire.length; i++)
+    if (city.fire[i]) { fx = i % MAP; fy = (i / MAP) | 0; break; }
+  if (fx < 0) return;
+  zoomAnim.active = false;
+  cam.x = worldX(fx, fy); cam.y = worldY(fx, fy);
+  clampCam();
+  setStatus(`🚨 Civil Defense: ${city.disaster ? city.disaster.kind : "fire"} — ` +
+    `paused at ${streetNameFor(fx, fy)}.`);
 }
 
 // GP6: the Vitals approval cell is the entry point into the survey.

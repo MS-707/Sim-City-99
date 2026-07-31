@@ -682,7 +682,69 @@
       "priority_rank": 13,
       "touches_save_format": true,
       "status": "todo",
-      "split_of": "GP8 (preflight-authored S3 split, grounded against the live source 2026-07-30)"
+      "split_of": "GP8 (preflight-authored S3 split, grounded against the live source 2026-07-30)",
+      "implementation_record": {
+        "date": "2026-07-31",
+        "artifact": "docs/gp8a-hazard-soak.json",
+        "design": "the two-quantity design (D1, recommended option): every row publishes ODDS (a pure function of the shipped spawn model, city-invariant) AND an EXPOSURE band (what the city actually is). The panel says so on its face.",
+        "sim_surface": [
+          "HAZARD_TERMS (7 frozen rows = the 7 BUILT kinds; MELTDOWN stays out per D2)",
+          "HAZARD_BANDS / HAZARD_BAND_NAMES / hazardBand() \u2014 the ONE band-edge definition in the tree",
+          "hzResp / hzClamp2 / hzPct / hzCoastal / hzAgedPlantNear \u2014 the shared driver-response arithmetic",
+          "hazardTileScore / hazardTileBand \u2014 O(1), planes only, shared by the Risk map, the FIRE_RISK_HIGH row and the panel",
+          "City.hazardCensus() \u2014 exactly ONE O(map^2) scan; deptStrain() is NEVER called (svcStrain is read instead)",
+          "City.hazardReport() \u2014 pure; one census per call; topDriver is by reference an element of the row's own drivers array",
+          "ADVISORY_GATES += FIRE_RISK_HIGH (advisory-only; GROWTH_GATES untouched)",
+          "DISASTER_EDITIONS + 7 newsQueue pushes inside the SUCCESSFUL startDisaster branches (the flood push sits AFTER the landlocked abort)"
+        ],
+        "ui_surface": [
+          "MENUS.disasters 3 kinds -> 7 (9 rows = 8 arrays + 1 separator)",
+          "MENUS.windows += Civil Defense; += the opt-in Pause & Jump On Disaster toggle",
+          "openCivDef() + #dlg-civdef + .civdef-* CSS",
+          "MM_NAMES / MM_LEGENDS / the 14th .mm button, extended in ONE edit",
+          "render.js risk branch + RISK_BANDS + the module-scope riskBuf/riskKey memo (City gains ZERO fields)",
+          "audio.js quake/flood/riot/monster \u2014 7 kinds, 7 distinct voices",
+          "advisors.js safety-chief Civil Defense lines",
+          "main.js disasterFocusFrame() (pure read; default OFF)"
+        ],
+        "measured_in_this_pass": {
+          "C1_byte_identity": "PASS \u2014 40 runs (20 corpus seeds x both disastersEnabled states) x 600 ticks, checkpoints at 200/400/600 against a git worktree of f74b6e0: 0 differing serialize() bytes, 0 differing plane hashes (19 planes), 0 differing pop/funds/jobs, all 4 cursor ints equal at all 120 checkpoints. v:18 both sides, 51-key sequence character-identical, 0 new keys.",
+          "C2_read_only": "PASS \u2014 1000 hazardReport() + 1000 full-map band bakes leave serialize() byte-identical, all 4 cursors unmoved, recCur.disasters unmoved, Object.keys(city).length unchanged at 132.",
+          "C3_calibration_identity": "PASS \u2014 pTick 0.0009 exact; pYearAgg - analytic = 2.8e-17; the 7 ladder bases sum to 1 with error 0; exp = 1.000000000000 (delta exactly 0) on ALL SEVEN rows at the neutral anchor.",
+          "C4_aggregate_odds": "PASS \u2014 20 seeds x 50 years, Math.random unstubbed: 238 events over 921.42 ELIGIBLE city-years = 0.25830/yr against the published 0.22842 (+13.1% relative, inside the 20% bar); the published figure lies inside the measured 95% Poisson rate interval [0.22652, 0.29328].",
+          "C5_per_kind_power_gated": "PASS as specified \u2014 only FIRE clears the expected>=30 power floor (expected 115.8, observed 139, share error +6.2%). The other six are REPORTED with exact Poisson 95% CIs and never scored.",
+          "C6_landlocked": "PASS \u2014 flood pYear exactly 0, the other six byte-equal to FX-REF, aggregate 0.2124318855810384 vs 0.93x analytic 0.21243188558103843 (delta 2.8e-17); 50 aborted floods spent 0 hazard draws, 0 recCur increments, 0 newsQueue pushes.",
+          "C7_disasters_off": "PASS \u2014 all 7 rows publish pYear === 0 and pYearAgg === 0; the panel prints the disabled state in words.",
+          "C8_named_contributor": "PARTIAL (harness-level) \u2014 Sum(contrib) === 1 within 1e-9 and every contrib in [0,1] on every row of every state tested; 5 single-cause states named the moved driver 5/5. The weight invariant w_max < 2*w_min is documented in-source as the exact condition that makes single-cause naming guaranteed. The full 200-state / 12-single-cause DOM sweep needs a browser.",
+          "C9_exposure_response": "PARTIAL \u2014 on FX-SMALL, bulldozing every station + zeroing fire funding + aging the plant moved the fire row 1.2988 -> 1.5714, crossing the High->Severe boundary inside 24 ticks. The full 4-intervention comparative sweep needs a browser harness.",
+          "C10_menu_shape": "PASS (static) \u2014 MENUS.disasters is 9 rows = 8 arrays + 1 separator; 7 distinct Snd voice references.",
+          "C11_one_bugle_per_kind": "PASS \u2014 instrumented push wrapper: exactly 20 pushes per kind (140 total), 7 distinct headlines, every entry an object with non-empty headline/sub/body; 0 pushes for 20 aborted landlocked floods.",
+          "C12_legibility": "PASS on the palette half \u2014 14/14 MM_NAMES/MM_LEGENDS/.mm buttons; RISK_BANDS luminance 52.2/108.8/164.9/220.6 (steps 56.6/56.2/55.6), adjacent max-channel deltas 68/177/184, worst pairwise CIEDE2000 over {4 bands + #013 water} 24.2 normal and 24.1 deuteranope-simulated. Screenshot histograms need a browser.",
+          "C13_no_camera_leak": "PASS on the static half \u2014 0 occurrences of `cam` in the risk branch, in riskBands(), in the whole Civil Defense block of sim.js and in every new sim function (comments reworded so the grep is honest). The buffer/rotation hash needs a browser.",
+          "C15_advisory_fires_and_stays_quiet": "PASS \u2014 FIRE_RISK_HIGH fires on 60 tiles of FX-REF (a real city at fire coverage 0 with 60 level-2+ lots) and on 0 tiles of a healthy FX-SMALL; GROWTH_GATES untouched and C1's cursor comparison re-run green.",
+          "C21_one_source": "PASS \u2014 per hazardReport(): hazardCensus 1, deptStrain 0, approvalCensus 0; topDriver is by REFERENCE an element of the row's own drivers array 7/7 and its label appears verbatim in the sentence 7/7; exactly 1 definition of HAZARD_BANDS in the tree."
+        },
+        "not_measured_in_this_pass": [
+          "C14 (perf under the live rAF loop)",
+          "C16 (Show-me DOM clicks)",
+          "C17 (WebAudio parameter capture)",
+          "C18 (prefs round-trip + pause/jump counting)",
+          "C19 (console errors)",
+          "C20 (provenance \u2014 the session was instructed not to commit)"
+        ],
+        "decisions_still_open": [
+          "D1 odds-vs-exposure labelling (implemented on the recommended two-quantity option)",
+          "D2 MELTDOWN vs TORNADO in the seven rows (implemented on the launch_order_note assumption: the seven BUILT kinds)",
+          "D3 'all 5 scenarios remain winnable' is unrunnable \u2014 js/scenarios.js holds FOUR",
+          "D4 corpus seed 10 collapses to pop 0 under live disasters (3,019 of 14,400 ticks eligible)"
+        ],
+        "corrections_to_this_entry_gate_text": [
+          "The BYTE-IDENTICAL gate says 'the payload still declares v:17'. It declares v:18 \u2014 GP7a is live. GP8a left it untouched at 18 and added no key. An implementer who 'fixed' the version to match the stale text would corrupt the save ladder.",
+          "The MENU REACHABILITY gate says 'length === 8'. The baseline shape is 5 (4 arrays + 1 separator), so 3->7 kinds gives 9, not 8.",
+          "The save_version_plan says v17 throughout and cites pre-GP7a line numbers; it is stale by one rung."
+        ]
+      },
+      "provenance_note": "docs/gp8a-hazard-soak.json was landed ALONE at 88d2675 with js/, index.html and css/ identical to f74b6e0, so git history vouches for it as a pre-implementation measurement. This is the process rule adopted after GP7a C2 failed for the opposite reason."
     },
     {
       "id": "GP8b",
@@ -1292,7 +1354,8 @@
       "certified_through": "GP5b (service strain & the education payoff \u2014 the GP5 pair complete). GP6 (citizen opinion poll) is LIVE in the tree at save v17 and is NOT yet certified \u2014 its verify + panel pass owns that promotion; see live_but_uncertified below.",
       "live_but_uncertified": [
         "GP6 citizen-opinion-poll (save v17) \u2014 9/10 gates pass; BLOCKED on two user decisions in GP6.blocker. NOT shipped.",
-        "GP7a assessed-value shadow ledger (save v18) \u2014 15/16 gates pass after the fix pass; the only failure is the C2 provenance clause, which the orchestrator invalidated by bundling the spike into a checkpoint commit and has independently re-verified 7/7 on the unchanged tree. Open: GP7a.orchestrator_provenance_finding and design_user_decisions U2 (the history left-pad retroactively repairs commute/avgcom/approv on mature pre-v17 saves \u2014 measured additive and idempotent, but unscoped). NOT shipped."
+        "GP7a assessed-value shadow ledger (save v18) \u2014 15/16 gates pass; blocked on the C2 provenance clause (orchestrator-caused, property independently re-verified 7/7) plus decision U2. NOT shipped.",
+        "GP8a civil-defense risk ruler implement pass (hazard census + Civil Defense panel + Risk minimap + advisory row + 4 Snd voices; sim.js/ui.js/render.js/main.js/audio.js/advisors.js/index.html/css) \u2014 save-neutral, checkpointed mid-workflow, NOT shipped; certified or fixed/reverted by running workflow wf_b862920f-589. Its soak artifact is already landed separately at 88d2675."
       ],
       "artifact_reflects": "this ship (bundle rebuilt at GP5b close)"
     }

@@ -98,7 +98,7 @@
           <!-- M32a: 90° view rotation -->
           <div id="viewrot"><button id="rot-ccw" class="btn95 tiny" title="Rotate view CCW (Q / [)">&#x27f2;</button><button id="rot-cw" class="btn95 tiny" title="Rotate view CW (E / ])">&#x27f3;</button></div>
           <div id="mapmodes">
-            <button class="btn95 tiny mm active" data-mode="all" title="City overview">City</button><button class="btn95 tiny mm" data-mode="power" title="Power grid">Pwr</button><button class="btn95 tiny mm" data-mode="poll" title="Pollution">Pollu</button><button class="btn95 tiny mm" data-mode="value" title="Land value">Val</button><button class="btn95 tiny mm" data-mode="crime" title="Crime">Cri</button><button class="btn95 tiny mm" data-mode="pol" title="Police coverage">Pol</button><button class="btn95 tiny mm" data-mode="fire" title="Fire coverage">Fire</button><button class="btn95 tiny mm" data-mode="traffic" title="Traffic congestion">Trf</button><button class="btn95 tiny mm" data-mode="svc" title="City services (education &amp; health)">Svc</button><button class="btn95 tiny mm" data-mode="dist" title="Districts / neighborhoods">Dist</button><button class="btn95 tiny mm" data-mode="water" title="Water network">Wtr</button><button class="btn95 tiny mm" data-mode="transit" title="Rail &amp; subway network">Rail</button><button class="btn95 tiny mm" data-mode="commute" title="Commute / jobs reachable">Com</button>
+            <button class="btn95 tiny mm active" data-mode="all" title="City overview">City</button><button class="btn95 tiny mm" data-mode="power" title="Power grid">Pwr</button><button class="btn95 tiny mm" data-mode="poll" title="Pollution">Pollu</button><button class="btn95 tiny mm" data-mode="value" title="Land value">Val</button><button class="btn95 tiny mm" data-mode="crime" title="Crime">Cri</button><button class="btn95 tiny mm" data-mode="pol" title="Police coverage">Pol</button><button class="btn95 tiny mm" data-mode="fire" title="Fire coverage">Fire</button><button class="btn95 tiny mm" data-mode="traffic" title="Traffic congestion">Trf</button><button class="btn95 tiny mm" data-mode="svc" title="City services (education &amp; health)">Svc</button><button class="btn95 tiny mm" data-mode="dist" title="Districts / neighborhoods">Dist</button><button class="btn95 tiny mm" data-mode="water" title="Water network">Wtr</button><button class="btn95 tiny mm" data-mode="transit" title="Rail &amp; subway network">Rail</button><button class="btn95 tiny mm" data-mode="commute" title="Commute / jobs reachable">Com</button><button class="btn95 tiny mm" data-mode="risk" title="Disaster exposure (Civil Defense)">Risk</button>
           </div>
         </fieldset>
         <fieldset class="fs95"><legend>Vitals</legend>
@@ -389,6 +389,22 @@
       <table id="survey-table" class="budget-table"></table>
       <div class="survey-foot">Sample: 400 residents reached on a landline between dinner and Wheel of Fortune.<br>Show-me buttons switch the map and swing the camera to the worst block.</div>
       <div class="dlg-buttons"><button class="btn95 dlg-close">Thank you for your time</button></div>
+    </div>
+  </div>
+
+  <!-- GP8a: Civil Defense — the honest risk ruler. Two different quantities per
+       hazard and it says so: the ODDS are a pure function of the shipped spawn
+       model (they do not move with anything you build), the BAND is the city's
+       EXPOSURE. Rows are rebuilt live on every open (that scan runs at open
+       time only, never in the frame loop), each carrying a Show-me button that
+       switches minimap mode and swings the camera onto the worst block. -->
+  <div id="dlg-civdef" class="win95 dlg hidden">
+    <div class="titlebar"><span>🚨 Civil Defense — Office of Emergency Preparedness</span><span class="title-btns"><span class="tbtn dlg-close">✕</span></span></div>
+    <div class="dlg-body">
+      <div id="civdef-head"></div>
+      <table id="civdef-table" class="budget-table"></table>
+      <div class="civdef-foot">Odds are the published frequency of the disaster itself and are the same for every city — the band is what YOUR city is exposed to when it lands.<br>Show-me buttons switch the map and swing the camera to the worst block.</div>
+      <div class="dlg-buttons"><button class="btn95 dlg-close">Stay safe out there</button></div>
     </div>
   </div>
 

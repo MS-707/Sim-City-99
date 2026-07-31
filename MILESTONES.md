@@ -26,6 +26,21 @@ Queue policy: keep at least 5 open improvements at all times.
   `docs/gp10a-distress-pre.json`; two gate clauses were **refuted by
   measurement** and recorded there rather than quietly satisfied. No
   abandonment, no decay, no countdown copy anywhere — that is GP10b.
+  **Fix pass (panel round 1)**: the sim half was untouched — what changed is
+  the *expression*, because the first cut passed its pixel-count gates while
+  reading as monthly noise. The wash and the Blight overlay now wait for
+  `BLIGHT_MIN` = **3 consecutive failing months** (at one month, 63% of all
+  developed lots were washed and 62% of them re-graded every rollover — the
+  SLUMP row reads a citywide scalar and traffic crosses the 0.8 line
+  seasonally); the grime moves to a soot `#2a180d` at `[0.17, 0.34, 0.52]`, so
+  adjacent bands separate by mean **CIE76 6.1/6.1/6.7** instead of 2.9-3.7
+  (a third of those pixels were under the 2.3 JND), the wash no longer
+  *brightens* near-black roofs and its winter/summer strength ratio falls from
+  1.8× to 1.22×; the minimap ramp moves off the sepia it shared with GP9a's
+  garbage overlay (dE 6.5 → 41.5 at the worst band); and the almanac prints an
+  em-dash instead of "0 of 0 lots failing" on a ledger nobody has swept yet.
+  Every *counting* surface still counts from month one — only the two picture
+  surfaces wait.
 
 - **Three milestones built, awaiting adjudication**: GP6 (9/10 gates), GP7a
   (15/16) and GP8a (18/21 then fix-pass green) are implemented and live in the

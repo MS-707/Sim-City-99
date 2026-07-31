@@ -1000,9 +1000,11 @@ function renderFrame(city, uiState, clearBG) {
             // GP10a: the blight wash — a lot that has been failing for months
             // grimes over. FIRE DOMINATES (an `else`): a burning building must
             // keep the char as its single unambiguous read. Skipped at level 0
-            // (nothing built to grime) and free at every rotation, since it is
-            // a pure function of city.distress[i].
-            else if (city.lvl[i] && city.distress[i])
+            // (nothing built to grime) and below BLIGHT_MIN consecutive failing
+            // months (see the constant: a one-month dip is not blight), and
+            // free at every rotation, since it is a pure function of
+            // city.distress[i].
+            else if (city.lvl[i] && city.distress[i] >= BLIGHT_MIN)
               drawBlight(spr, wx, wy, distressBand(city.distress[i]));
             // G9: mast-bearing C3 towers blink their aircraft beacon live,
             // each tower phase-offset by its tile index — the baked red tip
@@ -1356,10 +1358,53 @@ function drawChar(spr, wx, wy) {
    rotations are free (M32a/b) and the shipped sprite set is byte-unchanged.
    It is also DAY-LAYER ONLY: it never touches nightAdd/nightPunch or spr.night,
    so G1/G2 night legibility and the night-layer cache key are untouched.
-   Three alphas, one per readout band — measured to differ from the unwashed
-   sprite and from each other across the sprite bbox by well over the 2% bar,
-   because the silhouette covers ~18% of the bbox on an r2. */
-const BLIGHT_ALPHA = [0.16, 0.28, 0.42];
+
+   THE CACHE TIER IS DECLARED, not incidental: one extra canvas per sprite
+   OBJECT (`spr.blight`), built at first use and never rebuilt — measured 340
+   canvases / 5.31 MB after visiting all four rotations x four seasons on a
+   TOTALLY blighted city, i.e. +4.8% on the 4,627-canvas sprite atlas. It is
+   not a sprite BAKE (no ART_RNG, no R(), no new anchor); it is the drawChar
+   tier one entry wider.
+
+   THE LADDER IS MEASURED IN deltaE, NOT IN PIXEL COUNTS. A pixel-count gate
+   passes on a wash nobody can see: the first cut of this feature used
+   #6b4526 at [0.16, 0.28, 0.42] and covered 68% of the bbox while the mean
+   CIE76 distance between ADJACENT bands was 2.9-3.7 with 21-41% of the
+   changed pixels under the 2.3 JND — a ladder that measures but does not
+   read. Re-derived (mean dE over changed pixels, ZR L2 lot, summer/autumn/
+   winter, day and deep night):
+       healthy->strained 6.1   strained->at-risk 6.1   at-risk->critical 6.7
+       healthy->critical 18.8, against the fire char's 25.4 — so the char
+       stays the strongest read on the tile and the hierarchy G3 established
+       is preserved (a burning lot is never washed: fire is an `else`).
+       under-JND share of changed pixels: 10.5 / 10.6 / 9.9 percent.
+   The fill is #2a180d, a near-black soot-brown, for two measured reasons:
+   it keeps the wash DARKENING (3.9% of changed pixels rise in luminance, vs
+   15.4% under the old mid-rust, which turned near-black C-tower roofs milky),
+   and it flattens the SEASON dependence — winter/summer strength ran 1.8x
+   apart under the old rust (bright snow tinted far harder than summer grass)
+   and runs 1.22x apart now. */
+/* THE EXPRESSION FLOOR — half the at-risk window, i.e. a full quarter of
+   consecutive failing months before a lot grimes over at all. It is an
+   EXPRESSION threshold only: the ledger, the census, history.blight, the
+   almanac line, the district row and the advisory all still count from month
+   one. The wash and the Blight overlay are the two surfaces that wait.
+
+   WHY, MEASURED on the pinned reference city (seed 4242 @600) over 36
+   consecutive rollovers. Drawn from month one, 63% of all developed lots
+   carried the wash at any instant and 62% of the washed set re-graded EVERY
+   month — the sim's own brownout flicker and the citywide demand/congestion
+   swings (the SLUMP row reads a citywide scalar, and traffic crosses the 0.8
+   line seasonally) push whole sectors in and out of the ledger every rollover,
+   so the treatment read as monthly noise across the whole map instead of the
+   localised, accumulating decline it is for. At the floor: 36% of developed
+   lots washed, and the share of wash RUNS shorter than three months drops from
+   67% to 38% (on a power-solvent city, from 22% to 1.7%, with a median run of
+   7 months). The counter still resets the instant a lot stops failing — this
+   is not hysteresis and it stores no state; it is a pure function of
+   distress[i], so all four rotations stay free. */
+const BLIGHT_MIN = DISTRESS_BANDS[0] / 2;   // 3 months
+const BLIGHT_ALPHA = [0.17, 0.34, 0.52];
 function drawBlight(spr, wx, wy, band) {
   if (!spr.blight) {
     const c = document.createElement("canvas");
@@ -1367,7 +1412,7 @@ function drawBlight(spr, wx, wy, band) {
     const g = c.getContext("2d");
     g.drawImage(spr.c, 0, 0);
     g.globalCompositeOperation = "source-in";
-    g.fillStyle = "#6b4526";           // rust/sepia grime
+    g.fillStyle = "#2a180d";           // soot-brown grime
     g.fillRect(0, 0, c.width, c.height);
     spr.blight = c;
   }
@@ -2350,15 +2395,23 @@ const MM_WASTE_BANDS = ["#14240f", "#7a4a12", "#a08a52", "#e39a5e", "#f0e4c0"];
    THE HEALTHY SWATCH IS DELIBERATELY COOL and the three distress bands are
    deliberately warm: on this overlay any warm pixel is a grievance, which is
    the read a player should get before they parse the ladder at all.
-   MEASURED. Rec.709 luminance strictly rising 56.2 / 96.0 / 146.4 / 220.3 —
-   steps 39.8 / 50.4 / 73.9, every one over this codebase's 25 bar — and >= 50
-   apart in at least one channel between adjacent bands (R 92, R 70, G 78), so
-   the ladder survives deuteranopia on luminance alone. The water base sits
-   40.3 luminance below the healthy swatch, so a zoned coastline still reads as
-   coastline. NO BAND IS PURE #ffffff, deliberately: the rotation gate masks the
-   union of pure-white pixels (the camera-viewport stroke), and a white band
-   would be eaten by that mask. */
-const MM_BLIGHT_BANDS = ["#2e3a44", "#8a5a20", "#d08a30", "#ffd8a0"];
+   MEASURED. Rec.709 luminance strictly rising 56.2 / 103.6 / 152.4 / 199.4 —
+   steps 47.5 / 48.8 / 47.0, every one over this codebase's 25 bar — and >= 50
+   apart in at least one channel between adjacent bands (R 181, G 53/B 68, R 0
+   /G 59), so the ladder survives deuteranopia on luminance alone. The water
+   base sits 40.3 luminance below the healthy swatch, so a zoned coastline
+   still reads as coastline. NO BAND IS PURE #ffffff, deliberately: the
+   rotation gate masks the union of pure-white pixels (the camera-viewport
+   stroke), and a white band would be eaten by that mask.
+   FIX PASS — WHY IT IS A SCORCH RAMP AND NOT A SEPIA ONE. The first cut ran
+   #8a5a20 / #d08a30 / #ffd8a0, which is the GARBAGE ramp shipped one milestone
+   earlier wearing a different name: CIE76 dE to the nearest MM_WASTE_BANDS
+   entry was 6.5 / 15.5 / 15.8 — the first of those is HALF this codebase's own
+   13 bar, and side by side on the same city the two overlays read as twins.
+   Re-derived against every shipped band ramp: nearest waste entry now 41.5 /
+   26.2 / 25.9, nearest value 71.3 / 60.4 / 51.1, nearest risk 48.3 / 44.4 /
+   21.6, and the cool healthy swatch is unchanged at 24.5 from waste. */
+const MM_BLIGHT_BANDS = ["#2e3a44", "#e34a22", "#ff7f66", "#ffbaa8"];
 
 /* GP8a: the Risk band buffer, memoised in MODULE scope — deliberately NOT a
    field on City. That is what makes GP8a's read-only proof structural: the
@@ -2566,9 +2619,15 @@ function renderMinimap(city, mode) {
          denominator the ledger publishes its share against), and everything
          else takes the standard two-value background. Strictly north-up:
          nothing here reads cam, rot4 or screenToTile, so all four rotations
-         paint the identical minimap (G10(b)). */
+         paint the identical minimap (G10(b)).
+         IT USES THE SAME BLIGHT_MIN FLOOR THE TILE WASH DOES, on purpose: the
+         two surfaces must agree about what counts as blight, or the overlay
+         paints a warm field over lots the city itself draws clean. Below the
+         floor a zoned lot takes the healthy swatch — it is failing, and every
+         COUNTING surface (hover, district row, almanac, graph) says so from
+         month one; the two PICTURE surfaces wait for the quarter. */
       const dn = city.distress[i];
-      col = dn > 0 ? MM_BLIGHT_BANDS[1 + distressBand(dn)]
+      col = dn >= BLIGHT_MIN ? MM_BLIGHT_BANDS[1 + distressBand(dn)]
         : apxZone(city, i) ? MM_BLIGHT_BANDS[0]
         : (city.terr[i] === TERR.WATER ? "#013" : "#111");
     } else if (mode === "dist") {

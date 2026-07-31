@@ -834,7 +834,12 @@ const MM_LEGENDS = {
   // (sim.js DISTRESS_BAND_NAMES, short-cased to match the garbage ladder's
   // one-word style) and the standard water swatch. Five swatch/label pairs is
   // the same load the `garbage` row above measures at the house two-row 23px.
-  blight: '<i class="sw" style="background:#2e3a44"></i>healthy <i class="sw" style="background:#8a5a20"></i>strained <i class="sw" style="background:#d08a30"></i>at risk <i class="sw" style="background:#ffd8a0"></i>critical <i class="sw" style="background:#013"></i>water',
+  // FIX PASS: the swatches follow render.js MM_BLIGHT_BANDS onto the scorch
+  // ramp (the sepia one collided with `garbage` at dE 6.5), and each band
+  // carries its month edge — this overlay draws from render.js BLIGHT_MIN (3
+  // consecutive failing months), not from month one, and a legend that did not
+  // say so would be describing a different picture than the one on screen.
+  blight: '<i class="sw" style="background:#2e3a44"></i>healthy <i class="sw" style="background:#e34a22"></i>strained 3+ <i class="sw" style="background:#ff7f66"></i>at risk 6+ <i class="sw" style="background:#ffbaa8"></i>critical 12+ <i class="sw" style="background:#013"></i>water',
 };
 
 // GP5a: legend mode names — with 15 map modes the abbreviated buttons alone
@@ -1605,11 +1610,21 @@ function buildAlmanacRows() {
     // GP3b commute line above is the exact precedent). Both denominators are
     // printed because they answer different questions: the zoned share is the
     // commitment the mayor made, the developed share is what is standing.
-    `<tr><td colspan="5">Blight: ${city.distressCensus.distressed} of ` +
-    `${city.distressCensus.zoned} zoned lots failing ` +
-    `(${Math.round(city.distressCensus.share * 100)}%) · ` +
-    `${city.distressCensus.devDistressed} of ${city.distressCensus.dev} built ` +
-    `(${Math.round(city.distressCensus.devShare * 100)}%)</td></tr>`;
+    // FIX PASS — UNMEASURED IS NOT ZERO. distressCensus is seeded all-zero in
+    // the constructor and is only real once distressTick has swept, so on a
+    // fresh city and on the first frame after a load this line used to state
+    // "0 of 0 zoned lots failing (0%)" over a city with thousands of zoned
+    // lots: a factual claim of no blight on a ledger nobody has read yet. The
+    // em-dash is the same fallback the commute line above uses for the same
+    // reason; distressVisits is 0 until the first sweep and MAP*MAP after it.
+    (city.distressVisits
+      ? `<tr><td colspan="5">Blight: ${city.distressCensus.distressed} of ` +
+        `${city.distressCensus.zoned} zoned lots failing ` +
+        `(${Math.round(city.distressCensus.share * 100)}%) · ` +
+        `${city.distressCensus.devDistressed} of ${city.distressCensus.dev} built ` +
+        `(${Math.round(city.distressCensus.devShare * 100)}%)</td></tr>`
+      : `<tr><td colspan="5">Blight: — (not swept yet — the ledger reads at ` +
+        `the month rollover)</td></tr>`);
 }
 
 function openAlmanac() {

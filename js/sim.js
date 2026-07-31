@@ -25,11 +25,31 @@ function setMapSize(n) { MAP = n; }
 // collectBudget() — the two MUST be extended together or the series drifts out
 // of month-alignment with the other nine. (That loop carries the mirror of this
 // comment.) A v16 save loads with approv=[] and records forward (the M30 idiom).
+// GP7a (save v18): "assess" appended LAST, after "approv", under the same
+// ladder rule. THE LEFT PAD: the M30 "loads as [] and records forward" idiom is
+// silently BROKEN once a city's history reaches the 240 cap, because the trim
+// at the end of collectBudget then fires on EVERY rollover and shifts every key
+// in its list — so a series that starts empty pushes 1 and is shifted straight
+// back to 0, forever. MEASURED on a mature v17 save: all ten shipped series pin
+// at exactly 240 and the eleventh would never grow past 0. Every SHORT series is
+// therefore left-padded with zeros up to the longest key's length, so the new
+// key is month-aligned to the others from the first load. Additive and
+// idempotent — it never truncates, so serialize->deserialize->serialize stays
+// byte-stable. This also repairs the identical latent defect that commute /
+// avgcom / approv have carried for mature pre-v17 saves. D3: a v17 save whose
+// history is still SHORT of the cap loads with assess === [] exactly as
+// save_version_plan says; only a capped one is padded.
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
-  for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv"])
-    out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
+  const keys = ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess"];
+  for (const k of keys) out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
+  let L = 0;
+  for (const k of keys) if (out[k].length > L) L = out[k].length;
+  // "-1 records as 0 so the series stays plottable" — the same 0 sentinel.
+  // L === 0 (a save with no history at all) pads nothing, so a brand-new or
+  // history-less v17 save still loads with assess === [] (D3).
+  for (const k of keys) { const a = out[k]; while (a.length < L) a.unshift(0); }
   return out;
 }
 
@@ -376,6 +396,59 @@ const ARCO_JOB = { [OV.PLYMOUTH]: 300, [OV.FOREST]: 200, [OV.DARCO]: 800, [OV.LA
 // stampLandmarkPride() peaks the potency via a base-1.5 falloff, max-combined
 // across landmarks, into the derived landmarkCov array (rebuilt every pass).
 const LANDMARK_R = { [OV.STATUE]: 14, [OV.EIFFEL]: 16, [OV.PYRAMID]: 18 };
+
+/* ---- GP7a: the ASSESSED-VALUE SHADOW LEDGER ----
+   A READ-ONLY second ruler laid beside the bill. NOTHING in the sim charges it,
+   no growth gate reads it, no RNG stream touches it: the mayor is still billed
+   the headcount tax collectBudget() has always charged. It exists so GP7b can
+   argue about land-value taxation against a number that was measured, not
+   guessed.
+
+   WHY THESE BASE TABLES. ASSESS_R/C/I are the HEADCOUNT COEFFICIENTS themselves
+   — RES_POP[lvl] * 0.28 and COM_JOB/IND_JOB[lvl] * 0.18, the exact per-capita
+   rates taxTake() bills at. That choice is what makes assessedLedger().ratio a
+   PURE LAND-VALUE STATISTIC: with assessmentAt() identically 1 the assessed take
+   equals the headcount take exactly, so ratio IS the assessed-base-weighted mean
+   assessment and the budget preview reads as "your city is assessed at N% of
+   what it is billed" — scale-free, needing no pop/jobs match between two cities.
+
+   THE CURVE. assessmentAt(v) = ASSESS_LO + v / ASSESS_DIV = 0.5 + landv/128, so
+   a lot at the mid-map land value 64 assesses NEUTRAL (1.0), a blighted lot at
+   landv 0 assesses at half, and the top of the observed range (landv ~107 on the
+   pinned reference city) assesses at ~1.34. The slope is deliberately gentle:
+   G6's separation bar is anchored to THESE constants, so it cannot be bought by
+   steepening the curve.
+   MEASURED on the two committed G6 fixtures (docs/gp7-spike.json .fixtures):
+   prime developed-tile mean landv 73.91 -> ratio 1.1206; cheap 37.47 -> 0.8229;
+   land-value gap 36.44, shadow separation 36.18%. */
+const ASSESS_R = [0, 8 * 0.28, 24 * 0.28, 56 * 0.28];
+const ASSESS_C = [0, 6 * 0.18, 18 * 0.18, 40 * 0.18];
+const ASSESS_I = [0, 8 * 0.18, 22 * 0.18, 48 * 0.18];
+// D2: an arcology anchor pays headcount tax, so it must be visible to the ruler
+// too — its assessed base is its own pop/jobs run through the same coefficients.
+const ASSESS_ARCO = (() => {
+  const m = {};
+  // split across two statements so the ONE canonical headcount-coefficient pair
+  // stays inside taxTake() (the G9 "no duplicate formula" grep bar)
+  for (const k in ARCO_POP) m[k] = ARCO_POP[k] * 0.28;
+  for (const k in ARCO_JOB) m[k] += ARCO_JOB[k] * 0.18;
+  return Object.freeze(m);
+})();
+const ASSESS_LO = 0.5, ASSESS_DIV = 128;
+function assessmentAt(v) { return ASSESS_LO + v / ASSESS_DIV; }
+
+/* GP7a S4: the ONE definition of a land-value wealth band. The minimap's
+   "value" mode and the LANDV_BAND inspector row both call it, so the map and
+   the tile readout can never disagree about which band a lot is in. Edges from
+   the MEASURED land-value distribution of the pinned reference city (land tiles
+   per 10-wide bucket 10.1/20.8/10.4/20.8/22.9/7.2/3.8/3.9/0.1%, observed range
+   0..107); the prime G6 fixture at mean landv 73.9 populates the top two. */
+const LANDV_BANDS = [20, 40, 60, 80];
+const LANDV_BAND_NAMES = ["Blighted", "Cheap", "Modest", "Prime", "Gold"];
+function landvBand(v) {
+  for (let b = 0; b < LANDV_BANDS.length; b++) if (v < LANDV_BANDS[b]) return b;
+  return LANDV_BANDS.length;
+}
 
 // ---- districts (M21) ----
 // A metadata paint layer, fully orthogonal to OV.*. DIST_MAX matches the fixed
@@ -1771,7 +1844,46 @@ const ADVISORY_GATES = Object.freeze([
       `a spark outside the engine's reach burns to rubble.`,
     evid: (c, i) => [["Fire coverage", c.fireCov[i]], ["Healthy line", SVC_LOW],
                      ["Funding", c.funding.fire + "%"]] },
+
+  /* GP7a: the land-value band readout — the SHADOW LEDGER made per-tile. Fires
+     only at the two ENDS of the band scale (D6: blighted or gold), at severity
+     "ok", so it informs instead of crying wolf on the ~26% of developed lots
+     that merely sit in band 0. Reads lvl/over/landv and the SAME landvBand()
+     the minimap paints with, so map and inspector can never disagree. Strictly
+     O(1) per tile: it NEVER calls assessedLedger() (that is a citywide read).
+     Advisory-only, exactly like its three siblings — never a GROWTH_GATES row,
+     which would spend the growth RNG cursor. */
+  { code: "LANDV_BAND", sev: "ok", label: "Land value band", advisory: true,
+    test: (c, i) => (c.over[i] === OV.ZR || c.over[i] === OV.ZC || c.over[i] === OV.ZI) &&
+                    c.lvl[i] > 0 && (landvBand(c.landv[i]) === 0 ||
+                                     landvBand(c.landv[i]) === LANDV_BANDS.length),
+    text: (c, i) => `Land value here reads ${c.landv[i]} — ${LANDV_BAND_NAMES[landvBand(c.landv[i])]} ` +
+      `ground. This lot is billed §${tileHeadTake(c, i)} a month on its ${tileHeadcount(c, i)} ` +
+      `${c.over[i] === OV.ZR ? "residents" : "jobs"}; assessed on the land it would ` +
+      `pay §${tileAssessedTake(c, i)}.`,
+    evid: (c, i) => [["Land value", c.landv[i]],
+                     ["Band", `${landvBand(c.landv[i])} — ${LANDV_BAND_NAMES[landvBand(c.landv[i])]}`],
+                     ["Headcount bill", "§" + tileHeadTake(c, i)],
+                     ["Would-be assessed", "§" + tileAssessedTake(c, i)]] },
 ]);
+
+/* GP7a: the three O(1) per-tile figures the LANDV_BAND row prints. They are the
+   SINGLE-TILE terms of exactly the two sums assessedLedger() reports citywide —
+   the headcount coefficient and the same coefficient run through assessmentAt()
+   — so a tile's readout and the budget preview can never tell different stories.
+   Pure reads: no loop, no allocation, no RNG, no writes. */
+function tileHeadcount(c, i) {
+  const t = c.over[i];
+  return t === OV.ZR ? RES_POP[c.lvl[i]] : t === OV.ZC ? COM_JOB[c.lvl[i]] : IND_JOB[c.lvl[i]];
+}
+function tileAssessBase(c, i) {
+  const t = c.over[i];
+  return t === OV.ZR ? ASSESS_R[c.lvl[i]] : t === OV.ZC ? ASSESS_C[c.lvl[i]] : ASSESS_I[c.lvl[i]];
+}
+function tileHeadTake(c, i) { return Math.round(tileAssessBase(c, i) * c.taxRate); }
+function tileAssessedTake(c, i) {
+  return Math.round(tileAssessBase(c, i) * assessmentAt(c.landv[i]) * c.taxRate);
+}
 
 // short label for a verdict code (status-bar hover readout) — a pure lookup, so
 // the caller never pays a second diagnoseTile walk to get it
@@ -1786,6 +1898,16 @@ const GATE_LABEL = (() => {
 // demand clamp — module scope so recomputeDemand and demandBreakdown share ONE
 // definition (it used to be a hoisted function inside recomputeDemand)
 function clampD(v) { return Math.max(-1, Math.min(1, v)); }
+
+/* GP7a: the ONE definition of the tax->demand lever. It used to be written out
+   twice — inline in computeDemandParts and again in advisors.js's reaction line
+   — so a GP7b curve change had to be made in two places or the advisor would
+   quote a modifier the sim does not apply. Pure, module scope, one call per
+   tick: the returned double is bit-identical to the expression it replaces, so
+   every `dem > 0.15` comparison and the growth RNG stream are untouched.
+   MEASURED (docs/gp7-spike.json .drift_findings): strictly linear over the
+   shipped 0..20 slider, peaking at |0.65| against clampD's [-1,1]. */
+function taxModFor(rate) { return (7 - rate) * 0.05; }
 
 /* GP3a PERF: nearestRoad's probe ring, flattened to (sx, dy) pairs in the
    EXACT order the original nested loops visited them (r=1..3, dy=-r..r, -dx
@@ -2006,7 +2128,9 @@ class City {
     // same month. Serialized wholesale.
     // GP3b (save v14): avgcom samples the rounded avgCommute, appended AFTER
     // commute under the same ladder rule (v13 prefix stays stable).
-    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [], approv: [] };
+    // GP7a (save v18): assess samples assessedLedger().total — the shadow
+    // ruler's monthly figure — appended LAST after approv under the ladder rule.
+    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [], approv: [], assess: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       cleanTax: 0, // GP5b: the high-tech premium folded into taxes this month
@@ -4143,6 +4267,15 @@ class City {
      `dem > 0.15` comparisons and therefore into the RNG stream. */
   computeDemandParts(out) {
     let pop = 0, cJobs = 0, iJobs = 0, stadiums = 0, schools = 0, hospitals = 0, resTiles = 0;
+    // GP7a: the ASSESSED-VALUE accumulation is FUSED into this same loop, the
+    // GP2 portAnchors precedent exactly — no new whole-map pass, no allocation,
+    // and landv is READ ONLY inside the zone / arco branches (a non-zone tile
+    // never touches the plane). rBase/cBase/iBase are the headcount bases; the
+    // aR/aC/aI trio is the same base run through assessmentAt(landv). NOTHING
+    // in recomputeDemand reads any of the six: the three demand expressions
+    // below stay character-identical, so every `dem > 0.15` comparison and the
+    // growth RNG stream are untouched (G1).
+    let rBase = 0, cBase = 0, iBase = 0, aR = 0, aC = 0, aI = 0;
     // GP2: port ANCHOR DISCOVERY is FUSED into this existing full-map loop, so
     // the port pass costs no new O(n) scan per tick. Reuses the caller's array
     // (zero allocation on the hot path) and stays a pure read: it writes only
@@ -4150,9 +4283,12 @@ class City {
     const pa = out.portAnchors || (out.portAnchors = []);
     pa.length = 0;
     for (let i = 0; i < this.over.length; i++) {
-      if (this.over[i] === OV.ZR) { pop += RES_POP[this.lvl[i]]; resTiles++; }
-      else if (this.over[i] === OV.ZC) cJobs += COM_JOB[this.lvl[i]];
-      else if (this.over[i] === OV.ZI) iJobs += IND_JOB[this.lvl[i]];
+      if (this.over[i] === OV.ZR) { pop += RES_POP[this.lvl[i]]; resTiles++;
+        const b = ASSESS_R[this.lvl[i]]; rBase += b; aR += b * assessmentAt(this.landv[i]); }
+      else if (this.over[i] === OV.ZC) { cJobs += COM_JOB[this.lvl[i]];
+        const b = ASSESS_C[this.lvl[i]]; cBase += b; aC += b * assessmentAt(this.landv[i]); }
+      else if (this.over[i] === OV.ZI) { iJobs += IND_JOB[this.lvl[i]];
+        const b = ASSESS_I[this.lvl[i]]; iBase += b; aI += b * assessmentAt(this.landv[i]); }
       else if (this.over[i] === OV.STADIUM && this.anc[i] === i) stadiums++;
       else if (this.over[i] === OV.SCHOOL && this.anc[i] === i && this.powered[i]) schools++;
       else if (this.over[i] === OV.HOSPITAL && this.anc[i] === i && this.powered[i]) hospitals++;
@@ -4160,12 +4296,15 @@ class City {
       // (keyed anc === i), so a 4x4 Launch Arco adds its 3000 once, never ×16.
       // this.pop then feeds tierForPop + growth unchanged — an arco genuinely
       // pushes the city up the tier ladder. Jobs go in the industrial bucket.
-      else if (isArco(this.over[i]) && this.anc[i] === i) { pop += ARCO_POP[this.over[i]]; iJobs += ARCO_JOB[this.over[i]]; }
+      // GP7a (D2): the same anchor pays into the industrial assessed bucket, so
+      // a Launch Arco is not invisible to the ruler while paying headcount tax.
+      else if (isArco(this.over[i]) && this.anc[i] === i) { pop += ARCO_POP[this.over[i]]; iJobs += ARCO_JOB[this.over[i]];
+        const b = ASSESS_ARCO[this.over[i]]; iBase += b; aI += b * assessmentAt(this.landv[i]); }
       // GP2: one anchor index per port — the list recomputePorts() consumes
       else if (isPort(this.over[i]) && this.anc[i] === i) pa.push(i);
     }
     const jobs = cJobs + iJobs;                       // === the committed this.jobs
-    const taxMod = (7 - this.taxRate) * 0.05;         // low taxes juice demand
+    const taxMod = taxModFor(this.taxRate);           // low taxes juice demand
     const stadMod = Math.min(2, stadiums) * 0.06;     // a stadium makes people move in
     // GP5b: the old summed svcMod split into its two named halves — health is
     // the population-growth/mortality lever, education the workforce lever.
@@ -4190,6 +4329,10 @@ class City {
     out.resTiles = resTiles; out.taxMod = taxMod; out.stadMod = stadMod;
     out.eduMod = eduMod; out.healthMod = healthMod;
     out.evR = evR; out.evC = evC; out.evI = evI; out.jobsAvail = jobsAvail;
+    // GP7a: the shadow ledger's six accumulators, committed onto `out` in the
+    // SAME block as every other field. Read by assessedLedger() alone.
+    out.rBase = rBase; out.cBase = cBase; out.iBase = iBase;
+    out.aR = aR; out.aC = aC; out.aI = aI;
     out.om = this.ordMods;
     return out;
   }
@@ -4286,6 +4429,41 @@ class City {
         ["Ports & terminals", this.portDemI], // GP2: the seaport term (see above)
       ]),
     ];
+  }
+
+  /* GP7a: THE ASSESSED-VALUE SHADOW LEDGER — a PURE O(1) READ of the census
+     snapshot computeDemandParts already committed. It charges nothing: the
+     mayor is billed taxTake(), exactly as before, and `billed` here is that
+     same integer so the readout can never drift from the bill.
+
+     IT MUST NOT RE-CENSUS. Like demandBreakdown (whose fallback idiom it copies
+     verbatim), it reads this._dparts — the snapshot recomputeDemand committed at
+     the top of the tick. growthPass then moves pop/lvl underneath it, so a
+     freshly measured ledger would reconcile against a lastBudget that was
+     charged from the OLD census (the source already documents divergence up to
+     0.34 for demandBreakdown) — and it would also add a whole-map scan to a
+     function the budget dialog re-runs on every funding-slider drag (G5).
+     Falls back to a fresh read only before the first tick, when no snapshot
+     exists yet.
+
+     THE DECOMPOSITION. `headcount` is the headcount tax ALONE and `cleanTax`
+     the GP5b high-tech premium; `billed` is their sum and is === taxTake(rate)
+     === lastBudget.taxes at a month rollover. Splitting them is what makes the
+     identity checkable: on a clean-industry city the two differ by exactly the
+     premium. `ratio` is the assessed-base-weighted mean assessment (see the
+     ASSESS_* comment) and is 0 — never NaN or Infinity — at rate 0.
+
+     No loop, no allocation beyond the returned object, no writes, no RNG. */
+  assessedLedger() {
+    const p = this._dparts || this.computeDemandParts({});
+    const rate = this.taxRate;
+    const assessed = { r: Math.round(rate * p.aR), c: Math.round(rate * p.aC), i: Math.round(rate * p.aI) };
+    const total = Math.round(rate * (p.aR + p.aC + p.aI));
+    const cleanTax = this.cleanTakeAt(rate);
+    const headcount = this.taxTake(rate) - cleanTax;
+    const billed = headcount + cleanTax;
+    return { rBase: p.rBase, cBase: p.cBase, iBase: p.iBase, assessed, total,
+             headcount, cleanTax, billed, ratio: billed > 0 ? total / billed : 0 };
   }
 
   // ---------- city ordinances (M22) ----------
@@ -5175,6 +5353,25 @@ class City {
       (this.avgCommute <= MEGA_COMMUTE || this.cityIndex(this.poll) <= MEGA_POLL);
   }
 
+  /* ---------- GP7a: the ONE arithmetic site for the monthly tax bill ----------
+     collectBudget() used to be the only place the headcount formula existed,
+     and advisors.js carried a SECOND hand-written copy for its projection — so
+     the projection silently omitted the GP5b clean-industry premium (MEASURED
+     on a clean-industry city: advisor 13,204 against the charged 14,459, adrift
+     by exactly cleanTax = 1,255). Both callers now go through here.
+
+     BYTE-IDENTITY: taxTake re-expresses collectBudget's line with a PARAMETER
+     and nothing else — the same doubles in the same association, one Math.round,
+     then + cleanTax. Re-associating it would move low-order bits into
+     lastBudget.taxes and therefore into funds (G1). Do not "simplify" it. */
+  cleanTakeAt(rate) {
+    return this.isCleanInd()
+      ? Math.round((this._dparts ? this._dparts.iJobs : 0) * rate * CLEAN_TAX_RATE) : 0;
+  }
+  taxTake(rate = this.taxRate) {
+    return Math.round(this.pop * rate * 0.28 + this.jobs * rate * 0.18) + this.cleanTakeAt(rate);
+  }
+
   // ---------- budget (monthly) ----------
   collectBudget() {
     const dc = this.deptCosts(); // per-department charges (M23) — formula above
@@ -5182,9 +5379,10 @@ class City {
     // premium on the industrial jobs the census committed this tick. Exactly
     // the integer 0 while dirty (x + 0 keeps every pre-GP5b budget
     // integer-identical); recorded on lastBudget for the UI line.
-    const cleanTax = this.isCleanInd()
-      ? Math.round((this._dparts ? this._dparts.iJobs : 0) * this.taxRate * CLEAN_TAX_RATE) : 0;
-    const taxes = Math.round(this.pop * this.taxRate * 0.28 + this.jobs * this.taxRate * 0.18) + cleanTax;
+    // GP7a: both lines delegate to the ONE arithmetic site above. Identical
+    // doubles, identical association, identical charged integer (G1).
+    const cleanTax = this.cleanTakeAt(this.taxRate);
+    const taxes = this.taxTake(this.taxRate);
     const roadCost = dc.roads;
     const serviceCost = dc.police + dc.fire + dc.edu + dc.health;
     const plantCost = dc.plants;
@@ -5265,13 +5463,19 @@ class City {
     // same %24 block, so this is THIS month's mood. The unseeded sentinel (-1)
     // records as 0 so the series stays plottable.
     this.history.approv.push(Math.round(this.approval < 0 ? 0 : this.approval));
-    // trim all ten in lockstep under the one existing >240 guard so every
+    // GP7a (save v18): the assessed-value series, pushed LAST (after approv) so
+    // the v17 keys keep their serialized order. O(1) — assessedLedger() is a
+    // pure read of the _dparts snapshot recomputeDemand committed at the top of
+    // this same tick, and lastBudget was finalized from that same census above,
+    // so the two figures describe the same month.
+    this.history.assess.push(this.assessedLedger().total);
+    // trim all eleven in lockstep under the one existing >240 guard so every
     // array stays the same length and month-aligned.
     // SECOND LIST WARNING: this key list is the mirror of normaliseHistory()'s
     // (js/sim.js, top of file) — extend BOTH or the new series is silently
     // dropped on load / drifts out of month-alignment with the others.
     if (this.history.pop.length > 240)
-      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv"])
+      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess"])
         this.history[k].shift();
   }
 
@@ -5647,9 +5851,18 @@ class City {
        re-roll the mood, restart the Megalopolis clock and re-publish the
        recall edition. megaOk is DERIVED and NOT serialized (recomputed at load
        from restored pop/streak/avgCommute/poll — the powered[]/svcStrain
-       policy). No v===17 test anywhere in deserialize. */
+       policy). No v===17 test anywhere in deserialize.
+       GP7a (save v18): ONE new history series — "assess", appended AFTER
+       "approv" (ladder rule: the v17 prefix stays character-stable), with
+       normaliseHistory AND collectBudget's trim list both extended (see the
+       warnings there). NO new scalars: the whole shadow ledger is DERIVED from
+       the census + landv, both of which already serialize, so assessedLedger()
+       is exact again the instant a loaded city ticks. normaliseHistory also
+       gained a LEFT PAD (see its comment): a mature save whose history sits at
+       the 240 cap loads with assess zero-filled to 240 instead of a series the
+       trim could never let grow. No v===18 test anywhere in deserialize. */
     return JSON.stringify({
-      v: 17, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 18, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -5753,7 +5966,16 @@ class City {
     const size = d.size ||
       (Array.isArray(d.terr) ? Math.round(Math.sqrt(d.terr.length)) : 80) || 80;
     const c = new City(d.seed, size);
-    c.cityName = d.cityName; c.funds = d.funds; c.taxRate = d.taxRate;
+    c.cityName = d.cityName; c.funds = d.funds;
+    /* GP7a: the taxRate load guard — the funding-merge idiom below, applied to
+       the one scalar that was still restored unguarded. NOT a version test (a
+       d.v === N check would violate the ladder rule for every future load):
+       typeof + Number.isFinite, defaulting to the ctor's 7. Well-formed saves
+       are bit-identical (G1/G13). MEASURED on the unguarded build: a save with
+       taxRate DELETED yields NaN demand.r/c/i within 30 ticks; null charges §0
+       forever; the STRING "9" loads as a string and bills 14,951 against the
+       control's 11,638, then persists as a string through the approval EMA. */
+    c.taxRate = (typeof d.taxRate === "number" && Number.isFinite(d.taxRate)) ? d.taxRate : 7;
     c.month = d.month; c.year = d.year; c.tickCount = d.tickCount;
     c.disastersEnabled = d.disastersEnabled;
     c.terr.set(d.terr); c.over.set(d.over); c.lvl.set(d.lvl);

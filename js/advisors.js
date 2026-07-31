@@ -370,22 +370,28 @@ const ADVISOR_RULES = {
    snapshot — no reaction fires until the mayor actually moves the slider.
    Reaction rules (old rate O → new rate N):
      cut (N < O)      Transportation protests, citing the projected §/month
-                      revenue loss round(pop*O*.28 + jobs*O*.18) −
-                      round(pop*N*.28 + jobs*N*.18) — the money that pays the
-                      road crews; Finance APPROVES the cut.
+                      revenue loss city.taxTake(O) − city.taxTake(N) — the money
+                      that pays the road crews; Finance APPROVES the cut.
      deep cut (N ≤ 3) Safety and Environment protest too (service advisors).
      hike to N ≥ 10   ALL four advisors — Finance included — warn of resident
                       exodus, each citing the demand modifier the sim already
-                      applies: taxMod = (7 − N) × 0.05 (recomputeDemand's
-                      single tax→demand lever; advisors cite it, never add a
-                      second penalty).
-     mild hike        Finance alone welcomes the extra revenue. */
+                      applies: taxModFor(N) (recomputeDemand's single tax→demand
+                      lever; advisors cite it, never add a second penalty).
+     mild hike        Finance alone welcomes the extra revenue.
+   GP7a: both figures are now DELEGATED to the sim's single definitions rather
+   than re-typed here. The projection therefore INCLUDES the GP5b clean-industry
+   premium, which the old hand-written copy silently dropped — MEASURED on a
+   clean-industry city: the advisor quoted 13,204 against the charged 14,459, a
+   divergence of exactly cleanTax = 1,255 (a dirty city read 12,904 both ways).
+   advTaxesAt KEEPS its rate argument: it is called at BOTH the old and the new
+   rate to price the delta, so a delegation that ignored the argument would make
+   `loss` identically 0 and print "a projected §0 a month gone". */
 const ADV_REACT_TTL = 10;
 let advSnap = null;                 // { cityRef, taxRate, funding }
 let advReact = null, advReactTTL = 0;
 
-function advTaxesAt(rate) {         // projected monthly tax take at a rate
-  return Math.round(city.pop * rate * 0.28 + city.jobs * rate * 0.18);
+function advTaxesAt(rate) {         // projected monthly tax take AT A GIVEN rate
+  return city.taxTake(rate);
 }
 
 function advCheckDeltas() {
@@ -401,7 +407,7 @@ function advCheckDeltas() {
   if (N !== O) {
     const r = { finance: [], safety: [], environment: [], transport: [] };
     const loss = Math.abs(advTaxesAt(O) - advTaxesAt(N));
-    const taxMod = ((7 - N) * 0.05).toFixed(2);
+    const taxMod = taxModFor(N).toFixed(2);
     if (N < O) {
       r.transport.push("Whoa whoa WHOA — taxes cut from " + O + "% to " + N +
         "%?! That's a projected §" + loss.toLocaleString() + " a month gone " +

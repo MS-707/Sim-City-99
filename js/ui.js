@@ -746,7 +746,11 @@ const MM_LEGENDS = {
   // GQ11: gradients/swatches mirror the retuned deutan-safe overlay ramps
   // (render.js MM_POLL/MM_CRIME/MM_TRAFFIC + the blue/orange svc pair)
   poll:    '<i class="grad" style="background:linear-gradient(90deg,#131,#966e24,#ffbe32)"></i>clean / foul',
-  value:   '<i class="grad" style="background:linear-gradient(90deg,#1e283c,#6adabb)"></i>cheap / prime',
+  // GP7a S4: the continuous cheap/prime gradient replaced by the FIVE named
+  // wealth bands renderMinimap now paints (render.js MM_VALUE_BANDS, indexed by
+  // sim.js's landvBand()), plus the standard water swatch — the G8 contract
+  // that the strip echoes the exact branch colours.
+  value:   '<i class="sw" style="background:#1e283c"></i>blighted <i class="sw" style="background:#2b5a55"></i>cheap <i class="sw" style="background:#3d8c6e"></i>modest <i class="sw" style="background:#6adabb"></i>prime <i class="sw" style="background:#b8f5e0"></i>gold <i class="sw" style="background:#013"></i>water',
   crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#8c285a,#ff60be)"></i>safe / lawless',
   traffic: '<i class="grad" style="background:linear-gradient(90deg,#46dc3c,#eba028,#8c101c)"></i>free / jammed',
   svc:     '<i class="sw" style="background:#288cfa"></i>edu <i class="sw" style="background:#fc8c32"></i>health <i class="sw" style="background:#fcf0fa"></i>both',
@@ -1130,6 +1134,24 @@ function fillBudgetTable() {
     `${Math.round(city.eduLevel * 100)}%${city.isCleanInd() ? " &middot; clean industry" : ""}</small>`;
   const cleanRow = (b.cleanTax || 0) > 0
     ? `<tr><td>&nbsp;&nbsp;incl. High-tech premium</td><td>${f(b.cleanTax)}</td></tr>` : "";
+  /* GP7a: the ASSESSED-VALUATION PREVIEW — the shadow ledger printed beside the
+     bill it is NOT charging. ONE city.assessedLedger() call: an O(1) read of the
+     census snapshot, so this block costs nothing extra on a funding-slider drag
+     (which re-runs this whole function). Every figure reads the LIVE slider
+     rate — ui.js's tax-slider handler writes city.taxRate before calling here —
+     so the block tracks the slider month-free. Placed AFTER the department rows
+     and BEFORE the Net total so the charged ledger stays visually intact. */
+  const al = city.assessedLedger();
+  const diff = al.total - al.billed;
+  const previewRows = `
+    <tr class="preview-head"><td colspan="2">Assessed valuation (not charged)</td></tr>
+    <tr><td>&nbsp;&nbsp;Residential</td><td>${f(al.assessed.r)}</td></tr>
+    <tr><td>&nbsp;&nbsp;Commercial</td><td>${f(al.assessed.c)}</td></tr>
+    <tr><td>&nbsp;&nbsp;Industrial</td><td>${f(al.assessed.i)}</td></tr>
+    <tr><td>&nbsp;&nbsp;Assessed total</td><td>${f(al.total)}</td></tr>
+    <tr><td>&nbsp;&nbsp;Today's headcount bill</td><td>${f(al.billed)}</td></tr>
+    <tr><td>&nbsp;&nbsp;Difference</td><td>${f(diff)}</td></tr>
+    <tr><td>&nbsp;&nbsp;Assessed at</td><td>${Math.round(al.ratio * 100)}% of the bill</td></tr>`;
   document.getElementById("budget-table").innerHTML = `
     <tr><td>Tax revenue</td><td>${f(b.taxes)}</td></tr>
     ${cleanRow}
@@ -1145,6 +1167,7 @@ function fillBudgetTable() {
     <tr><td>Regional power trade</td><td>${f(city.lastBudget.trade || 0)}</td></tr>
     <tr><td>Ports &amp; terminals</td><td>${f(city.portsBudget().net)}</td></tr>
     <tr><td>Bond payments</td><td>${f(-(b.debt || 0))}</td></tr>
+    ${previewRows}
     <tr class="total"><td>Net (monthly)</td><td>${f(b.net)}</td></tr>
     <tr><td>Treasury</td><td>${f(Math.round(city.funds))}</td></tr>`;
 }
@@ -2235,8 +2258,13 @@ function hoverReadout() {
   // GP3a: the advisory rides the SAME memoized per-(tile, tickCount) verdict —
   // zero extra diagnoseTile calls. GP5a: generalized to every advisory row via
   // the GATE_LABEL lookup (character-identical for the JOB_ACCESS_LOW case).
+  // GP7a: the advisory glyph is SEVERITY-KEYED. The three shipped rows are all
+  // sev "warn" and therefore still print "⚠" character-for-character; the new
+  // informational LANDV_BAND row is sev "ok" and prints "ℹ", so a readout that
+  // fires on roughly a quarter of developed lots does not cry wolf (D6).
   const advis = v && v.advisories && v.advisories.length
-    ? v.advisories.map(a => " ⚠ " + GATE_LABEL[a.code]).join("") : "";
+    ? v.advisories.map(a => " " + ({ crit: "⛔", warn: "⚠", ok: "ℹ" }[a.severity] || "⚠") +
+        " " + GATE_LABEL[a.code]).join("") : "";
   const text = `(${h.x}, ${h.y}) ${what}${lvl}${mark ? " — " + mark : ""}${advis}`;
   hoverMemo = { key, text, city };
   return text;

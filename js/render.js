@@ -2224,6 +2224,15 @@ const MM_COMMUTE = [[70, 220, 60], [235, 160, 40], [140, 16, 28]];
 // end-to-end dL* > 74, worst semantic-pair deutan dE 24.
 const MM_POLCOV = [[16, 24, 52], [40, 110, 190], [125, 220, 255]];   // dark navy → bright cyan-blue
 const MM_FIRECOV = [[50, 20, 12], [190, 95, 32], [255, 208, 122]];   // dark ember → bright amber-gold
+/* GP7a S4: the five land-value wealth bands the "value" overlay paints, indexed
+   by sim.js's landvBand() (edges 20/40/60/80 on landv). Blighted -> Gold, strictly
+   rising in Rec.709 luminance (39.3 / 79.6 / 121.0 / 192.0 / 230.5 — steps
+   40.3 / 41.4 / 70.9 / 38.6, every one >= 25) and >= 50 apart in at least one
+   channel between adjacent bands (50 / 50 / 78 / 78), so the
+   ladder reads under deuteranopia as well as in colour. The endpoints are the
+   shipped legend's own #1e283c and #6adabb, so the strip needs no new hues. */
+const MM_VALUE_BANDS = ["#1e283c", "#2b5a55", "#3d8c6e", "#6adabb", "#b8f5e0"];
+
 function mmRamp(t, s) {
   const u = t <= 0 ? 0 : t >= 1 ? 1 : t;
   const k = u < 0.5 ? 0 : 1, f = (u - k * 0.5) * 2;
@@ -2262,8 +2271,18 @@ function renderMinimap(city, mode) {
       const v = city.poll[i];
       col = v > 4 ? mmRamp(Math.min(1, v / 160), MM_POLL) : (city.terr[i] === TERR.WATER ? "#013" : "#131");
     } else if (mode === "value") {
-      const v = city.landv[i];
-      col = `rgb(${30 + v * 0.3 | 0},${40 + v * 0.7 | 0},${60 + v * 0.5 | 0})`;
+      /* GP7a S4: the continuous ramp retuned into FIVE NAMED WEALTH BANDS, so
+         the overlay answers "which band is this block in" — the same question
+         the LANDV_BAND inspector row and the assessed ledger are asked. The
+         band edges come from sim.js's landvBand(), the ONE definition both the
+         map and the tile readout use, so they can never disagree.
+         Palette monotonic in Rec.709 luminance (39.3 / 79.6 / 121.0 / 192.0 /
+         230.5) so the ramp survives deuteranopia, and it keeps the shipped
+         legend endpoints #1e283c -> #6adabb. Water takes the standard `#013`
+         branch the poll/crime/svc/power modes already use.
+         A PURE FUNCTION OF city.landv / city.terr — no cam, no rot4, no
+         screenToTile: this branch must stay rotation-invariant (G10(b)). */
+      col = city.terr[i] === TERR.WATER ? "#013" : MM_VALUE_BANDS[landvBand(city.landv[i])];
     } else if (mode === "traffic") {
       if (city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD ||
           city.over[i] === OV.XWAY || city.over[i] === OV.RAMP) { // M26: crossing shows traffic; GP4a: an unused expressway samples the free-flow green — it reads as EMPTY

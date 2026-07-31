@@ -1254,7 +1254,8 @@
       "save_version": 17,
       "certified_through": "GP5b (service strain & the education payoff \u2014 the GP5 pair complete). GP6 (citizen opinion poll) is LIVE in the tree at save v17 and is NOT yet certified \u2014 its verify + panel pass owns that promotion; see live_but_uncertified below.",
       "live_but_uncertified": [
-        "GP6 citizen-opinion-poll (approval composite + City Survey dialog + Megalopolis rung + recall, save v17) \u2014 9/10 gates pass; BLOCKED on two user decisions recorded in the GP6 milestone blocker field. NOT shipped; the certified baseline remains a702c92 (GP5b, save v16)."
+        "GP6 citizen-opinion-poll (approval composite + City Survey dialog + Megalopolis rung + recall, save v17) \u2014 9/10 gates pass; BLOCKED on two user decisions recorded in the GP6 blocker field. NOT shipped.",
+        "GP7a assessed-value shadow ledger implement pass (assessedLedger pure read, shadow-vs-actual budget rows, banded land-value minimap, history.assess, save v18; sim.js/ui.js/render.js/advisors.js/css) plus the published docs/gp7-spike.json measured on the UNCHANGED b3d780c build \u2014 checkpointed mid-workflow, NOT shipped; certified or fixed/reverted by running workflow wf_10dc91ee-24c."
       ],
       "artifact_reflects": "this ship (bundle rebuilt at GP5b close)"
     }

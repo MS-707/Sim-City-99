@@ -1,0 +1,137 @@
+{
+  "title": "GP9b pre-measurement artifact — Somewhere To Put It",
+  "milestone": "GP9b — landfill, waste-to-energy incinerator, overflow. The GP9a waste ledger stops being a read-only ruler and becomes a system with a sink, a stock and a consequence.",
+  "baseline_commit": "41642f7 — 'GP10a SHIP: the distress ledger certified — save v20'. Every anchor, literal and measurement in this file was taken against THAT tree: js/sim.js 7428 lines, js/ui.js 2622, js/sprites.js 4347, js/render.js 2680. The GP9b roadmap scope text's line anchors predate GP10a and are ~1400 lines stale; they are NOT used here.",
+  "purpose": "Pins the baseline, the id/predicate audit, the constants, the fixtures and every HEAD-side number BEFORE the implementation, so the verification pass compares against numbers that were written down rather than numbers that were discovered afterwards. GP7a's provenance gate failed for bundling the pre-measurement with the code; GP9a and GP10a passed by splitting them.",
+  "process_deviation": "THIS RUN COULD NOT SPLIT THE COMMITS. The implementation pass was executed under an explicit 'do NOT commit' instruction, so this artifact and the code land in the same working tree with no commit boundary between them. C0 as written ('git rev-parse HEAD:js equals 41642f7:js') is therefore UNSATISFIABLE for this run, and that is recorded rather than silently dropped. The artifact is nonetheless authored to the same contract: every number below is a MEASUREMENT taken with the harness in `instrument`, on the UNCHANGED 41642f7 tree, BEFORE the first edit.",
+
+  "instrument": {
+    "sim_arm": "node vm: a fresh context per arm containing {console, performance}, into which js/sim.js is evaluated whole, followed by a trailer that publishes {OV, City, SVC_LINEAR, WASTE_RATE, MAP} onto globalThis. js/sim.js is DOM-free, so this is the entire dependency. Module-scope `const` is NOT visible on the vm context object — the trailer is required, not a convenience.",
+    "build_script": "docs/gp1-baseline.json .protocol.build_script, VERBATIM.",
+    "call": "(eval(build_script))(seed) — it CONSTRUCTS and RETURNS the city; passing a pre-made city yields an all-zeros run.",
+    "math_random": "UNSTUBBED on every run in this file.",
+    "rollovers": "24 ticks per month rollover (the %24 gate in tick()); 600 ticks of warm-up is exactly 25 rollovers."
+  },
+
+  "measured_baseline_facts_on_41642f7": {
+    "save_ladder": { "live_v_literal": 20, "gp9b_ships": 21, "note": "READ OFF THE TREE at js/sim.js `v: 20`. The GP9b scope text's ladder integer is stale." },
+    "over_id_space": {
+      "max_id_today": 33,
+      "max_id_name": "OV.RAMP",
+      "OV_key_count": 34,
+      "OV_NAMES_length": 34,
+      "OV_NAMES_is_index_keyed": true,
+      "consequence": "OV.LANDFILL = 34 and OV.INCIN = 35 are appended after RAMP and never renumbered. OV_NAMES must gain EXACTLY two entries or both consumers — the query panel (js/ui.js openQuery/renderQuery) and the hover memo — print `undefined`."
+    },
+    "crosstalk_default_membership": {
+      "City.ovCrosstalk(34)": { "conducts": true, "drawsPower": true, "brownoutEligible": true, "flickerEligible": true, "feedsPump": true, "fireCandidate": true, "wireJoins": true },
+      "City.ovCrosstalk(35)": { "conducts": true, "drawsPower": true, "brownoutEligible": true, "flickerEligible": true, "feedsPump": true, "fireCandidate": true, "wireJoins": true },
+      "SVC_LINEAR.has(34)": false,
+      "SVC_LINEAR.has(35)": false,
+      "verdict": "A NEW over[] id >= OV.ZR JOINS EVERY FAMILY BY ACCIDENT. All seven hoisted memberships return TRUE for both unallocated ids on HEAD, so every exclusion GP9b declares is individually falsifiable and none of the 16 ovCrosstalk assertions is vacuous.",
+      "ninth_site": "ovCrosstalk exposes SEVEN keys and deliberately OMITS SVC_LINEAR membership (documented in-source: ovIsStructure is not a pure function of the byte). The scope's 'all eight memberships via ovCrosstalk()' is unproducible as written; GP9b adds an eighth key (feedsIncin) and asserts SVC_LINEAR separately, giving 16 + 2 = 18."
+    },
+    "serialize": {
+      "v_literal_site": "js/sim.js — the JSON.stringify({ v: 20, ... }) head",
+      "over_is_serialized_as": "Array.from(this.over) — a plain JSON number array, so ids 34/35 round-trip with NO loader change",
+      "no_version_equality_test": "regex /\\bv\\s*===/ and /d\\.v\\s*===/ find 0 matches in deserialize on HEAD; the ladder is carried entirely by defensive typeof/Array.isArray/unpackU8 guards"
+    },
+    "history_series": {
+      "count": 13,
+      "keys": ["pop","funds","net","tax","poll","crime","landv","commute","avgcom","approv","assess","waste","blight"],
+      "second_list_warning": "normaliseHistory's key list is MIRRORED by collectBudget's >240 trim loop. GP9b adds NO series, so both lists stay untouched — a whole class of regression avoided by construction.",
+      "history.waste_records": "wasteCensus().total — the monthly FLOW (stream), certified at GP9a. GP9b does NOT redefine it; the STOCK is the new city.garbageBacklog scalar."
+    },
+    "scenarios": {
+      "ids_on_tree": ["gridlock-97", "twister-season", "blackout-summer-97", "y2k-ready"],
+      "count": 4,
+      "verdict": "The parent gate's '5 scenarios / 5-element pass-fail vector' is unproducible by the fixture. Restated to a 4-element vector, re-read off the tree at launch. Measurement-only restatement."
+    },
+    "recycling_ordinance": {
+      "shipped_mods": { "pollMul": 0.72, "wasteMul": 0.75 },
+      "measured_citywide_cut_on_REF_seed_777": { "before_t_per_mo": 18832, "after_t_per_mo": 14124, "cut_pct": 25.000 },
+      "verdict": "The scope's 'designed percentage' is resolved BY READING THE TREE, not by choosing: 25% exactly, because WASTE_RATE is a quarter grid and the per-tile round at K=0.75 is exact."
+    }
+  },
+
+  "pinned_fixtures": {
+    "FIX300": {
+      "recipe": "(eval(docs/gp1-baseline.json .protocol.build_script))(seed) with the FINAL zoning sweep's inner bound `x <= 75` replaced by `x <= 16` (the sweep is the last loop in the script; the earlier road/wire/pipe sweeps keep their 75 bound), then 600 ticks.",
+      "why": "A ~300-lot city is small enough that a 20x20 landfill field, an incinerator bank and a 120-rollover run are all cheap, and large enough that the waste stream is a real number.",
+      "measured_on_41642f7": {
+        "777":   { "developed": 293, "pop": 1736, "wasteCensus_total": 5448, "cityIndex_poll": 3, "developed_footprint_mean_poll": 13.95, "cum_120_rollovers_t": 716548, "peak_monthly_t": 6448, "history_waste_dips_in_120": 33, "max_single_dip_t": -84 },
+        "1":     { "developed": 308, "pop": 1816, "wasteCensus_total": 5744, "cityIndex_poll": 3, "developed_footprint_mean_poll": 14.25, "cum_120_rollovers_t": 790136, "peak_monthly_t": 6964, "history_waste_dips_in_120": 47, "max_single_dip_t": -156 },
+        "4242":  { "developed": 229, "pop": 1336, "wasteCensus_total": 4172, "cityIndex_poll": 3, "developed_footprint_mean_poll": 13.97, "cum_120_rollovers_t": 565480, "peak_monthly_t": 4940, "history_waste_dips_in_120": 31, "max_single_dip_t": -32 },
+        "2":     { "developed": 277, "pop": 1528, "wasteCensus_total": 5456, "cityIndex_poll": 3, "developed_footprint_mean_poll": 15.11, "cum_120_rollovers_t": 666472, "peak_monthly_t": 5824, "history_waste_dips_in_120": 44, "max_single_dip_t": -180 },
+        "12345": { "developed": 337, "pop": 1952, "wasteCensus_total": 6632, "cityIndex_poll": 3, "developed_footprint_mean_poll": 15.25, "cum_120_rollovers_t": 822736, "peak_monthly_t": 7440, "history_waste_dips_in_120": 45, "max_single_dip_t": -176 }
+      },
+      "stock_to_flow_ratio_seed_777": "716548 : 6448 ~= 111 : 1 — so the parent gate's '(C) an incinerator of EQUAL RATED TONNAGE' cannot hold for both arms. The landfill arm is sized off the CUMULATIVE tonnage, the incinerator arm off the PEAK MONTHLY tonnage, each with its own +20% margin, and the sizing method is stated with the result.",
+      "history_waste_is_NOT_monotone_with_no_waste_feature_present": "MEASURED on the unchanged tree: 31-47 dips over 120 rollovers on every one of the 5 seeds (max single dip -180 t). The parent gate's 'history.waste non-decreasing over all 24' is self-contradictory against its own control; the STOCK bar (garbageBacklog strictly increasing) is kept and the FLOW bar is restated comparatively.",
+      "cityIndex_poll_saturates": "cityIndex(poll) reads 3 on every FIX300 seed and the in-source whole-map ceiling is 40. A 300-tile source cannot move a whole-map mean by +20. The gate is restated onto the DEVELOPED-FOOTPRINT mean poll, comparatively against a drained control."
+    },
+    "REF": {
+      "recipe": "the unmodified pinned build_script, seed 777, 600 ticks",
+      "measured_on_41642f7": { "developed": 1141, "pop": 5320, "cityIndex_poll": 7, "wasteCensus_total": 18832, "wasteCensus_total_with_recycle": 14124 },
+      "used_for": "the Sigma power-ledger identity, the trade arms and the recycling gate"
+    },
+    "TRADE": {
+      "recipe": "blank 80x80, one 2x2 coal at (30,30), a wire run x=0..29 on row 30 (physically touching the WEST map edge), deals[3] = {mode:1, mw:100}",
+      "why": "the pinned reference city has ZERO wired border edges, so no build_script city can exercise power trade at all"
+    },
+    "CROSSTALK": {
+      "recipe": "blank 80x80, two DISCONNECTED wire runs each fed by its own coal plant, a 20x20 (400-tile) landfill field laid between them; the fire/deptStrain arms use 4 coal plants + 1 powered fire station",
+      "why": "400 tiles of a new id is the smallest fixture that makes every anti-crosstalk omission LOUD — a non-SVC_LINEAR field collapses citywide fire coverage, and a fire-candidate field re-pins every ignition index on every seed"
+    }
+  },
+
+  "pinned_constants_D3": {
+    "note": "EVERY number here is a BALANCE KNOB (design decision D3, surfaced not decided). Every gate is written against the SYMBOL; the ship verdict must report the number actually chosen.",
+    "INCIN_MW": 40,
+    "INCIN_BURN": 900,
+    "INCIN_SMOG": 70,
+    "INCIN_UPKEEP": 120,
+    "FILL_MAX": 255,
+    "FILL_UNIT": 40,
+    "landfill_cell_capacity_t": "FILL_MAX * FILL_UNIT = 10200",
+    "LF_SMELL": 34,
+    "LF_SMELL_FULL": 46,
+    "LF_UPKEEP": 2,
+    "OVERFLOW_T": 2000,
+    "BACKLOG_POLL_DIV": 90,
+    "BACKLOG_POLL_CAP": 60,
+    "BACKLOG_FAX_CAP": "150 — the complaint's OWN cap on the same backlog pressure, deliberately above the pollution cap. MEASURED: at the pollution cap the garbage fax tops out at score 100, and scanComplaints' shared ladder puts `unpowered` at a flat 150 and `rubble` at 130, so on any grown city (which always has a dark lot somewhere) the kind would have been dead state.",
+    "BACKLOG_LV": 0.5,
+    "LF_LV_CAP": 26,
+    "COST.landfill": 100,
+    "COST.incin": 6000,
+    "TOOL_TIER.incin": 2,
+    "WASTE_REF": "WASTE_RATE[OV.ZI][3] = 140 — the heaviest single tile, used as the complaint weighting's denominator",
+    "LF_TRIPS": 5,
+    "INCIN_TRIPS": 26,
+    "WASTE_SPREAD": 3,
+    "WASTE_DECAY": 0.62
+  },
+
+  "declared_predicate_table": {
+    "OV.LANDFILL(34)": { "conducts": false, "drawsPower": false, "brownoutEligible": false, "flickerEligible": false, "feedsPump": false, "feedsIncin": false, "fireCandidate": false, "wireJoins": false, "SVC_LINEAR": true, "OV_IS_STRUCTURE": 0 },
+    "OV.INCIN(35)":    { "conducts": false, "drawsPower": false, "brownoutEligible": false, "flickerEligible": false, "feedsPump": false, "feedsIncin": false, "fireCandidate": true,  "wireJoins": false, "SVC_LINEAR": false, "OV_IS_STRUCTURE": 1 },
+    "feedsIncin_INCIN_contradiction": "THE DESIGN DOCUMENT CONTRADICTS ITSELF ON THIS ONE CELL. Its section 2 site (9) writes the predicate literally as `!isWaterOv(t) && !isMega(t) && !isXp(t) && !isWaste(t)` and states the reason ('excluding isWaste prevents one incinerator bootstrapping another'), which makes feedsIncin(OV.INCIN) FALSE; its criterion C3 declares the cell TRUE. Resolved to FALSE, for three reasons: (a) the implementation spec states it twice and states its reason; (b) the exact analogue one line up is ovFeedsPump, and ovFeedsPump(OV.PUMP) is likewise FALSE — a pump does not feed another pump; (c) TRUE would be genuinely defective, because the receiver pass writes powered[] as it walks in ascending index order, so a touching bank of incinerators would chain in one map direction and not the other — an order-dependent, direction-asymmetric grid. A verifier running C3 verbatim will read 17/18 here; the cell, not the implementation, is the transcription slip.",
+    "why_landfill_is_in_SVC_LINEAR": "deptStrain's fire-load census counts every over[] tile that is NOT in SVC_LINEAR as a combustible structure. A 400-tile landfill field left OUT of SVC_LINEAR is 400 phantom structures, which collapses citywide fire coverage from tiles nowhere near a station.",
+    "why_landfill_is_NOT_a_fire_candidate": "startDisaster('fire') picks with cand[rh.pick(cand.length)] — the array LENGTH is the RNG argument, so widening the candidate set re-pins every ignition index on every seed."
+  },
+
+  "design_decisions_surfaced_not_decided": {
+    "D1": "The incinerator energisation model: WIRE-GATED TERMINAL RECEIVER (the M24 pump precedent) vs a self-lighting power island (the M28 mega precedent) vs a fuel-gated output. Implemented as the wire-gated receiver, because it is the only one of the three that keeps the 'unpowered incinerator' art state and the 'you forgot the wire' failure state reachable.",
+    "D2": "The receiver pass runs BEFORE the demand scan — a deliberate divergence from the pump precedent, which runs last. FORCED: the MW must join `supply` before powerTradeDelta(supply, demand) or the incinerator's output is not exportable.",
+    "D3": "Every tuning constant above.",
+    "D4": "The fire-candidacy split — landfill OUT, incinerator IN.",
+    "D5": "The per-tile complaint weighting. The scope's flat `40 + backlogPressure` is a CITYWIDE SCALAR: every tile scores identically and scanComplaints picks with a strict `score > bestScore`, so the fax would resolve to the LOWEST qualifying map index forever and the ticker's 'Show me' jump would land on the same corner tile every time. Replaced with a weighting off GP9a's certified wasteRateAt ruler."
+  },
+
+  "explicitly_out_of_scope_for_GP9b": [
+    "any new history series (the STOCK rides city.garbageBacklog; the FLOW is GP9a's history.waste, unchanged)",
+    "any new GROWTH_GATES row (it would shift the growth cursor and need its own re-pin)",
+    "any change to isPlant() membership for the incinerator (no plantYear, no aging curve, no PLANT_WARN_AGE nag, no plants*40 upkeep)",
+    "any change to WASTE_RATE or the recycling ordinance's mods"
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "title": "GP9a — The Waste Ledger: PRE-IMPLEMENTATION measurement artifact",
+  "milestone": "GP9a (read half of GP9 — the garbage number, the honest power pie, the crosstalk audit)",
+  "baseline_commit": "7def71d (GP8a checkpoint 2 — the commit immediately preceding GP9a; baseline_ledger.certified_through is GP5b, so this is the R1 comparison commit, NOT a 'GP8 baseline', which does not exist)",
+  "purpose": "Everything GP9a's gates compare against, pinned BEFORE the implementation exists: the constants the milestone ships, the fixtures its gates run on, and every measurement of the UNCHANGED build. Landing this ahead of the code is the process rule adopted after GP7a's provenance gate failed for bundling the two.",
+
+  "provenance_note": "The measurements below were taken by two instruments. (a) HEADLESS: js/sim.js evaluated in a node vm with a DOM-free global set, driving the pinned build_script from docs/gp1-baseline.json .protocol and the scripted fixtures defined here. This is what produced every sim-side number (crosstalk truth table, census figures, power matrix, normaliseHistory behaviour, trim behaviour, determinism corpus). The baseline arm reads `git show 7def71d:js/sim.js` verbatim. (b) BROWSER (chromium-1194 / playwright, served :8901 + a :8902 worktree of 7def71d): the DOM/canvas numbers — .mm strip geometry, minimap ImageData, rotation hashes, the perf noise floor. The browser numbers in `carried_from_design` were measured during the GP9a design pass and are carried forward here; they must be RE-READ by the verify pass rather than trusted, and any that disagree with a fresh reading are the fresh reading's.",
+  "process_deviation": "This artifact was written by the implement pass under an explicit 'do NOT commit' instruction, so it could not be landed in its own commit ahead of the code as C18 requires. C18's commit-ordering clause is therefore NOT satisfiable from inside this pass and must be honoured by whoever commits: land docs/gp9a-waste-pre.json alone first, then the implementation.",
+
+  "pinned_constants": {
+    "WASTE_RATE": {
+      "units": "INTEGER tonnes/month per DEVELOPED zone tile, indexed [level], index 0 unused",
+      "ZR": [0, 2, 5, 9],
+      "ZC": [0, 3, 7, 12],
+      "ZI": [0, 6, 14, 26],
+      "shape_note": "Industry heaviest per the M31 design. These are the magnitudes design decision D1 asks the user to confirm; they are the table the design pass measured, and re-running that measurement on this implementation reproduces its figures exactly (see reference_city_census).",
+      "site": "js/sim.js, immediately after IND_JOB"
+    },
+    "recycle_wasteMul": {
+      "K": 0.75,
+      "site": "the EXISTING ORDINANCES `recycle` row, mods: { pollMul: 0.72, wasteMul: 0.75 }",
+      "consumers": "wasteRateAt() and wasteCensus() ONLY — zero sim paths read wasteMul, so the ordinance's simulated effect is unchanged by construction",
+      "note": "D2. See measurements.recycle_drop — the AGGREGATE drop is NOT 25%, because the rate is rounded to an integer PER TILE."
+    },
+    "WASTE_BAND_EDGES": {
+      "value": [3, 9, 14, 26],
+      "derivation": "[ZR[1]+1, ZR[3], ZI[2], ZI[3]] — read off WASTE_RATE itself, so a D1 retune cannot leave the overlay's ladder describing a rate scale that no longer exists",
+      "band_names": ["trace", "light", "moderate", "heavy", "extreme"]
+    },
+    "MM_WASTE_BANDS": {
+      "value": ["#14240f", "#7a4a12", "#a08a52", "#e39a5e", "#f0e4c0"],
+      "no_garbage_base": {"water": "#013", "land": "#111"},
+      "rec709_luminance": [31.1, 80.2, 138.6, 165.2, 228.0],
+      "adjacent_luminance_steps": [49.1, 58.4, 26.6, 62.8],
+      "adjacent_max_channel_steps": [102, 64, 67, 98],
+      "worst_ciede2000_among_5_bands_plus_water_013": 17.0,
+      "worst_pair": "moderate #a08a52 vs heavy #e39a5e",
+      "dE_to_value_ramp_gold_ffe066": 15.3,
+      "dE_to_risk_ramp_severe_ffd2e0": 26.9,
+      "dE_band0_vs_no_garbage_bases": {"water_013": 16.7, "land_111": 15.0},
+      "pure_white_present": false,
+      "white_note": "No band may be #ffffff: the rotation gate masks the UNION of pure-white pixels (the camera-viewport stroke), so a white band would be eaten by the mask and the gate would pass on nothing."
+    },
+    "save_version": {"from": 18, "to": 19, "site": "js/sim.js serialize()", "new_keys": ["history.waste"], "new_top_level_keys": [], "new_city_fields": []}
+  },
+
+  "pinned_fixtures": {
+    "reference_city": {"build_script": "docs/gp1-baseline.json .protocol.build_script, VERBATIM", "call": "(eval(build_script))(seed) — it CONSTRUCTS and RETURNS the city; never pass a pre-made one", "seed": 4242, "ticks": 600, "rollovers": 25},
+    "determinism_corpus": {"seeds": [1, 7, 42, 101, 404, 777, 1234, 2024, 4242, 31337], "ticks": 600, "sample_every": 25, "samples_per_seed": 24},
+    "EMPTY": "new City(31337, 80), untouched",
+    "LVL1": "new City(31337,80) + scripted over/lvl writes: ZR1 x300, ZC1 x200, ZI1 x200 (700 developed tiles)",
+    "SATURATED": "same tile set at level 3: ZR3 x300, ZC3 x200, ZI3 x200",
+    "MIXED": "ZR1 x60, ZR3 x40, ZC2 x50, ZI2 x50, ZI3 x20 — FIVE distinct (zone type, level) pairs, FIVE distinct rates {2,9,7,14,26}",
+    "power_matrix": {
+      "seed": 2024,
+      "terrain": "terr filled LAND (flat)",
+      "layout": "4 or 1 coal at (4+3k, 3) [2x2, rows 3-4]; north-border feeder wire column x=2, y=0..5; bus wire row y=5, x=2..70; ZR zones laid CONTIGUOUSLY from y=6 down, lvl set to 1",
+      "surplus_arm": "4 coal + 60 wired ZR -> plantSupply 1200, demand 60",
+      "deficit_arm": "1 coal + 600 wired ZR -> plantSupply 300, demand 600",
+      "deal": "conn[0] (north) wire open, deals[0].mw = 200, mode in {0 none, 1 sell, 2 buy}",
+      "footgun": "the zone tool id is \"zr\"/\"zc\"/\"zi\" — place(\"zoneR\",...) returns {ok:true, cost:0} and writes NOTHING, which silently yields powerDemand 0 and collapses the matrix (it made sell x deficit read as a 4th differing cell in a first draft of this artifact). Always assert powerDemand > 0 before reading the matrix."
+    }
+  },
+
+  "measurements": {
+    "instrument": "headless (a) unless noted",
+
+    "reference_city_census": {
+      "seed": 4242, "ticks": 600,
+      "total": 3012, "res": 1017, "com": 615, "ind": 1380,
+      "byLevel": [0, 2887, 125, 0], "tiles": 906,
+      "ind_over_res": 1.357,
+      "sigma_wasteRateAt_equals_total": true,
+      "D1_finding": "1.357 is BELOW the preflight's suggested 'ind:res >= 1.5 at every fixture' bar, on a correct implementation of the pinned table. The reference city is 95.9% level-1 by tonnage, and the table's ind:res ratio at level 1 is 6/2 = 3.0 while the CITY ratio is set by how many ZR vs ZI tiles the growth model actually develops. Either the table's industry weight rises (a balance change) or the bar is pinned to the fixture's measured mix. D1: the user's call."
+    },
+
+    "census_fixtures": {
+      "EMPTY": {"total": 0},
+      "LVL1": {"total": 2400, "res": 600, "com": 600, "ind": 1200, "byLevel": [0, 2400, 0, 0], "tiles": 700},
+      "SATURATED": {"total": 10300, "res": 2700, "com": 2400, "ind": 5200, "byLevel": [0, 0, 0, 10300], "tiles": 700},
+      "MIXED": {"total": 2050, "distinct_bands_painted": 5},
+      "SATURATED_over_LVL1": 4.292,
+      "de_levelling_round_trip": "ZR lvl 1 -> 3 -> 1 returns LVL1.total to EXACTLY 2400 (the ruler is a pure function of over[]/lvl[], no hysteresis)",
+      "zoning_lvl0_tiles": "changes total by exactly 0 — an undeveloped lot makes no garbage"
+    },
+
+    "recycle_drop": {
+      "K": 0.75,
+      "per_tile": {"ZR1": "2 -> 2 (0.0%)", "ZR2": "5 -> 4 (20.0%)", "ZR3": "9 -> 7 (22.2%)", "ZC1": "3 -> 2 (33.3%)", "ZC2": "7 -> 5 (28.6%)", "ZC3": "12 -> 9 (25.0%)", "ZI1": "6 -> 5 (16.7%)", "ZI2": "14 -> 11 (21.4%)", "ZI3": "26 -> 20 (23.1%)"},
+      "aggregate": {"reference_city_seed4242_600t": "3012 -> 2552 = -15.27%", "LVL1": "2400 -> 2000 = -16.67%", "MIXED": "2050 -> 1600 = -21.95%", "SATURATED": "10300 -> 7900 = -23.30%"},
+      "finding": "C4's bar ('total falls by exactly the pinned percentage, K=0.75 => -25%, within +/-2 percentage points') is NOT met on the pinned reference city, and the cause is the arithmetic the design itself pins: Math.round(row[l] * wasteMul) is applied PER TILE, so the aggregate drop is a tile-mix-weighted average of the nine per-tile drops above, which range 0.0%..33.3%. The worst offender is ZR level 1 (2 -> 2, no drop at all), and the reference city is 95.9% level-1. Only a table whose every entry is a multiple of 4 would make the aggregate exactly 25%. This is D2 territory: either K/the table are retuned so the drop is exact, or C4's bar is restated against the measured mix. SURFACED, NOT DECIDED.",
+      "invariants_that_DO_hold": "typeof ordMods.wasteMul === 'number' and === 0.75 enacted / === 1 repealed; Sigma wasteRateAt(i) === wasteCensus().total exactly with the ordinance ON as well as OFF; the total returns to EXACTLY its pre-enactment integer on repeal"
+    },
+
+    "crosstalk_truth_table": {
+      "ids": 34,
+      "pure_predicates": 7,
+      "assertions": 238,
+      "mismatches_vs_baseline_inline_expressions": 0,
+      "predicates": ["ovConducts", "ovDrawsPower", "ovBrownoutEligible", "ovFlickerEligible", "ovFeedsPump", "ovFireCandidate", "ovWireJoins"],
+      "ovConducts_vs_ovWireJoins_disagree_on": [22, 23, 24, 25, 26, 27, 28],
+      "structure_split": {"non_zone_non_NONE_ids": 30, "mismatches": 0, "ovIsStructure_OV_NONE": false, "ovZoneIsStructure": "ZR/ZC/ZI x {lvl 0 -> false, lvl 2 -> true} = 6/6", "total_structure_assertions": 37},
+      "why_split": "ovIsStructure is NOT a pure function of the overlay byte — deptStrain short-circuits OV.NONE before the SVC_LINEAR test, and for ZR/ZC/ZI the answer depends on lvl[i]. 34 x 8 = 272 is therefore not an achievable count; 238 + 37 = 269 is."
+    },
+
+    "power_matrix_on_BASELINE_7def71d": {
+      "cells": [
+        {"arm": "surplus", "trade": "none", "mixSum": 1200, "powerSupply": 1200, "powerDemand": 60, "displayed_minus_actual": 0},
+        {"arm": "surplus", "trade": "sell", "mixSum": 1200, "powerSupply": 1000, "powerDemand": 60, "displayed_minus_actual": 200},
+        {"arm": "surplus", "trade": "buy",  "mixSum": 1200, "powerSupply": 1400, "powerDemand": 60, "displayed_minus_actual": -200},
+        {"arm": "deficit", "trade": "none", "mixSum": 300,  "powerSupply": 300,  "powerDemand": 600, "displayed_minus_actual": 0},
+        {"arm": "deficit", "trade": "sell", "mixSum": 300,  "powerSupply": 300,  "powerDemand": 600, "displayed_minus_actual": 0},
+        {"arm": "deficit", "trade": "buy",  "mixSum": 300,  "powerSupply": 500,  "powerDemand": 600, "displayed_minus_actual": -200}
+      ],
+      "differing_cells": 3,
+      "confirms": "The preflight's 4 -> 3 correction is CONFIRMED. sell x deficit is provably delta-0 because sold = min(sellCommit, max(0, plantSupply - demand)) = min(200, max(0, 300-600)) = 0. The pre-GP9a budget dialog therefore captions a WRONG 'Total supply' in exactly 3 of the 6 cells, with zero GP9 code — this is parent gate 3's stated invariant failing on the unchanged build."
+    },
+
+    "normaliseHistory_on_BASELINE_7def71d": {
+      "unknown_key_dropped": "injecting history.waste = [1,2,3] into a v18 save and deserializing yields `undefined` — normaliseHistory builds from a hardcoded key list and DROPS everything else",
+      "left_pad": "a MATURE save (L > 0) loads a newly added key as L NULLS, not []. Only a save with NO history at all (L === 0) loads []. This is the shipped GP7a `assess` convention and any gate clause asserting [] on a mature save is wrong.",
+      "trim_at_250": "a fabricated save with every history array at 250 entries, ticked to exactly one rollover, leaves ALL of them at 250 — push 1, shift 1. 'Trimmed in lockstep' cannot mean 'trimmed down to 240'. The DISCRIMINATOR for a half-extended trim list is the new key sitting at 251 while its siblings sit at 250.",
+      "ticks_to_one_rollover_from_a_loaded_save": 200
+    },
+
+    "determinism_corpus_on_BASELINE_7def71d": {
+      "seeds": 10, "samples_per_seed": 24, "total_sample_hashes": 240,
+      "hashed": "SHA-256 over over[], lvl[], poll[], crime[], landv[], traffic[], powered[], watered[], jobAccess[], anc[] concatenated, plus pop/funds/approval/avgCommute/strandedShare/eduLevel/powerSupply/powerDemand",
+      "note": "Math.random UNSTUBBED. This is the reference the implementation arm is diffed against; the 20-seed browser corpus C1 specifies is a superset of these 10."
+    },
+
+    "pre_existing_defects_recorded_not_fixed": {
+      "serialize_round_trip": "City.deserialize(c.serialize()).serialize() !== c.serialize() on an UNTOUCHED new City(31337,80) at 7def71d. The single differing key is `approval`: it serializes as the unseeded sentinel -1 and reloads as 100 (the load-time seeding). GP9a does not touch it and does not fix it, but C9(c)'s 'character-identical round-trip' clause is therefore ALREADY FALSE on the baseline for a fresh city and must be measured on a TICKED city (approval seeded) or restated."
+    }
+  },
+
+  "carried_from_design": {
+    "instrument": "browser (b), measured during the GP9a design pass on HEAD 7def71d — RE-READ, do not trust",
+    "mapmodes_strip_pre_GP9a": {"mm_buttons": 14, "gridTemplateColumns_tracks": 7, "scrollWidth": 244, "clientWidth": 160, "offsetHeight": 35},
+    "mapmodes_strip_projected_with_15th_button": {"mm_buttons": 15, "tracks": 8, "scrollWidth": 279, "clientWidth": 160, "offsetHeight": 35},
+    "overflow_note": "'scrollWidth <= clientWidth' is FALSE pre-GP9a by 84px BY DESIGN (css/style.css: 'hard cap = minimap width: the strip scrolls, never grows'). The 15th button opens exactly ONE new 34px column and does not add a third row.",
+    "rotation_masking": "In 'poll' mode across 5 camera configs x 4 rotations: whole-canvas hashes = 4 unique at every non-degenerate config; masking each capture's OWN white pixels = still 4 unique; masking the UNION of white positions across the four captures = 1 unique at EVERY config. Cameras at z <= 0.25 are 1 unique even unmasked.",
+    "perf_noise_floor": {
+      "200x_deptStrain": "2.9 ms median (below timer/JIT resolution)",
+      "200x_recomputePower": "11.2 ms median, 52.7% spread",
+      "600_tick_across_three_FRESH_browser_contexts_same_build": [313.9, 183.2, 161.7],
+      "self_vs_self_spread_fresh_contexts": "94% on the 600-tick metric",
+      "interleaved_self_vs_self_two_replicates": {"deptStrain": ["+2.57%", "-0.22%"], "recomputePower": ["-2.26%", "+2.67%"], "600_tick": ["+4.62%", "-3.54%"], "max_abs_delta": "4.67%"}
+    },
+    "scenarios": "js/scenarios.js has exactly FOUR scenarios (gridlock-97, twister-season, blackout-summer-97, y2k-ready) — any gate citing 'all 5' is factually wrong."
+  },
+
+  "perf_protocol": {
+    "shape": "INTERLEAVED. ONE browser instance, two pages (A = :8901 GP9a, B = :8902 baseline 7def71d), each warmed with 3 discard rounds, then 9 ALTERNATING rounds A,B,A,B,...",
+    "blocks": ["20,000 x deptStrain()", "5,000 x recomputePower()", "9 alternating full 600-tick build_script runs (discard the first 2 of each as JIT warmup)"],
+    "block_sizing_rule": "every block must exceed 250 ms so it clears the timer/JIT noise floor",
+    "statistic": "per-metric MEDIAN of 9; report the raw run vectors, never just the verdict",
+    "admission_control": "MANDATORY and FIRST — run the identical protocol with BOTH pages on :8901 (same build vs itself). The cross-build comparison is admitted as evidence only if the self-vs-self |delta| is under 10% on all three metrics.",
+    "instrument_hygiene": "when wrapping City.prototype methods, RngStream.prototype.next/chance/pick, or CanvasRenderingContext2D.prototype.arc to count calls/sweeps, RESTORE the originals before any later measurement — a left-in wrapper inflates every subsequent test."
+  },
+
+  "open_design_decisions_surfaced_not_decided": {
+    "D1": "WASTE_RATE magnitudes and the ind:res shape bar. Measured on the pinned reference city with the pinned table: ind:res = 1.357, below the suggested 1.5 bar. Raise industry (a balance change) or pin the bar to the measured mix.",
+    "D2": "The recycle wasteMul constant. K = 0.75 is implemented, but the AGGREGATE drop is 15.27% on the reference city (see recycle_drop) because the per-tile rate is an integer. Retune, or restate C4's bar.",
+    "D3": "The .mm strip grows to 15 buttons / 8 scroll columns / scrollWidth 279 inside a 160px overflow-x:auto cap — the shipped contract working as intended, and the second column added since GP5a's '13 buttons -> 7 columns' comment. If GP8a is reverted, every geometry number shifts back to 14/7/244.",
+    "D4": "Whether the per-tile query 'Garbage' row ships in GP9a. SHIPPED here (it closes preflight_missing_coverage #2 — wasteRateAt would otherwise have no numeric surface anywhere) and it adds one row to every tile's query table.",
+    "D5": "Carried forward unresolved from the parent: gate 3's Sigma === powerSupply (already false pre-GP9a under any open deal — see power_matrix_on_BASELINE_7def71d), gate 6's byte-identity-vs-overflow contradiction, and gate 6's non-existent 'GP8 baseline' (the real comparison commit is 7def71d)."
+  },
+
+  "explicitly_out_of_scope_for_GP9a": [
+    "no new over[] ids, no tools, no landfill/incinerator, no disposal",
+    "no complaint kind and no ADVISORY_GATES row (WASTE_OVERFLOW is GP9b)",
+    "NO GROWTH_GATES row — that walk spends the growth RNG cursor (js/sim.js firstGate) and would desync every corpus seed",
+    "no wasteCapacity(), no fill[] plane, no garbageBacklog scalar (all GP9b)",
+    "no pollution or land-value coupling: nothing in the sim reads WASTE_RATE or ordMods.wasteMul in GP9a"
+  ]
+}

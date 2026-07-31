@@ -630,7 +630,12 @@ function castsShadow(city, i, ov) {
          ov === OV.GAS || ov === OV.WIND || ov === OV.MAYOR ||
          ov === OV.STADIUM || ov === OV.WATERTOWER || ov === OV.PUMP ||
          isMega(ov) ||
-         ov === OV.NUKE || ov === OV.AIRPORT || ov === OV.SEAPORT; // GQ10: new casters join the GQ8 set (anchor gate + sizeOf are size-agnostic)
+         ov === OV.NUKE || ov === OV.AIRPORT || ov === OV.SEAPORT || // GQ10: new casters join the GQ8 set (anchor gate + sizeOf are size-agnostic)
+         // GP9b: the incinerator is a tall hall with a 46px stack and casts
+         // like the plants beside it. The LANDFILL deliberately does NOT — it
+         // is graded ground, not a structure (the PARK/RUBBLE exclusion), and
+         // its own baked mound shadow already grounds it.
+         ov === OV.INCIN;
 }
 
 // footprint diamond with its S and W corners displaced by D = (−2δ, +δ)
@@ -1655,6 +1660,17 @@ function updateSmoke(city) {
         // silent. Live-pool Math.random, never a bake (the COAL/NUKE pattern).
         const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
         pushPlume(worldX(b.x, b.y) - 16, worldY(b.x, b.y) + HH - 56, Math.random() * 0.4 - 0.1);
+      } else if (t === OV.INCIN && city.anc[i] === i && city.powered[i] && Math.random() < 0.4) {
+        // GP9b: a LIT incinerator is a chimney by definition — it is the one
+        // structure in the game whose entire job is burning things. Gated on
+        // the SAME powered[anchor] flag the sprite pair and the INCIN_SMOG
+        // pollution source read, so a cold plant is clean AND silent AND
+        // visibly idle — all three from one bit. backCorner pins the plume to
+        // the drawn stack at ALL FOUR rotations (the M32a lesson: a 2x2 sprite
+        // moves corners under rotation, and a plume that ignores that drifts
+        // off the building). Live-pool Math.random only, NEVER inside a bake.
+        const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
+        pushPlume(worldX(b.x, b.y) - 16, worldY(b.x, b.y) + HH - 66, Math.random() * 0.4 - 0.1);
       // GP5b: clean high-tech industry stops smoking — spawn-gated in map
       // space (never reads cam.r), so the drop is visible at every rotation
       // and the pool drains naturally as the last dirty plumes age out.
@@ -2290,6 +2306,11 @@ function minimapCityCol(city, i) {
   if (t === OV.RUBBLE) return "#654";
   if (t === OV.AIRPORT) return "#9ab"; // GQ10: tarmac slate
   if (t === OV.SEAPORT) return "#c52"; // GQ10: crane rust
+  // GP9b: disposal. A landfill is earth-brown and DARKENS as it fills, so the
+  // City minimap shows the tip filling up without needing a mode of its own;
+  // the incinerator takes the hot ember-orange of the thing it is.
+  if (t === OV.LANDFILL) return city.fill[i] >= FILL_MAX ? "#6a5a2c" : "#8a7a52";
+  if (t === OV.INCIN) return "#e8721f";
   if (t === OV.XWAY) return "#b8bcc8"; // GP4a: pale concrete — brighter than road grey
   if (t === OV.RAMP) return "#98a0b0"; // GP4a: the exchange, a half-step dimmer
   // GQ10: surface the M28 gap — ids 22..28 used to fall through to the

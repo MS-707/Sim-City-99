@@ -6,6 +6,49 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
+- **GP9b — Somewhere To Put It** *(built, awaiting verification)*: the
+  BEHAVIOUR half of GP9. GP9a published a garbage *ruler* and deliberately
+  consumed none of it; GP9b gives the tonnage a destination, a stock and a
+  consequence. Two new over[] ids appended after `RAMP` and never renumbered —
+  **`LANDFILL` (34)**, a 1×1 drag-painted refuse cell carrying a per-cell fill
+  level, and **`INCIN` (35)**, a 2×2 waste-to-energy plant. A new `isWaste`
+  anti-crosstalk predicate rides **nine** membership sites, because a new id
+  ≥ `OV.ZR` joins *every* family by accident (measured on the baseline:
+  `ovCrosstalk(34)` and `(35)` return **true at all seven** hoisted
+  memberships). The tenth and highest-risk site is the one the scope omitted —
+  the landfill joins `SVC_LINEAR`, or 400 refuse cells become 400 phantom
+  structures and collapse citywide fire coverage from tiles nowhere near a
+  station. Fire candidacy is the one **asymmetric** site: the landfill is
+  excluded (`cand[rh.pick(cand.length)]` takes the array *length* as its RNG
+  argument, so including it re-pins every ignition index on every seed), the
+  incinerator is included. Power: the incinerator is a **wire-gated terminal
+  receiver** — the M24 pump idiom — whose pass runs *before* the demand scan,
+  so its 40 MW joins `supply` ahead of `powerTradeDelta` and is genuinely
+  exportable (measured: `sold_with − sold_without === 40`, exactly). It takes a
+  sixth `waste` bucket in the power mix and the budget pie, and joins
+  `isPlant()` **nowhere** — no aging curve, no rebuild nag, no `plants * 40`.
+  Sim: a `fill` Uint8 plane and a path-dependent `garbageBacklog` stock (save
+  **v21**, both appended strictly after `distressCause` so the whole v20 prefix
+  stays character-stable), an RNG-free `wasteTick()` slotted between
+  `distressTick` and `collectBudget`, a landfill smell that gets *worse* when
+  the cell saturates, an incinerator plume, a land-value scar, refuse-truck
+  traffic on the streets you actually connected, a `garbage` fax weighted
+  **per tile** (the scope's flat score is a citywide scalar, which would have
+  pinned the ticker's "Show me" jump to the lowest map index forever) and a
+  `WASTE_OVERFLOW` advisory row. Art: the landfill is **three** bakes indexed
+  by the same `fillBand()` the sim reads — graded earth and dozer tracks, a
+  working refuse mound, a capped mound with a glowing methane flare and gulls
+  — and the incinerator is an idle/lit **pair**, all appended at the literal
+  end of `buildSprites` on their own seeded side stream so no shipped sprite's
+  draw order moves. Pre-measurement, the pinned fixtures and every baseline
+  number live in `docs/gp9b-waste-pre.json`. **Two gate clauses are
+  unattainable by construction and are recorded rather than quietly
+  satisfied**: "a city with no waste tiles is byte-identical to baseline" is
+  the *same city* as "zero disposal accumulates overflow", and the pollution
+  gap's monotonicity clause measures a plateau. The attainable attribution —
+  `WASTE_RATE` zeroed, 20 seeds × 600 ticks, **0 differing bytes** across
+  every plane, scalar and history series — passes.
+
 - **GP10a — The Distress Ledger** *(built, awaiting verification)*: the RULER
   half of GP10. A deterministic O(n) monthly sweep (`distressTick`, slotted
   between `approvalTick` and `collectBudget` and never to move) walks the new

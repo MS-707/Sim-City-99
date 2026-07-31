@@ -321,6 +321,16 @@ const OV = {
   // carry the mandatory isXp anti-crosstalk exclusions at every documented
   // recomputePower / fire-candidate site below.
   XWAY: 32, RAMP: 33,
+  // GP9b: the two DISPOSAL ids, appended after RAMP=33 and never renumbered
+  // (over[] is a Uint8Array serialized via plain Array.from, so 34/35 round-trip
+  // with NO loader change; save v21 is the version bump only). LANDFILL is a
+  // 1x1 drag-painted refuse cell carrying a per-cell fill level; INCIN is the
+  // 2x2 waste-to-energy plant. Both are >= ZR, which on this tree means they
+  // join EVERY hoisted membership by ACCIDENT (MEASURED on 41642f7:
+  // City.ovCrosstalk(34) and (35) return TRUE at all seven keys), so they carry
+  // the mandatory isWaste anti-crosstalk exclusions at every documented site
+  // below — see the isWaste block beside isMega/isPort.
+  LANDFILL: 34, INCIN: 35,
 };
 
 // M25: RAIL — a THIRD network, but on a SEPARATE PLANE (city.rail, a Uint8Array)
@@ -347,6 +357,10 @@ const OV_SIZE = {
   [OV.STATUE]: 3, [OV.EIFFEL]: 3, [OV.PYRAMID]: 4,
   // GQ10: nuke/seaport are 3x3; the airport group is the proven 4x4 max
   [OV.NUKE]: 3, [OV.AIRPORT]: 4, [OV.SEAPORT]: 3,
+  // GP9b: the incinerator is a 2x2 anchor (the PUMP precedent). The landfill
+  // stays 1x1 BY OMISSION — sizeOf() returns 1 for anything unlisted — because
+  // it is a drag-painted FIELD, not a building (the PIPE precedent).
+  [OV.INCIN]: 2,
 };
 const sizeOf = (t) => OV_SIZE[t] || 1;
 
@@ -398,6 +412,20 @@ const isArco = (t) => t >= OV.PLYMOUTH && t <= OV.LAUNCH;
 const isLandmark = (t) => t >= OV.STATUE && t <= OV.PYRAMID;
 const isMega = (t) => t >= OV.PLYMOUTH && t <= OV.PYRAMID;
 
+/* GP9b: the DISPOSAL family — the isWaterOv/isXp/isMega ANTI-CROSSTALK pattern
+   for the two new >= ZR ids, and the reason it exists is MEASURED, not
+   defensive: on the 41642f7 tree City.ovCrosstalk(34) and (35) return TRUE at
+   ALL SEVEN hoisted memberships, so a landfill field would have conducted
+   electricity, drawn grid demand, browned out, flickered on Y2K, fed a water
+   pump, caught fire and sprouted cosmetic wire arms — every one of them
+   silently. isWaste is therefore appended at SEVEN of the eight pure-predicate
+   sites below (fire candidacy is the ONE split: the landfill is excluded and
+   the incinerator is included — decision D4), and a NINTH membership,
+   ovFeedsIncin, is introduced for the incinerator's terminal-receiver pass.
+   Every predicate returns false for all existing 0..33 types, so a city that
+   places no waste tile is byte-identical to the GP10a baseline. */
+const isWaste = (t) => t === OV.LANDFILL || t === OV.INCIN;
+
 /* GP2: the two TERMINALS. A NEW predicate only — AIRPORT/SEAPORT keep EVERY
    existing membership they had at GQ10 (they still conduct in recomputePower's
    conducts(), still count as powered consumers, stay flammable / brownout- /
@@ -433,28 +461,52 @@ const PORT_LABEL = { [OV.AIRPORT]: "Airport", [OV.SEAPORT]: "Seaport" };
 const ovIsZone = (t) => t === OV.ZR || t === OV.ZC || t === OV.ZI;
 // recomputePower conducts(): a wire/wireroad/building carries the grid; NONE,
 // plain road, rubble, the water overlays, the megas and the concrete never do.
+// GP9b: a drag-painted landfill FIELD would otherwise bridge wires the player
+// never laid; the incinerator is a GENERATOR, and a generator that conducts
+// would route the grid through itself. Both excluded.
 const ovConducts = (t) => t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE
-  && !isWaterOv(t) && !isMega(t) && !isXp(t);
+  && !isWaterOv(t) && !isMega(t) && !isXp(t) && !isWaste(t);
 // recomputePower demand scan: which powered tiles actually DRAW from the grid.
+// GP9b: a landfill is not a consumer and the incinerator is a supplier — the
+// isPlant()/isWaterOv() symmetry, spelled for a family that is neither.
 const ovDrawsPower = (t) => t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
-  && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t);
+  && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t)
+  && !isWaste(t);
 // recomputePower brownout cut: which consumers a capacity shortfall may darken.
+// GP9b: BOTH excluded. This site and the flicker below are HASH-DOMAIN WALKS
+// OVER i, so widening the eligible set changes WHICH tiles a given cutRatio
+// lands on — on every existing city, not only cities that own a landfill.
 const ovBrownoutEligible = (t) => t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t)
-  && !isWaterOv(t) && !isMega(t) && !isXp(t);
+  && !isWaterOv(t) && !isMega(t) && !isXp(t) && !isWaste(t);
 // recomputePower Y2K flicker: same family, but rubble is excluded too.
 const ovFlickerEligible = (t) => t >= OV.ZR && t !== OV.RUBBLE
-  && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t);
+  && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t)
+  && !isWaste(t);
 // recomputePower pump feed: a neighbour that may energize a PUMP anchor as a
 // terminal receiver (it must be a real conductor, not another pump/mega/xway).
-const ovFeedsPump = (t) => !isWaterOv(t) && !isMega(t) && !isXp(t);
+// GP9b: the GP4a !isXp symmetry — a tile that never conducts can never feed.
+const ovFeedsPump = (t) => !isWaterOv(t) && !isMega(t) && !isXp(t) && !isWaste(t);
+/* GP9b: recomputePower INCINERATOR feed — the ninth membership site, and the
+   exact analogue of ovFeedsPump one line up: a neighbour that may energize an
+   INCIN anchor as a terminal receiver. isWaste is excluded so one incinerator
+   can never bootstrap another (two adjacent plants would otherwise light each
+   other off a grid neither of them touches). */
+const ovFeedsIncin = (t) => !isWaterOv(t) && !isMega(t) && !isXp(t) && !isWaste(t);
 // startDisaster("fire"): which tiles a fire may be seeded on. NOTE the absence
 // of a mega exclusion — an arcology IS flammable, and always has been.
+// GP9b (decision D4): the ONE asymmetric site. A refuse cell is not a building
+// and MUST stay out — `cand[rh.pick(cand.length)]` takes the array LENGTH as
+// its RNG argument, so a 400-tile field of a CANDIDATE id re-pins every
+// ignition index on every seed. The incinerator is a furnace and stays in.
 const ovFireCandidate = (t) => t >= OV.ZR && t !== OV.RUBBLE
-  && t !== OV.WIREROAD && t !== OV.XWAY && t !== OV.RAMP && t !== OV.PIPE;
+  && t !== OV.WIREROAD && t !== OV.XWAY && t !== OV.RAMP && t !== OV.PIPE
+  && t !== OV.LANDFILL;
 // sprites.js wireMask(): may a power line sprout a cosmetic arm toward this
 // neighbour? Identical to ovConducts EXCEPT the megas (see the note above).
+// GP9b: BOTH excluded, or a drawn wire autotiles an arm into a tile that
+// carries no current at all — the art would contradict the grid (S4).
 const ovWireJoins = (t) => t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE
-  && !isWaterOv(t) && !isXp(t);
+  && !isWaterOv(t) && !isXp(t) && !isWaste(t);
 // deptStrain fire-load census, non-zone half: over[] that is NOT a linear/debris
 // overlay is a combustible structure. The zone half needs lvl[] as well.
 const ovIsStructure = (t) => t !== OV.NONE && !ovIsZone(t) && !SVC_LINEAR.has(t);
@@ -488,6 +540,7 @@ const OV_DRAWS_POWER = ovTable(ovDrawsPower);
 const OV_BROWNOUT_ELIGIBLE = ovTable(ovBrownoutEligible);
 const OV_FLICKER_ELIGIBLE = ovTable(ovFlickerEligible);
 const OV_FEEDS_PUMP = ovTable(ovFeedsPump);
+const OV_FEEDS_INCIN = ovTable(ovFeedsIncin); // GP9b
 const OV_FIRE_CANDIDATE = ovTable(ovFireCandidate);
 const OV_WIRE_JOINS = ovTable(ovWireJoins);
 
@@ -558,6 +611,97 @@ const wasteBand = (v) => {
   for (let j = 0; j < WASTE_BAND_EDGES.length; j++) if (v >= WASTE_BAND_EDGES[j]) k = j + 1;
   return k;
 };
+
+/* ================= GP9b: SOMEWHERE TO PUT IT ================================
+   GP9a published a RULER (WASTE_RATE / wasteRateAt / wasteCensus) and
+   deliberately consumed none of it. GP9b turns that flow into a SYSTEM: two
+   sinks, one path-dependent stock, and a consequence when the stock outruns
+   the sinks.
+
+   EVERY NUMBER IN THIS BLOCK IS A BALANCE KNOB (design decision D3, surfaced
+   and never decided). The gates are all written against the SYMBOL, so a
+   retune is a one-line edit that no measurement has to be rewritten for.
+
+     FILL_MAX / FILL_UNIT   a landfill cell's per-cell fill counter lives in a
+                            Uint8 plane (city.fill), so its resolution is 255
+                            steps; FILL_UNIT is the tonnage each step buys.
+                            One cell therefore holds FILL_MAX * FILL_UNIT =
+                            10,200 t — MEASURED against the pinned FIX300
+                            fixture, whose peak month is ~6,450 t, so a single
+                            cell is a month and a half of a small city and a
+                            usable field is genuinely a field.
+     INCIN_BURN             tonnes one LIT incinerator destroys per rollover.
+                            900 t/mo means ~7 plants swallow FIX300's whole
+                            stream — the incinerator is the expensive, compact,
+                            dirty answer; the landfill is the cheap sprawling one.
+     INCIN_MW               a TRICKLE of generation per lit anchor. One coal
+                            plant measures 300 MW effective, so the incinerator
+                            is never a power strategy — it is a disposal plant
+                            that happens to pay a little of its own way.
+     LF_SMELL / _FULL       per-tile pollution SOURCE a landfill cell emits,
+                            graded by fill. A SATURATED cell emits MORE, not
+                            less: the scar keeps stinking after it stops
+                            accepting, which is the whole point of the mechanic.
+     INCIN_SMOG             per FOOTPRINT tile, so a lit 2x2 is 4x — a local
+                            cloud, deliberately denser than a landfill cell and
+                            deliberately confined to four tiles.
+     OVERFLOW_T             the backlog at which the city is declared to be in
+                            overflow: the advisory row, the complaint kind and
+                            the query readout all key on this ONE line.
+     BACKLOG_POLL_DIV/_CAP  the citywide backlog's pollution pressure, applied
+                            to DEVELOPED ZONE tiles only (rubbish piles up where
+                            people are) and hard-capped so an unbounded stock
+                            can never produce an unbounded source term.
+     BACKLOG_LV / LF_LV_CAP the same pressure as a land-value penalty, folded at
+                            the GP2 targeted-penalty site.
+     LF_UPKEEP/INCIN_UPKEEP flat monthly upkeep, NO funding slider — the M24
+                            water precedent, not the police/fire one. */
+const FILL_MAX = 255;      // Uint8 ceiling: city.fill[i] saturates here
+const FILL_UNIT = 40;      // tonnes per fill step -> 10,200 t per landfill cell
+const INCIN_BURN = 900;    // tonnes destroyed per lit incinerator per rollover
+const INCIN_MW = 40;       // MW a lit incinerator adds to `supply`
+const LF_SMELL = 34;       // pollution source at fill 0 -> FILL_MAX (graded)
+const LF_SMELL_FULL = 46;  // ...and the flat source a SATURATED cell emits
+const INCIN_SMOG = 70;     // pollution source per LIT incinerator footprint tile
+const OVERFLOW_T = 2000;   // backlog (t) at which the city is "in overflow"
+const BACKLOG_POLL_DIV = 90;  // backlog -> pollution pressure divisor
+const BACKLOG_POLL_CAP = 60;  // ...hard cap on that pressure
+/* GP9b: the COMPLAINT's own cap on the same pressure, deliberately HIGHER than
+   the pollution one. The two are separate numbers because they answer separate
+   questions: BACKLOG_POLL_CAP bounds a source term that gets diffused across
+   the map, while this one has to compete on scanComplaints' ONE shared score
+   ladder, where `unpowered` sits at a flat 150 and `rubble` at 130. MEASURED
+   on the pinned reference city: with the pollution cap (60) the garbage fax
+   tops out at 100 and can NEVER be the month's complaint on any city that
+   still has a dark lot somewhere — which is every grown city — so the whole
+   kind would have been dead state. At 150 the ladder is graded instead of
+   dead: a mild overflow stays below the dark lots, and a city genuinely buried
+   in rubbish out-shouts them. */
+const BACKLOG_FAX_CAP = 150;
+const BACKLOG_LV = 0.5;    // pressure -> land-value penalty coefficient
+const LF_LV_CAP = 26;      // ...hard cap on that penalty
+const LF_UPKEEP = 2;       // § per landfill CELL per month (flat)
+const INCIN_UPKEEP = 120;  // § per incinerator ANCHOR per month (flat)
+/* GP9b: the complaint weighting's denominator — the heaviest single tile on
+   GP9a's ruler (a level-3 factory). Derived FROM the table so a D3/D1 retune
+   of WASTE_RATE cannot leave the complaint scoring against a scale that no
+   longer exists (the WASTE_BAND_EDGES discipline). */
+const WASTE_REF = WASTE_RATE[OV.ZI][3];
+/* GP9b: truck traffic. spreadWasteTrips is a structural clone of
+   spreadPortTrips, so it takes the same shape of constants: a bounded BFS
+   depth and a per-depth decay. The trip counts are per DISPOSAL tile — a
+   landfill cell is a trickle of bin lorries, an incinerator anchor is a
+   genuine freight destination. A SATURATED landfill cell deposits nothing at
+   all: it accepts no tonnage, so no truck drives to it. */
+const WASTE_SPREAD = 3;
+const WASTE_DECAY = 0.62;
+const LF_TRIPS = 5;
+const INCIN_TRIPS = 26;
+/* GP9b: the landfill's three ART bands, derived from the same fill plane the
+   sim reads, so the sprite and the query readout can never disagree about
+   whether a cell is empty, working or capped. 0 = graded earth + dozer tracks,
+   1 = a working refuse mound, 2 = capped, flared and gull-ridden. */
+const fillBand = (f) => (f >= FILL_MAX ? 2 : f >= FILL_MAX / 2 ? 1 : 0);
 
 // M28: fixed population / jobs each arcology houses. Counted EXACTLY ONCE per
 // structure in recomputeDemand (keyed anc === i), so a 4x4 Launch Arco adds its
@@ -790,6 +934,9 @@ const COST = {
   // GP4a: expressway class — 4x road per tile (concrete viaduct), ramp 2.5x;
   // xway joins the 5x water-bridge multiplier in toolCost like road/wire/rail.
   xway: 40, ramp: 25,
+  // GP9b: disposal. The landfill is cheap per cell and drag-painted (a field of
+  // 40 cells is §4,000); the incinerator is a real capital project.
+  landfill: 100, incin: 6000,
 };
 
 /* ---- GP6: the Megalopolis gate — the one rung population alone cannot buy ----
@@ -834,7 +981,12 @@ const TOOL_TIER = { mayor: 2, stadium: 3, rail: 2, subway: 2, station: 2, // Tow
   // (darco/launch precedent) — same padlock/locked-place() machinery.
   nuke: 4, airport: 3, seaport: 2,
   // GP4a: expressways unlock at Town alongside rail (the mass-transit tier).
-  xway: 2, ramp: 2 };
+  xway: 2, ramp: 2,
+  // GP9b: the incinerator unlocks at Town (the seaport precedent) — a village
+  // has nowhere near the tonnage to justify one. The LANDFILL is deliberately
+  // UNGATED (absent from this table): a brand-new settlement must be able to
+  // put its rubbish somewhere from tick 1, or the mechanic is a trap.
+  incin: 2 };
 
 /* ---- city ordinances (M22) ----
    Citywide policy booleans the mayor toggles from the #dlg-ordinances panel.
@@ -1020,7 +1172,12 @@ const EVENTS = [
    Deterministic backstop: while any qualifying tile persists, a complaint is
    guaranteed within COMPLAINT_EVERY (= 3, well under 8) consecutive rollovers
    — the scan is one bounded pass over the map, no retry loops. */
-const COMPLAINT_T = { crime: 100, poll: 100, traffic: 170 };
+// GP9b: `garbage` joins the table at the SAME line the rest of the milestone
+// keys on — OVERFLOW_T — so the advisory row, the query readout and the fax
+// can never disagree about when the city is in overflow. Unlike its five
+// siblings this one is a CITYWIDE threshold on city.garbageBacklog, not a
+// per-tile one; the per-tile ranking is done by wasteRateAt (see scanComplaints).
+const COMPLAINT_T = { crime: 100, poll: 100, traffic: 170, garbage: OVERFLOW_T };
 const COMPLAINT_EVERY = 3; // guaranteed-complaint window, in month rollovers
 
 // 90s-flavored citizen name pool: 16 x 12 combinations, all distinct
@@ -1043,6 +1200,9 @@ const COMPLAINT_TEXT = {
   // GP10a: the distress fax. Names the block's decline and NOTHING about what
   // happens next — the ledger counts, it does not threaten.
   distress: (n) => `📠 Angry fax from ${n}: this block has been going downhill for months and nobody at city hall has noticed. Come look at it yourself!`,
+  // GP9b: the overflow fax. Names the pile-up and nothing else — the ledger
+  // counts, it does not threaten (the GP10a distress-fax discipline).
+  garbage: (n) => `📠 Angry fax from ${n}: the bins haven't been emptied in weeks and the alley smells like a Blockbuster carpet. Where is the garbage going, Mayor?`,
 };
 
 // panicked wire chatter while the Y2K effect is active (Dec 1999 only)
@@ -1681,8 +1841,16 @@ const covR = (radius, f) => Math.round(radius * (0.4 + 0.6 * f));
 // GP5a: linear/debris overlays — everything in over[] that is NOT a structure
 // for the fire-load census in deptStrain (roads, wires, pipes carry no
 // combustible building; rubble is already burnt).
+// GP9b — THE SPEC-OMITTED, HIGHEST-RISK MEMBERSHIP SITE. A landfill CELL is
+// refuse on graded earth, not a combustible structure, and this census runs
+// over the WHOLE map: 400 tiles of a non-SVC_LINEAR id are 400 phantom
+// structures, which MEASURED deptStrain().fire.load 569 -> 969, svcStrain.fire
+// 0.4218 -> 0.2477 (-41.3%) and Σ fireCov 8795 -> 5129 (-41.7%) — a citywide
+// fire-coverage collapse caused by tiles nowhere near a station, with no
+// visible cause. The INCINERATOR is a real building and deliberately stays
+// OUT of this set. ovIsStructure / OV_IS_STRUCTURE derive automatically.
 const SVC_LINEAR = new Set([OV.ROAD, OV.WIREROAD, OV.XWAY, OV.RAMP,
-  OV.WIRE, OV.PIPE, OV.RUBBLE]);
+  OV.WIRE, OV.PIPE, OV.RUBBLE, OV.LANDFILL]);
 
 /* GP9a (fix pass): deptStrain's fire-load census runs over EVERY tile, and it
    is the one hoisted predicate that sits in a per-tile loop hot enough to
@@ -2168,6 +2336,36 @@ const ADVISORY_GATES = Object.freeze([
       const d = c.distressAt(i);
       return [["Months failing", d.n], ["Cause", d.cause || "unrecorded"],
               ["Band", d.bandName || "Strained"]];
+    } },
+
+  /* GP9b: the OVERFLOW row. Same advisory-only discipline as its five siblings
+     (walked by _attachAdvisories alone, NEVER a GROWTH_GATES row — that walk
+     is what spends the growth RNG cursor, so a row inserted there would move
+     the growth stream on every existing city). This is the only row in the
+     table whose test is CITYWIDE rather than per-tile: it keys on the cached
+     boolean city.wasteOverflow that wasteTick publishes once per rollover, so
+     it costs one property read per tile and can never disagree with the fax,
+     the query readout or the graph about whether the city is in overflow.
+     Restricted to DEVELOPED lots — an empty painted lot has no bins.
+     Strictly O(1) per tile; the wasteCapacity() call in `evid` runs only when
+     the row has already matched, i.e. only for a tile the player clicked. */
+  { code: "WASTE_OVERFLOW", sev: "warn", label: "Garbage piling up", advisory: true,
+    test: (c, i) => OV_IS_ZONE[c.over[i]] && c.lvl[i] > 0 && c.wasteOverflow,
+    text: (c, i) => {
+      const cap = c.wasteCapacity();
+      return `The city is ${Math.round(c.garbageBacklog).toLocaleString()} t behind on collection ` +
+        `and this block's bins are part of it. Disposal handles ` +
+        `${cap.incinPerMonth.toLocaleString()} t a month at the incinerators with ` +
+        `${Math.round(cap.landfillRemaining).toLocaleString()} t of landfill left` +
+        `${cap.saturated > 0 ? ` (${cap.saturated} cell${cap.saturated === 1 ? "" : "s"} already capped)` : ""}.`;
+    },
+    evid: (c, i) => {
+      const cap = c.wasteCapacity();
+      return [["Backlog", Math.round(c.garbageBacklog) + " t"],
+              ["Overflow line", OVERFLOW_T + " t"],
+              ["This block", c.wasteRateAt(i) + " t/mo"],
+              ["Landfill left", Math.round(cap.landfillRemaining) + " t"],
+              ["Incinerators", cap.incinPerMonth + " t/mo"]];
     } },
 ]);
 
@@ -2702,6 +2900,44 @@ class City {
        overwhelmingly common case), while still guaranteeing that the LAST
        airport's scar is cleared on the very next pass. */
     this._noiseAny = false;
+    /* ---- GP9b: THE WASTE SYSTEM ------------------------------------------
+       TWO SERIALIZED keys (save v21) and four DERIVED ones.
+
+       SERIALIZED, because neither is a function of the restored world:
+         fill             per-CELL landfill fill, 0..FILL_MAX, a Uint8 plane in
+                          the over[]/lvl[]/roadWear/distress idiom. AUTHORED
+                          state — how full each cell is, is the accumulated
+                          history of every month the city ran, and a rebuild
+                          from scratch would hand the player a fresh empty tip.
+         garbageBacklog   the path-dependent STOCK: tonnes the city failed to
+                          dispose of, carried month to month. The approval /
+                          eduLevel precedent — a scalar EMA-shaped accumulator
+                          that no pure read can reconstruct.
+
+       DERIVED, never serialized (the megaOk / svcStrain / portWork policy) —
+       all four are pure functions of the two above plus over[]/powered[], and
+       are republished by recomputeWasteDerived() / recomputePower():
+         wasteOverflow    cached "backlog >= OVERFLOW_T", read by the advisory
+                          row, the fax and the query panel so the three can
+                          never disagree
+         _landfillAny     one-bit memo: does the map hold ANY landfill cell?
+         _wasteAny        the pollution/land-value/traffic FAST PATH, mirroring
+                          the shipped `noisy` hoist — a waste-free city pays no
+                          per-tile compare for terms that are identically 0
+         _incinLit        anchors the last recomputePower actually energised,
+                          in ascending index order; the ONE list powerMix, the
+                          empty-grid relight and wasteTick all read
+       _wasteVisit/_wasteTok are spreadWasteTrips' BFS visited scratch — its
+       OWN buffers, never the certified _port* ones (allocated once, stamped
+       per call, the _waterReach idiom). */
+    this.fill = new Uint8Array(n);
+    this.garbageBacklog = 0;
+    this.wasteOverflow = false;
+    this._landfillAny = false;
+    this._wasteAny = false;
+    this._incinLit = [];
+    this._wasteVisit = new Int32Array(n);
+    this._wasteTok = 0;
     /* GP3a: the job-access field. jobAccess[i] = total zone jobs the street
        network serving tile i can reach (0 off-grid). FULLY DERIVED — rebuilt
        by recomputeJobAccess() on the traffic cadence and NEVER serialized
@@ -2841,6 +3077,7 @@ class City {
       cleanTax: 0, // GP5b: the high-tech premium folded into taxes this month
       ord: 0, ordCost: 0, ordRev: 0, // M22: ordinance budget line
       ports: 0, portsRev: 0, portsCost: 0, // GP2: ports & terminals line
+      waste: 0, // GP9b: disposal upkeep — REQUIRED here, not optional: fillBudgetTable reads city.lastBudget BEFORE the first month rollover
       dept: { police: 0, fire: 0, roads: 0, edu: 0, health: 0, water: 0, transit: 0 } }; // M24 water / M25 transit upkeep
     this.bonds = [];                // municipal bonds (M13): {principal, rate, term, remaining, monthly, balance}
     this.disastersEnabled = true;
@@ -3078,6 +3315,7 @@ class City {
       this.lvl[i] = 0; this.anc[i] = -1; this.varnt[i] = 0;
       // GP10a clear site 1/10 (waterfill): a drowned lot carries no ledger.
       this.distress[i] = 0; this.distressCause[i] = 0;
+      this.fill[i] = 0; // GP9b fill clear 3/3 (waterfill): a flooded tip is gone
       if (this.rail[i] !== RL.NONE) { this.rail[i] = RL.NONE; this.railDirty = true; } // M25: flooding leaves no ghost line
       this.funds -= cost;
       this.powerDirty = true; // water blocks conduction & road access
@@ -3099,6 +3337,10 @@ class City {
       // tile starts its ledger at zero — otherwise a fresh lot inherits a
       // stale month count from whatever failed here before.
       this.distress[i] = 0; this.distressCause[i] = 0;
+      // GP9b fill clear 1/3 (place footprint): building over a tile — including
+      // re-painting a landfill cell — starts its tip at zero, or a fresh cell
+      // would inherit whatever was buried under the last one.
+      this.fill[i] = 0;
       // GP1b: the sprite variant is stamped at BUILD time, so it rides the
       // `build` cursor stream — required, not optional: byte-identical varnt[]
       // across two runs of the same input script is a hard determinism gate.
@@ -3109,6 +3351,16 @@ class City {
     // M19: a freshly built plant is brand new — stamp its build year so it
     // starts at full nameplate capacity and ages from here.
     if (isPlant(type)) { this.plantYear[a] = this.year; delete this.warnedPlants[a]; }
+    // GP9b: open the waste fast path IMMEDIATELY, incrementally — recomputeMaps
+    // runs on a 14-tick cadence and recomputeTraffic on its own, both long
+    // before the next month rollover republishes the flags, so a freshly
+    // painted tip would otherwise be inert (no smell, no scar, no lorries) for
+    // up to a month. O(1) here; the exact recompute happens on removal, where
+    // the answer can only get smaller (the _noiseAny memo discipline).
+    if (isWaste(type)) {
+      if (type === OV.LANDFILL) this._landfillAny = true;
+      this._wasteAny = true;
+    }
     this.funds -= cost;
     this.powerDirty = true;
     this.devRev++;
@@ -3145,6 +3397,7 @@ class City {
     const a = this.anc[i] >= 0 ? this.anc[i] : i;
     const ax = a % MAP, ay = (a / MAP) | 0;
     const s = sizeOf(this.over[a]);
+    const wasWaste = isWaste(this.over[a]); // GP9b: re-derive the fast path below
     for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
       const j = this.idx(ax + dx, ay + dy);
       this.over[j] = OV.NONE; this.lvl[j] = 0; this.anc[j] = -1;
@@ -3152,9 +3405,23 @@ class City {
       // GP10a clear site 3/10 (bulldoze): rides beside the fire/unpow clear
       // that has always lived on this line, for the same reason.
       this.distress[j] = 0; this.distressCause[j] = 0;
+      // GP9b fill clear 2/3 (bulldoze): razing a tip removes the refuse with
+      // it. The tonnage already disposed of is NOT returned to the backlog —
+      // burying it was a one-way transaction, and un-burying it on a bulldoze
+      // would make "doze the full cell, repaint it" a free capacity exploit.
+      this.fill[j] = 0;
       this.plantYear[j] = 0; // M19: demolishing a plant clears its build year
     }
     delete this.warnedPlants[a];
+    /* GP9b: razing a tip is the ONE direction in which the fast-path memo can
+       get SMALLER, so it is the one place worth an exact O(n) recompute — the
+       guarantee the _noiseAny memo makes for the airport cone, made here for
+       the landfill scar: the LAST landfill's smell and land-value hole lift on
+       the very next recomputeMaps rather than lingering until a rollover.
+       _incinLit is refreshed by the recomputePower this bulldoze already
+       schedules, so an incinerator razed here still reads as lit until then —
+       harmless, because every term _wasteAny guards re-tests over[] per tile. */
+    if (wasWaste) this.recomputeWasteDerived();
     this.funds -= COST.bulldoze;
     this.powerDirty = true;
     this.devRev++;
@@ -3205,6 +3472,52 @@ class City {
         if (!this.powered[j] && conducts(j)) { this.powered[j] = 1; q.push(j); }
       }
     }
+    /* ---- GP9b: the INCINERATOR terminal-receiver pass (decisions D1 + D2) ----
+       An over[] id excluded from conducts() and standing outside isPlant/isMega
+       reads powered[] === 0 forever, even when it orthogonally touches a live
+       wire (MEASURED with the XWAY probe: wire tile powered 1, adjacent xway
+       powered 0). Under GP9b's declared predicate table NOTHING could otherwise
+       set powered[] on an incinerator, so mix.waste would be pinned at 0 and the
+       whole "powered vs unpowered" art state would be unreachable.
+
+       D1: this is the WIRE-GATED RECEIVER model — the M24 pump idiom, not the
+       M28 self-lighting power island. A lone incinerator with no wire run to it
+       stays dark and burns nothing, which is what keeps "you forgot the wire"
+       a reachable failure state and the two-sprite art pair non-trivial.
+
+       D2: it runs HERE — after the flood, BEFORE the demand scan — a deliberate
+       divergence from the pump, which runs LAST. That placement is FORCED, not
+       stylistic: the MW has to join `supply` before powerTradeDelta(supply,
+       demand) below or an incinerator's output is not exportable at all. The
+       incinerator is excluded from the brownout and Y2K families, so the later
+       cuts cannot perturb what this pass lights.
+
+       Ascending index order, zero RNG, non-propagating (it never re-enters the
+       flood queue), so a save->load->recomputePower reproduces _incinLit and
+       every MW exactly. */
+    this._incinLit.length = 0;
+    for (let i = 0; i < this.over.length; i++) {
+      if (this.over[i] !== OV.INCIN || this.anc[i] !== i) continue;
+      const s = sizeOf(OV.INCIN), ax = i % MAP, ay = (i / MAP) | 0;
+      let fed = false;
+      for (let dy = 0; dy < s && !fed; dy++) for (let dx = 0; dx < s && !fed; dx++) {
+        const fx = ax + dx, fy = ay + dy;
+        for (const [nx, ny] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = fx + nx, Y = fy + ny;
+          if (!this.inMap(X, Y)) continue;
+          const j = this.idx(X, Y);
+          // OV_FEEDS_INCIN excludes the water overlays, the megas, the
+          // expressway class and the waste family itself — so a self-powered
+          // arco island can't feed it and one incinerator can't bootstrap another.
+          if (this.powered[j] && OV_FEEDS_INCIN[this.over[j]]) { fed = true; break; }
+        }
+      }
+      if (!fed) continue;
+      for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++)
+        this.powered[this.idx(ax + dx, ay + dy)] = 1;
+      this._incinLit.push(i);
+      supply += INCIN_MW;
+    }
     // demand = number of developed/zoned consumer tiles that got power
     let demand = 0;
     for (let i = 0; i < this.over.length; i++) {
@@ -3241,6 +3554,19 @@ class City {
       // an arco/landmark on a plant-less map stays lit. No-op with no mega present
       // (isMega false everywhere), so the pre-M28 baseline is byte-identical.
       for (let i = 0; i < this.over.length; i++) if (isMega(this.over[i])) this.powered[i] = 1;
+      /* GP9b SITE 10 — declared and gated individually, NOT assumed a no-op.
+         An open M27 SELL can drive `supply` to 0 through the
+         Math.max(0, supply + delta) above while demand is still 0, so this
+         branch can fire on a grid that has already counted an incinerator's MW
+         into powerMix(). Without the relight the anchor reads powered === 0
+         while mix.waste reads non-zero — an internal contradiction, and the Σ
+         identity breaks. Relights exactly the anchors THIS pass energised. */
+      for (let k = 0; k < this._incinLit.length; k++) {
+        const a = this._incinLit[k], s = sizeOf(OV.INCIN);
+        const ax = a % MAP, ay = (a / MAP) | 0;
+        for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++)
+          this.powered[this.idx(ax + dx, ay + dy)] = 1;
+      }
     }
     // Y2K bug (Dec '99): systems flicker at random, grid capacity be damned
     if (this.y2kActive()) {
@@ -3372,7 +3698,12 @@ class City {
      surplus -200 MW, buy +200 MW). powerLedger() below is the honest statement
      of the identity: Σ mix + tradeIn - tradeOut === powerSupply. */
   powerMix() {
-    const mix = { coal: 0, solar: 0, gas: 0, wind: 0, nuke: 0 }; // GQ10: nuke bucket keeps Σ === powerSupply
+    // GP9b: `waste` is the SIXTH bucket. It is NOT summed from isPlant() — the
+    // incinerator deliberately never joined that family (no plantYear, no aging
+    // curve, no PLANT_WARN_AGE nag, no plants*40 upkeep) — it is summed from
+    // _incinLit, the exact list recomputePower added MW to, so the pie can
+    // never claim generation the grid did not receive.
+    const mix = { coal: 0, solar: 0, gas: 0, wind: 0, nuke: 0, waste: 0 }; // GQ10: nuke bucket keeps Σ === powerSupply
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       if (this.anc[i] !== i || !isPlant(t)) continue;
@@ -3383,6 +3714,7 @@ class City {
       else if (t === OV.WIND) mix.wind += cap;
       else if (t === OV.NUKE) mix.nuke += cap; // GQ10
     }
+    mix.waste = this._incinLit.length * INCIN_MW; // GP9b
     return mix;
   }
 
@@ -3402,7 +3734,10 @@ class City {
      Pure read: no writes, no RNG, no recompute*. */
   powerLedger() {
     const mix = this.powerMix();
-    const plantSupply = mix.coal + mix.solar + mix.gas + mix.wind + mix.nuke;
+    // GP9b: mix.waste MUST be in this sum. recomputePower folds INCIN_MW into
+    // `supply` before powerTradeDelta, so omitting it here breaks the Σ identity
+    // GP9a repaired the instant a single incinerator exists.
+    const plantSupply = mix.coal + mix.solar + mix.gas + mix.wind + mix.nuke + mix.waste;
     let tradeIn = 0;
     for (let e = 0; e < 4; e++) {
       if (!this.conn[e].wire) continue;
@@ -4159,6 +4494,28 @@ class City {
       }
       this._portDepAny = anyDep;
     }
+    /* GP9b: REFUSE TRUCKS — deposited beside the port freight above, into the
+       SAME load[] every congestion/land-value penalty already reads, and for
+       the same reason: a disposal site is a destination, and destinations put
+       lorries on the streets you actually connected them to.
+       THIS IS THE DECLARED RE-PIN of the milestone (load -> traffic -> landv ->
+       gFit -> the growth draws). It is bounded exactly one way: the whole block
+       is gated on _wasteAny, so a city that has placed no waste tile and
+       carries no backlog makes LITERALLY ZERO writes here and traffic[] stays
+       byte-identical to the GP10a baseline. A SATURATED landfill cell deposits
+       nothing — it accepts no tonnage, so no truck drives to it, and a capped
+       tip quietly stops generating traffic on its own. Ascending index order,
+       zero RNG. */
+    if (this._wasteAny) {
+      for (let i = 0; i < this.over.length; i++) {
+        const t = this.over[i];
+        let trips = 0;
+        if (t === OV.LANDFILL) trips = this.fill[i] >= FILL_MAX ? 0 : LF_TRIPS;
+        else if (t === OV.INCIN && this.anc[i] === i && this.powered[i]) trips = INCIN_TRIPS;
+        if (!trips) continue;
+        this.spreadWasteTrips(load, this.wasteGate(i), trips);
+      }
+    }
     // blend toward the new load so congestion is stable; roads only.
     // winter (M12): snow keeps drivers home — the effective load every road
     // carries is scaled DOWN by 0.72, so measured congestion drops ~28%
@@ -4537,6 +4894,22 @@ class City {
     // (recycling is waste, not fuel). pollMul === 1 when off => arithmetic
     // identical to pre-M22.
     const pm = this.ordMods.pollMul;
+    /* GP9b: the waste terms, all behind ONE hoisted flag mirroring the shipped
+       `noisy` fast-path below — a waste-free city (the overwhelmingly common
+       case) pays no per-tile compare for terms that are identically 0, and
+       `wasteAny && …` short-circuits to the SAME literal 0, so the accumulation
+       stays bit-identical either way.
+         bp   the citywide BACKLOG PRESSURE: rubbish that never got collected,
+              hard-capped so an unbounded stock can never make an unbounded
+              source term. Applied to DEVELOPED ZONE tiles only — bins pile up
+              where people are, not on empty grass.
+       DELIBERATELY NOT SCALED BY `pm` (ordMods.pollMul): recycling already
+       discounts curbside industry and road smog through pollMul, and routing
+       garbage through it as well would discount the same rubbish twice. The
+       ordinance's effect on garbage is carried by GP9a's wasteMul on the
+       stream, one layer up. */
+    const wasteAny = this._wasteAny;
+    const bp = wasteAny ? Math.min(BACKLOG_POLL_CAP, this.garbageBacklog / BACKLOG_POLL_DIV) : 0;
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       // GP5b: clean high-tech industry emits IND_CLEAN_POLL of the dirty smog.
@@ -4553,6 +4926,19 @@ class City {
       // not curbside waste — the COAL/GAS precedent). A dark, cut-off or
       // bulldozed seaport contributes exactly nothing.
       if (t === OV.SEAPORT && this.portWork[i]) src[i] += SEAPORT_SMOG;
+      // GP9b: the landfill smell, GRADED by how full the cell is — and a
+      // SATURATED cell emits MORE than a working one, flat. A capped tip keeps
+      // stinking long after it stops accepting: that asymmetry is the mechanic,
+      // not a rounding artifact.
+      if (wasteAny && t === OV.LANDFILL)
+        src[i] += this.fill[i] >= FILL_MAX ? LF_SMELL_FULL : LF_SMELL * (this.fill[i] / FILL_MAX);
+      // GP9b: the incinerator plume, per FOOTPRINT tile, so a lit 2x2 is 4x —
+      // a dense local cloud confined to four tiles. Gated on powered[] (the
+      // same flag the receiver pass wrote and the sprite reads), so a dark
+      // incinerator is clean AND silent, exactly like a cut-off seaport.
+      if (t === OV.INCIN && this.powered[i]) src[i] += INCIN_SMOG;
+      // GP9b: uncollected rubbish on a developed block.
+      if (wasteAny && bp > 0 && OV_IS_ZONE[t] && this.lvl[i] > 0) src[i] += bp;
       if (this.fire[i]) src[i] += 100;
     }
     this.diffuse(src, this.poll, 3, 0.24);
@@ -4566,6 +4952,12 @@ class City {
       if (this.over[i] === OV.MAYOR) lv[i] = 130;    // the mayor's manicured lawns
       if (this.over[i] === OV.STADIUM) lv[i] = 110;  // stadium pride (all 4 tiles)
       if (isLandmark(this.over[i])) lv[i] = 120;     // M28: the wonder's own lot is premium (all footprint tiles)
+      // GP9b: THE SCAR. A landfill cell seeds a literal ZERO — it does not just
+      // fail to add value, it overwrites whatever the waterfront/forest seeds
+      // above put there — and the radius-4 diffusion below spreads the hole the
+      // same way it spreads the park and stadium seeds. Nobody wants to live
+      // next to the tip, and now the map says so.
+      if (this.over[i] === OV.LANDFILL) lv[i] = 0;
     }
     const lvOut = new Uint8Array(n);
     this.diffuse(lv, lvOut, 4, 0.3);
@@ -4613,7 +5005,12 @@ class City {
             // far" literally true: a shop under the approach keeps its land
             // value (and so its upgrade odds via gFit), a house does not.
             // noiseCov is 0 everywhere with no working airport, and x - 0 === x.
-            - (noisy && this.over[i] === OV.ZR ? this.noiseCov[i] * NOISE_LV : 0);
+            - (noisy && this.over[i] === OV.ZR ? this.noiseCov[i] * NOISE_LV : 0)
+            // GP9b: the citywide backlog drags land value down everywhere, at
+            // the SAME targeted-penalty site (and with the same `x - 0 === x`
+            // guarantee on a waste-free city) as the GP2 jet-noise term above.
+            // Capped, so an unbounded stock is still a bounded penalty.
+            - (wasteAny ? Math.min(LF_LV_CAP, bp * BACKLOG_LV) : 0);
       this.landv[i] = Math.max(0, Math.min(255, v));
     }
 
@@ -5008,6 +5405,63 @@ class City {
       if (!frontier.length) break;
     }
     return deposited;
+  }
+
+  /* GP9b: refuse trucks onto the street grid — a STRUCTURAL CLONE of
+     spreadPortTrips above (bounded BFS over ROAD/WIREROAD from one gate tile,
+     depth <= WASTE_SPREAD, depositing trips * WASTE_DECAY^d at BFS depth d).
+     Deterministic and RNG-FREE by construction, deliberately NOT
+     recomputeTraffic's reservoir walk — that draws from the TRAFFIC hash domain
+     and would make "the waste code path spends zero RNG" a vacuous claim.
+     Its OWN visited scratch (_wasteVisit/_wasteTok), never the certified
+     _port* buffers, so the two deposits can never alias each other; each tile
+     is visited exactly once per call and the frontier is walked in ascending
+     index order, so the deposit is order-independent. `load` is a PARAMETER
+     for the same reason it is one on spreadPortTrips: this function never
+     touches city state. Returns the total deposited. */
+  spreadWasteTrips(load, gate, trips) {
+    if (!(gate >= 0) || !(trips > 0)) return 0;
+    const vis = this._wasteVisit, tok = ++this._wasteTok;
+    let frontier = [gate], deposited = 0;
+    vis[gate] = tok;
+    for (let d = 0; d <= WASTE_SPREAD; d++) {
+      const amt = trips * Math.pow(WASTE_DECAY, d);
+      frontier.sort((p, q) => p - q);
+      const next = [];
+      for (let k = 0; k < frontier.length; k++) {
+        const i = frontier[k];
+        load[i] += amt; deposited += amt;
+        if (d === WASTE_SPREAD) continue;
+        const x = i % MAP, y = (i / MAP) | 0;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const X = x + dx, Y = y + dy;
+          if (!this.inMap(X, Y)) continue;
+          const j = Y * MAP + X;
+          if (vis[j] === tok) continue;
+          if (this.over[j] !== OV.ROAD && this.over[j] !== OV.WIREROAD) continue;
+          vis[j] = tok; next.push(j);
+        }
+      }
+      frontier = next;
+      if (!frontier.length) break;
+    }
+    return deposited;
+  }
+
+  /* GP9b: the first ROAD/WIREROAD tile orthogonally touching tile i, probed in
+     the SAME fixed [E, W, S, N] order every other neighbour walk in this file
+     uses, so the chosen gate is a pure function of over[] and never of scan
+     history. -1 when the tile has no street contact at all — a landfill you
+     never connected generates no truck traffic, which is correct and visible. */
+  wasteGate(i) {
+    const x = i % MAP, y = (i / MAP) | 0;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const X = x + dx, Y = y + dy;
+      if (!this.inMap(X, Y)) continue;
+      const j = this.idx(X, Y);
+      if (this.over[j] === OV.ROAD || this.over[j] === OV.WIREROAD) return j;
+    }
+    return -1;
   }
 
   // ---------- demand ----------
@@ -5868,7 +6322,8 @@ class City {
     let roads = 0, wires = 0, police = 0, fireSt = 0, schools = 0,
         hospitals = 0, plants = 0, towers = 0, pumps = 0, pipeTiles = 0,
         surface = 0, subway = 0, stations = 0, // M25 rail-plane tallies
-        xwayTiles = 0, rampTiles = 0; // GP4a: expressway upkeep tallies
+        xwayTiles = 0, rampTiles = 0, // GP4a: expressway upkeep tallies
+        landfillTiles = 0, incinAnchors = 0; // GP9b: disposal upkeep tallies
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
       // M25: rail rides a separate plane — tally it alongside the over[] scan
@@ -5886,6 +6341,8 @@ class City {
       else if (t === OV.FIRESTA && this.anc[i] === i) fireSt++;
       else if (t === OV.SCHOOL && this.anc[i] === i) schools++;
       else if (t === OV.HOSPITAL && this.anc[i] === i) hospitals++;
+      else if (t === OV.LANDFILL) landfillTiles++;                     // GP9b
+      else if (t === OV.INCIN && this.anc[i] === i) incinAnchors++;    // GP9b
       else if (isPlant(t) && this.anc[i] === i) plants++;
     }
     const f = this.funding;
@@ -5905,6 +6362,12 @@ class City {
       // ALSO scales catchment by f.transit, cutting Transit funding shrinks
       // ridership AND cost monotonically — a genuine tradeoff (police/fire idiom).
       transit: Math.round((surface * 0.3 + subway * 0.5 + stations * 20) * f.transit / 100),
+      // GP9b: flat disposal upkeep — NO funding slider, the M24 water
+      // precedent rather than the police/fire one. A department slider would
+      // imply the mayor can under-fund collection, and GP9b has no
+      // under-collection mechanic to back that promise up. Zero waste tiles
+      // charges exactly the integer 0, so a waste-free budget is digit-identical.
+      waste:  Math.round(landfillTiles * LF_UPKEEP + incinAnchors * INCIN_UPKEEP),
     };
   }
 
@@ -6022,10 +6485,95 @@ class City {
     return { total, res, com, ind, byLevel, tiles };
   }
 
-  /* ---------- the crosstalk audit table (GP9a) ----------
-     The SEVEN module-scope predicates that ARE pure functions of the overlay
+  /* ---------- GP9b: the DISPOSAL CAPACITY ruler ----------
+     A pure O(n) read — the counterpart of wasteCensus(), which measures the
+     FLOW. This measures the SINK, and it is declared as a GP9b deliverable
+     precisely so the saturation gate is not measured by an instrument that
+     first appears inside the thing it is measuring.
+       cells              landfill cells on the map
+       saturated          how many of them are at FILL_MAX (accept 0 forever)
+       landfillRemaining  Σ (FILL_MAX - fill[i]) * FILL_UNIT over ALL cells —
+                          a saturated cell contributes exactly 0, so the sum is
+                          the same whether or not you filter them out
+       incinPerMonth      what the LIT incinerators destroy per rollover; reads
+                          _incinLit, so a dark plant counts for nothing
+       total              the one-month disposal ceiling if you emptied every
+                          tip at once — the number the query panel prints
+     Zero RNG, zero writes, never called from tick/growthPass/recomputeMaps. */
+  wasteCapacity() {
+    let cells = 0, saturated = 0, landfillRemaining = 0;
+    for (let i = 0; i < this.over.length; i++) {
+      if (this.over[i] !== OV.LANDFILL) continue;
+      cells++;
+      const f = this.fill[i];
+      if (f >= FILL_MAX) saturated++;
+      else landfillRemaining += (FILL_MAX - f) * FILL_UNIT;
+    }
+    const incinPerMonth = this._incinLit.length * INCIN_BURN;
+    return { cells, saturated, landfillRemaining, incinPerMonth,
+             total: landfillRemaining + incinPerMonth };
+  }
+
+  /* GP9b: republish the four DERIVED waste flags from restored/current state.
+     Called at the end of every wasteTick and once in the load cascade (the
+     megaOk precedent) — never serialized, because every one of them is a pure
+     function of fill[]/garbageBacklog/over[]. ONE definition, so the monthly
+     path and the load path can never disagree about whether the city is in
+     overflow or whether the fast path may be taken. */
+  recomputeWasteDerived() {
+    this._landfillAny = this.wasteCapacity().cells > 0;
+    this.wasteOverflow = this.garbageBacklog >= OVERFLOW_T;
+    // _incinLit is in the disjunction because the truck deposit in
+    // recomputeTraffic is gated on _wasteAny: an incinerator-only city (no
+    // landfill, no backlog) still runs freight, and dropping it here would
+    // silently switch that off. Being over-broad is free — every term this
+    // flag guards carries its own exact inner test and folds a literal 0.
+    this._wasteAny = this.garbageBacklog > 0 || this._landfillAny ||
+                     this._incinLit.length > 0;
+  }
+
+  /* ---------- GP9b: THE MONTHLY WASTE TICK ----------
+     Called from tick()'s %24 block in a FIXED slot — after distressTick() and
+     BEFORE collectBudget() — so the budget's waste line, the history.waste
+     push and the pollution / land-value terms all describe the SAME month.
+
+     RNG-FREE, ascending index order, and exactly ONE call to GP9a's certified
+     ruler (wasteCensus). The stream and the carried backlog are POOLED before
+     anything is disposed of, and that pooling is what makes relief measurable:
+     surplus capacity draws the backlog down by itself, so "adding capacity
+     clears the overflow within N rollovers" is a monotone, gateable property
+     rather than a vibe. Incinerators burn first (they are the expensive
+     capacity the player paid for), then landfill cells fill in index order;
+     whatever is left over IS the backlog.
+
+     A SATURATED CELL ACCEPTS 0 FOREVER: `room <= 0` skips it outright, so a
+     capped tip never silently absorbs another tonne — while continuing to
+     stink through the recomputeMaps term. */
+  wasteTick() {
+    let pool = this.wasteCensus().total + this.garbageBacklog;
+    for (let k = 0; k < this._incinLit.length; k++) {
+      if (pool <= 0) break;
+      pool -= Math.min(pool, INCIN_BURN);
+    }
+    for (let i = 0; i < this.over.length && pool > 0; i++) {
+      if (this.over[i] !== OV.LANDFILL) continue;
+      const room = (FILL_MAX - this.fill[i]) * FILL_UNIT;
+      if (room <= 0) continue;                      // saturated: accepts 0 forever
+      const take = Math.min(room, pool);
+      this.fill[i] += Math.ceil(take / FILL_UNIT);  // partial step rounds UP: capacity is never over-sold
+      pool -= take;
+    }
+    this.garbageBacklog = pool;
+    this.recomputeWasteDerived();
+  }
+
+  /* ---------- the crosstalk audit table (GP9a; GP9b: eight keys) ----------
+     The EIGHT module-scope predicates that ARE pure functions of the overlay
      byte, exposed as one table so "does a new id join this family?" is a row in
      an assertion, not an inline expression someone has to remember to find.
+     GP9b added the eighth (feedsIncin) alongside its ninth membership SITE —
+     SVC_LINEAR, which stays OUTSIDE this table for the documented reason below
+     and is asserted separately.
      Static because it takes a TYPE, not a tile: no city state is consulted.
      DELIBERATELY EXCLUDES structure membership — deptStrain's census is not a
      pure function of the byte (see ovIsStructure / ovZoneIsStructure). */
@@ -6036,6 +6584,7 @@ class City {
       brownoutEligible: ovBrownoutEligible(t),
       flickerEligible: ovFlickerEligible(t),
       feedsPump: ovFeedsPump(t),
+      feedsIncin: ovFeedsIncin(t), // GP9b: the ninth site, the eighth reported key
       fireCandidate: ovFireCandidate(t),
       wireJoins: ovWireJoins(t),
     };
@@ -6486,6 +7035,7 @@ class City {
     const plantCost = dc.plants;
     const waterCost = dc.water; // M24: flat water-network upkeep
     const transitCost = dc.transit; // M25: rail/subway/station upkeep (funding-scaled)
+    const wasteCost = dc.waste; // GP9b: flat landfill/incinerator upkeep
     // ---- debt service (M13) ----
     // Each active bond charges one payment per month rollover. The payment is
     // the fixed amortized `monthly` stamped at issue (annuity formula — see
@@ -6522,7 +7072,10 @@ class City {
     // WORKING port (a dark or cut-off terminal is charged nothing at all), so a
     // portless city's net and funds are bit-identical to pre-GP2.
     const pb = this.portsBudget();
-    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - debt + ob.net + trade + pb.net;
+    // GP9b: wasteCost joins the SAME expression — exactly the integer 0 on a
+    // city with no landfill and no incinerator, so `x - 0 === x` keeps every
+    // pre-GP9b net and every funds trajectory integer-identical.
+    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - wasteCost - debt + ob.net + trade + pb.net;
     this.funds += net;
     this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost,
       water: waterCost, transit: transitCost, debt, net, // M24 water / M25 transit upkeep lines
@@ -6532,6 +7085,8 @@ class City {
       ord: ob.net, ordCost: ob.cost, ordRev: ob.rev,
       // GP2: the ports & terminals line (same ord/ordCost/ordRev shape)
       ports: pb.net, portsRev: pb.rev, portsCost: pb.cost,
+      // GP9b: the disposal upkeep line charged this month
+      waste: wasteCost,
       // M23: the per-department breakdown actually charged this month
       dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
               edu: dc.edu, health: dc.health, water: dc.water, transit: dc.transit } };
@@ -6629,6 +7184,13 @@ class City {
   // with zero qualifying tiles never complains at all.
   scanComplaints() {
     if (++this.sinceComplaint < COMPLAINT_EVERY) return;
+    /* GP9b: the overflow pressure, hoisted ONCE — it is a CITYWIDE scalar, and
+       that is precisely the defect the per-tile weighting below exists to fix.
+       Exactly 0 until the backlog crosses COMPLAINT_T.garbage (=== OVERFLOW_T,
+       the same line the advisory row and the query readout key on), so a city
+       that disposes of its rubbish never enters the new branch at all. */
+    const gbp = this.garbageBacklog >= COMPLAINT_T.garbage
+      ? Math.min(BACKLOG_FAX_CAP, this.garbageBacklog / BACKLOG_POLL_DIV) : 0;
     let best = -1, bestKind = null, bestScore = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
@@ -6658,6 +7220,25 @@ class City {
       }
       if (this.poll[i] >= COMPLAINT_T.poll && 40 + this.poll[i] - COMPLAINT_T.poll > score) {
         kind = "poll"; score = 40 + this.poll[i] - COMPLAINT_T.poll;
+      }
+      /* GP9b: the garbage grievance — the THIRD unconditional override, after
+         poll, at the same 40 floor the crime/poll overrides use.
+         DESIGN DECISION D5, and a deliberate deviation from the scope's flat
+         `40 + backlogPressure`: that score is a CITYWIDE SCALAR, so every
+         qualifying tile scores IDENTICALLY, and the picker below uses a strict
+         `score > bestScore` — which resolves to the LOWEST qualifying map index
+         every single time. The fax would name the same corner block forever and
+         the ticker's "Show me" jump would land there forever with it.
+         The weight is GP9a's certified per-tile ruler, normalised by the
+         heaviest single tile on it (WASTE_REF), so the fax comes from the block
+         that actually generates the rubbish — or, at a capped landfill cell,
+         from the tip itself at full weight, because a saturated cell IS the
+         city's most visible garbage problem. `w > 0` keeps grass, roads and
+         undeveloped lots out. */
+      if (gbp > 0) {
+        const w = (t === OV.LANDFILL && this.fill[i] >= FILL_MAX) ? WASTE_REF : this.wasteRateAt(i);
+        const s = 40 + Math.round(gbp * w / WASTE_REF);
+        if (w > 0 && s > score) { kind = "garbage"; score = s; }
       }
       if (kind && score > bestScore) { best = i; bestKind = kind; bestScore = score; }
     }
@@ -6832,6 +7413,12 @@ class City {
       // here (a later slot lags the graph by a month), and which is the slot
       // GP10b needs so abandonment lands in the same month's taxes.
       this.distressTick();
+      /* GP9b: the waste tick — rollover only, zero RNG. THIS SLOT IS FIXED:
+         after distressTick and BEFORE collectBudget, so the budget's waste
+         line, the history.waste push and the pollution / land-value / traffic
+         terms all describe the SAME month. A later slot would leave the
+         month's disposal one rollover behind everything that reads it. */
+      this.wasteTick();
       this.collectBudget();
       this.updateRecords();   // City Hall records (M17) — rollover only
       this.scanComplaints();  // citizen complaints (M17) — rollover only
@@ -7039,7 +7626,7 @@ class City {
        simply carries neither key, unpackU8 no-ops, and the city loads with an
        all-zero ledger that starts counting at its next rollover. */
     return JSON.stringify({
-      v: 20, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 21, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -7136,6 +7723,26 @@ class City {
       /* ---- GP10a (save v20) ---- appended AFTER recallDone (ladder rule), so
          every byte of the v19 serialization above is character-stable. */
       distress: packU8(this.distress), distressCause: packU8(this.distressCause),
+      /* ---- GP9b (save v21) ---- appended STRICTLY AFTER distressCause under
+         the ladder rule, so the ENTIRE v20 prefix of the payload above stays
+         character-stable. TWO keys, and only two:
+           fill            the per-cell landfill level. AUTHORED state, not a
+                           derivation — how full each tip is IS the accumulated
+                           history of every month the city ran, so a rebuild
+                           would hand the player a fresh empty landfill. A
+                           mostly-zero small-valued Uint8 plane: packU8's sparse
+                           mode-3 workload, exactly like distress.
+           garbageBacklog  the path-dependent STOCK (the approval / eduLevel
+                           precedent). Not derivable from restored state by any
+                           pure read, which is exactly why it is here.
+         wasteOverflow, _wasteAny, _landfillAny and _incinLit are DERIVED and
+         deliberately absent — recomputeWasteDerived() and recomputePower()
+         rebuild all four in the load cascade (the megaOk precedent).
+         No `v === 21` test anywhere in deserialize: a pre-v21 save simply
+         carries neither key, unpackU8 no-ops, the typeof guard declines, and
+         the city loads with an all-zero fill plane and a zero backlog — i.e.
+         with NO retroactive overflow penalty. */
+      fill: packU8(this.fill), garbageBacklog: this.garbageBacklog,
     });
   }
 
@@ -7329,6 +7936,19 @@ class City {
        defaults until the first post-load rollover republishes them. */
     unpackU8(d.distress, c.distress);
     unpackU8(d.distressCause, c.distressCause);
+    /* GP9b (save v21): the landfill fill plane and the backlog stock, restored
+       beside the distress overlays under the identical defensive contract —
+       unpackU8 REJECTS a malformed/absent pack and leaves the ctor's zeroed
+       plane standing, and the typeof guard declines a missing scalar, so a
+       pre-v21 save loads with an empty tip and a zero backlog and no `v === 21`
+       test is needed anywhere. Placed BEFORE recomputeMaps below, which is
+       where the pollution and land-value terms read them; recomputeWasteDerived
+       republishes the four derived flags from exactly what was just restored,
+       so the fast path, the overflow boolean and the advisory row all agree
+       with the saved timeline instead of with a zeroed ctor. */
+    unpackU8(d.fill, c.fill);
+    if (typeof d.garbageBacklog === "number") c.garbageBacklog = d.garbageBacklog;
+    c.recomputeWasteDerived();
     /* GP3b (save v14): overlay the two commute scalars the cascade's
        recomputeTraffic just re-derived — its rebuild ran against lvl[] that
        may sit up to 4 ticks past trafficEpoch, so the recomputed values can
@@ -7424,5 +8044,10 @@ function toolOverlay(tool) {
     // lvl=0, varnt from the rng.build stream exactly like a road, powerDirty
     // set), so scripted determinism replays byte-identically.
     xway: OV.XWAY, ramp: OV.RAMP,
+    // GP9b: disposal. The landfill rides the generic 1x1 place() path exactly
+    // like a pipe (anc = i, lvl 0, varnt from the rng.build stream, powerDirty
+    // set), so drag-painting a field replays byte-identically under a scripted
+    // run; the incinerator rides the same 2x2 anchor path the pump does.
+    landfill: OV.LANDFILL, incin: OV.INCIN,
   })[tool] ?? OV.NONE;
 }

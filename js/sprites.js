@@ -3951,6 +3951,167 @@ function buildSprites() {
     };
     return { x: [bake("x", 0), bake("x", 1)], y: [bake("y", 0), bake("y", 1)] };
   })();
+
+  /* ================= GP9b: DISPOSAL ART =====================================
+     APPENDED AT THE LITERAL END of buildSprites, after SPR.train, and every
+     draw below consumes ONLY the dedicated `wasteRng` side stream (swapped in
+     and out around the whole block — the gasRng/megaRng idiom). That is the
+     hard rule this milestone rides on: interleaving a new bake anywhere
+     earlier re-pins the value-jitter of every shipped sprite and silently
+     breaks the G1/G2 night legibility and the G12/G14 season bakes. Both
+     families are baked ONCE here and only ever looked up by spriteFor — never
+     rebuilt per frame.
+
+     SPR.landfill is an ARRAY OF THREE, indexed by fillBand(city.fill[i]) — the
+     SAME function the sim's pollution term and the query readout key on, so
+     the art can never claim a cell is empty while the sim is charging it for a
+     capped one:
+       [0] EMPTY      graded earth, a perimeter berm and fresh dozer tracks
+       [1] HALF       a working refuse mound with scattered debris and a plant
+       [2] SATURATED  a capped, grassed-over mound with a lit methane flare
+                      and circling gulls — visibly finished, visibly still there
+
+     SPR.incin is a PAIR, indexed by powered[anchor]:
+       [0] IDLE  cold stack, dark glass, closed tipping door
+       [1] LIT   lit hall windows, a glowing grate and a warm stack cap
+     Both are baked through withNight, so the LIT one carries a real G1 glow
+     layer and the IDLE one carries an (empty) one — a dark incinerator stays
+     dark at night, which is the whole point of the pair. */
+  {
+    const wasteRng = mulberry32(0x9A57E5);
+    const prevRng = ART_RNG; ART_RNG = wasteRng;
+    const R2 = () => wasteRng();
+
+    // one landfill cell at band b (0 empty / 1 half / 2 capped)
+    const landfillDraw = (b) => (g, ox, oy) => {
+      // graded earth pad — sealedDiamond so adjacent cells composite to one
+      // continuous tip with no seam bleed (the terrain-tile contract)
+      sealedDiamond(g, ox, oy, "#6b5f4e");
+      // scraped lighter bands running along the NE-SW axis
+      g.save(); diamondPath(g, ox, oy); g.clip();
+      g.fillStyle = "#7a6d59";
+      for (let k = -2; k <= 2; k++) {
+        g.beginPath();
+        g.moveTo(ox - HW, oy + k * 5); g.lineTo(ox, oy - HH + k * 5);
+        g.lineTo(ox, oy - HH + k * 5 + 3); g.lineTo(ox - HW, oy + k * 5 + 3);
+        g.closePath(); g.fill();
+      }
+      // dozer tracks: paired dark hatch ticks, seeded so no two cells match
+      g.strokeStyle = "rgba(50,42,32,.55)"; g.lineWidth = 1;
+      for (let k = 0; k < 7; k++) {
+        const u = R2() * 1.6 - 0.8, v = R2() * 1.6 - 0.8;
+        const tx = ox + (u - v) * HW * 0.5, ty = oy + (u + v) * HH * 0.5;
+        g.beginPath(); g.moveTo(tx - 3, ty - 1); g.lineTo(tx + 3, ty + 1); g.stroke();
+        g.beginPath(); g.moveTo(tx - 3, ty + 1.6); g.lineTo(tx + 3, ty + 3.6); g.stroke();
+      }
+      g.restore();
+      if (b === 0) {
+        // a low back berm of pushed spoil, so an empty cell still reads as WORKED
+        // ground rather than bare dirt at every rotation
+        g.fillStyle = "#7d7059";
+        g.beginPath(); g.ellipse(ox, oy - HH + 5, 13, 4, 0, 0, 7); g.fill();
+        g.fillStyle = "#8d7f65";
+        g.beginPath(); g.ellipse(ox - 2, oy - HH + 4, 9, 2.6, 0, 0, 7); g.fill();
+        return;
+      }
+      // refuse mound — a squashed dome, taller and greener once capped
+      const ht = b === 2 ? 17 : 10;
+      const body = b === 2 ? "#6d7a52" : "#8a7f62";
+      g.fillStyle = "rgba(0,0,0,.20)";
+      g.beginPath(); g.ellipse(ox, oy + 2, 15, 6, 0, 0, 7); g.fill();
+      g.fillStyle = body;
+      g.beginPath(); g.ellipse(ox, oy - ht * 0.35, 14, ht * 0.62, 0, 0, 7); g.fill();
+      g.fillStyle = lighten(body, 0.22);   // NE-lit crown
+      g.beginPath(); g.ellipse(ox - 3, oy - ht * 0.55, 9, ht * 0.36, 0, 0, 7); g.fill();
+      g.fillStyle = shade(body, 0.78);     // SW shadow flank
+      g.beginPath(); g.ellipse(ox + 4, oy - ht * 0.18, 8, ht * 0.3, 0, 0, 7); g.fill();
+      if (b === 1) {
+        // scattered debris: little bright polys poking out of the working face
+        const junk = ["#b4423a", "#4d6fa8", "#c9c3b0", "#7a8f4a", "#c9903a"];
+        for (let k = 0; k < 9; k++) {
+          const a = R2() * Math.PI * 2, r = 3 + R2() * 10;
+          const jx = ox + Math.cos(a) * r, jy = oy - 2 + Math.sin(a) * r * 0.42;
+          g.fillStyle = junk[(R2() * junk.length) | 0];
+          g.beginPath();
+          g.moveTo(jx, jy - 2.2); g.lineTo(jx + 2, jy); g.lineTo(jx, jy + 1.6); g.lineTo(jx - 2, jy - 0.4);
+          g.closePath(); g.fill();
+        }
+      } else {
+        // capped: methane flare pipe with a burning tip, plus gull specks
+        const fx = ox + 7, fy = oy - ht * 0.7;
+        g.fillStyle = "#5a5f52"; g.fillRect(fx - 1.5, fy - 16, 3, 16);
+        g.fillStyle = "#7d8474"; g.fillRect(fx - 1.5, fy - 16, 1.2, 16);
+        g.fillStyle = "#ff8a3a";
+        g.beginPath(); g.ellipse(fx, fy - 18, 2.2, 3.4, 0, 0, 7); g.fill();
+        g.fillStyle = "#ffd98a";
+        g.beginPath(); g.ellipse(fx, fy - 18.5, 1.1, 1.8, 0, 0, 7); g.fill();
+        if (GLOWG) { // G1: the flare is the ONE thing on a tip that glows at night
+          GLOWG.fillStyle = "#ff8a3a";
+          GLOWG.beginPath(); GLOWG.ellipse(fx, fy - 18, 2.6, 3.8, 0, 0, 7); GLOWG.fill();
+        }
+        g.strokeStyle = "#e8e8ea"; g.lineWidth = 1;
+        for (let k = 0; k < 4; k++) {
+          const gx = ox - 10 + R2() * 20, gy = oy - ht - 4 - R2() * 9;
+          g.beginPath();
+          g.moveTo(gx - 2.4, gy + 1); g.lineTo(gx, gy - 0.8); g.lineTo(gx + 2.4, gy + 1);
+          g.stroke();
+        }
+      }
+    };
+    // band 2 carries the flare glow, so it goes through withNight; the other
+    // two bake flat (nothing on a working tip is lit after dark)
+    SPR.landfill = [
+      mkSprite(1, 1, 26, landfillDraw(0)),
+      mkSprite(1, 1, 26, landfillDraw(1)),
+      withNight(1, 1, 26, landfillDraw(2)),
+    ];
+
+    /* the 2x2 waste-to-energy plant. `lit` swaps the window quota, the grate
+       and the stack cap — the SILHOUETTE is identical in both, so the pair
+       reads as one building in two states rather than two buildings. */
+    const incinDraw = (lit) => (g, ox, oy) => {
+      const cn = corners(ox, oy, 2, 2);
+      poly(g, [cn.N, cn.E, cn.S, cn.W], "#6a6a70", "rgba(0,0,0,.28)"); // concrete apron
+      const hc = insetCorners(ox, oy, 2, 2, 0.66);
+      const HT = 26;
+      prismFrom(g, hc, HT, "#8a7f6a");                                 // the burn hall
+      // machine-hall glazing on the two screen-front faces
+      windows(g, hc.W, hc.S, HT, 2, 3, lit ? 0.85 : 0, "#ffd27a", "#20242c", GLOW_SODIUM);
+      windows(g, hc.S, hc.E, HT, 2, 4, lit ? 0.85 : 0, "#ffd27a", "#20242c", GLOW_SODIUM);
+      // the tipping-hall door on the SW face — the tile trucks drive into
+      const dx = (hc.W[0] + hc.S[0]) / 2, dy = (hc.W[1] + hc.S[1]) / 2;
+      g.fillStyle = "#3a3a42"; g.fillRect(dx - 5, dy - 13, 10, 12);
+      g.fillStyle = "#4c4c56"; g.fillRect(dx - 5, dy - 13, 10, 2);
+      // the GRATE: a slot above the door that is a cold dark bar when idle and
+      // an incandescent bar when the furnace is running
+      g.fillStyle = lit ? "#ff7a2a" : "#2b2b33";
+      g.fillRect(dx - 6, dy - 17, 12, 3);
+      if (lit) {
+        g.fillStyle = "#ffdca0"; g.fillRect(dx - 5, dy - 16.4, 10, 1.2);
+        if (GLOWG) { GLOWG.fillStyle = "#ff7a2a"; GLOWG.fillRect(dx - 7, dy - 18, 14, 5); }
+        groundPool(dx, dy + 4, 15, 6, GLOW_SODIUM); // G2: yard spill under the door
+      }
+      // the stack: tall, striped, with a warm cap only while burning
+      const tN = up(hc.N, HT);
+      stack(g, tN[0] + 11, tN[1] + 6, 46, 10, true);
+      if (lit) {
+        g.fillStyle = "#ff9c3e";
+        g.fillRect(tN[0] + 11 - 5, tN[1] + 6 - 46 - 3, 10, 3);
+        if (GLOWG) { GLOWG.fillStyle = "#ff9c3e"; GLOWG.fillRect(tN[0] + 6, tN[1] - 44, 10, 4); }
+      }
+      // roof scrubber drum, so the hall is not a bare box from above
+      const tS = up(hc.S, HT), rx = (tN[0] + tS[0]) / 2, ry = (tN[1] + tS[1]) / 2;
+      g.fillStyle = "#5f6670";
+      g.beginPath(); g.ellipse(rx - 6, ry + 2, 8, 3.6, 0, 0, 7); g.fill();
+      g.fillStyle = "#6d757f"; g.fillRect(rx - 14, ry - 6, 16, 8);
+      g.fillStyle = "#828b96";
+      g.beginPath(); g.ellipse(rx - 6, ry - 6, 8, 3.6, 0, 0, 7); g.fill();
+    };
+    SPR.incin = [withNight(2, 2, 74, incinDraw(false)),
+                 withNight(2, 2, 74, incinDraw(true))];
+
+    ART_RNG = prevRng; // restore the shared 0x5EED stream
+  }
 }
 
 // sprite lookup for an overlay tile (returns null when tile isn't the drawn anchor)
@@ -4039,6 +4200,19 @@ function spriteFor(city, i) {
     case OV.NUKE:     return B.nuke;
     case OV.AIRPORT:  return B.airport;
     case OV.SEAPORT:  return B.seaport;
+    /* GP9b: both disposal families are SEASON- and FACING-INVARIANT static
+       bakes (SPR.*, not B.*) — a refuse tip and a burn hall are the two
+       structures in the city that look the same from every side and in every
+       month, and keeping them out of the seasonal sets means makeWinter never
+       has to invent a snow cap for a mound of rubbish.
+       The landfill indexes fillBand() — the SAME function the pollution term
+       and the query readout use, so the sprite can never claim a cell is empty
+       while the sim is charging the player for a capped one.
+       The incinerator indexes powered[] AT ITS ANCHOR (not at the tile), so all
+       four footprint tiles agree; the `anc[i] >= 0` guard mirrors the identical
+       one in bulldoze() for a hand-edited save with a missing anchor. */
+    case OV.LANDFILL: return SPR.landfill[fillBand(city.fill[i])];
+    case OV.INCIN:    return SPR.incin[city.powered[city.anc[i] >= 0 ? city.anc[i] : i] ? 1 : 0];
   }
   return null;
 }

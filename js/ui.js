@@ -118,6 +118,18 @@ const TOOLS = [
   { id: "pipe",       name: "Water Pipe", key: "p", icon: null, spr: () => SPR.pipe[5] },
   { id: "watertower", name: "Watr Twr",   key: "t", icon: null, spr: () => SPR.watertower },
   { id: "pump",       name: "Watr Pump",  key: "u", icon: null, spr: () => SPR.pump },
+  // GP9b: disposal, a pair placed directly after the water trio — the two
+  // utilities that answer "where does it go?" now sit together. The LANDFILL is
+  // drag-painted like a pipe (1x1, place() per tile, ungated, no minTier key)
+  // and its toolbar chip shows the EMPTY band, which is what the player's first
+  // cell will look like; the INCINERATOR is a 2x2 anchor like the pump and is
+  // Town-gated, so its button dims with a padlock until the city ranks up.
+  // MEASURED before choosing: every letter a-z and every digit is already
+  // bound (a-z by TOOLS except q/e, which rotateView owns), so the two free
+  // keys are the home-row punctuation pair ; and '. Cost chips, padlocks and
+  // the F1 shortcut overlay all derive from TOOLS/COST/TOOL_TIER automatically.
+  { id: "landfill", name: "Landfill",  key: ";", icon: null, spr: () => SPR.landfill[0] },
+  { id: "incin",    name: "Incinertr", key: "'", icon: null, spr: () => SPR.incin[1], minTier: TOOL_TIER.incin },
   // M25: mass transit — gated behind Town (TOOL_TIER.rail/subway/station=2), so
   // the buttons dim with a padlock until the city ranks up. Keys r/k/n are free
   // (r/u/t from the design collide with rotate/pump/water-tower, so they moved).
@@ -1149,6 +1161,13 @@ const POWERMIX_TYPES = [
   { key: "solar", label: "Solar", col: "#2f74c0" },
   { key: "wind",  label: "Wind",  col: "#5fb56a" },
   { key: "nuke",  label: "Nuclear", col: "#d8c433" }, // GQ10: the fifth generator bucket (GP9a: the pie sums to the PLANT mix, not to powerSupply — see above)
+  // GP9b: the SIXTH bucket. Mandatory, not decorative — this array is BOTH the
+  // pie's slice list and the legend's row list AND the denominator every
+  // percent is taken against, so omitting the row would make the pie silently
+  // under-sum and the "Plant output" subtotal disagree with powerLedger().
+  // The colour is a dull refuse-olive, deliberately distant from the gas
+  // orange and the nuclear yellow it sits between on the wheel.
+  { key: "waste", label: "Waste-to-energy", col: "#8a7a3a" },
 ];
 function fillPowerMix() {
   const led = city.powerLedger();
@@ -1275,6 +1294,7 @@ function fillBudgetTable() {
     <tr><td>Health (${fd.health}%)${meter("health")}</td><td>${f(-dc.health)}</td></tr>
     <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
     <tr><td>Water system</td><td>${f(-dc.water)}</td></tr>
+    <tr><td>Waste disposal</td><td>${f(-dc.waste)}</td></tr>
     <tr><td>Transit (${fd.transit}%)</td><td>${f(-dc.transit)}</td></tr>
     <tr><td>City ordinances</td><td>${f(city.ordinanceBudget().net)}</td></tr>
     <tr><td>Regional power trade</td><td>${f(city.lastBudget.trade || 0)}</td></tr>
@@ -1880,7 +1900,11 @@ const OV_NAMES = ["—", "Road", "Power line", "Residential", "Commercial", "Ind
   // automatic for the nuke)
   "Nuclear plant", "Airport", "Seaport",
   // GP4a: indices 32/33 — the expressway class
-  "Expressway", "Ramp"];
+  "Expressway", "Ramp",
+  // GP9b: indices 34/35 — disposal. THIS ARRAY IS INDEX-KEYED, so both entries
+  // are mandatory: omit them and BOTH consumers (the query panel and the hover
+  // memo) print the literal string `undefined` on a landfill or an incinerator.
+  "Landfill", "Incinerator"];
 
 const htmlEsc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -2004,6 +2028,38 @@ function renderQuery() {
     }
   }
   const transitAccessRow = `<tr><td>Transit access</td><td>${city.railCov[i]}</td></tr>`;
+  /* GP9b: the disposal rows. ONE city.wasteCapacity() call, and only when the
+     clicked tile actually is a disposal tile — it is an O(n) read, and the
+     query panel re-renders every 500 ms while it is open, so it must never run
+     for the other 34 overlay ids.
+       LANDFILL   how full THIS cell is, as a percent, and the literal word
+                  `full` at saturation — the readout that tells the player the
+                  tip has stopped accepting and only the smell is left.
+       INCIN      whether the furnace is lit (the same powered[anchor] the
+                  sprite and the pollution source read) and what it burns.
+     Both then print the CITYWIDE line — backlog against remaining capacity —
+     because "is this cell full?" and "is the city coping?" are different
+     questions and the panel is where a player asks the second one. */
+  let wasteRow = "";
+  if (city.over[i] === OV.LANDFILL || city.over[i] === OV.INCIN) {
+    const cap = city.wasteCapacity();
+    if (city.over[i] === OV.LANDFILL) {
+      const f = city.fill[i];
+      const pct = Math.round(f / FILL_MAX * 100);
+      wasteRow += `<tr><td>Fill</td><td>${f >= FILL_MAX
+        ? `full — ${(FILL_MAX * FILL_UNIT).toLocaleString()} t buried, accepts nothing`
+        : `${pct}% full · ${((FILL_MAX - f) * FILL_UNIT).toLocaleString()} t of room left`}</td></tr>`;
+    } else {
+      const a = city.anc[i] >= 0 ? city.anc[i] : i;
+      wasteRow += `<tr><td>Furnace</td><td>${city.powered[a]
+        ? `🔥 burning ${INCIN_BURN.toLocaleString()} t/mo · +${INCIN_MW} MW`
+        : "cold (needs a power line to its footprint)"}</td></tr>`;
+    }
+    wasteRow += `<tr><td>City backlog</td><td>${Math.round(city.garbageBacklog).toLocaleString()} t` +
+      `${city.wasteOverflow ? " ⚠️ overflowing" : ""}</td></tr>` +
+      `<tr><td>Disposal left</td><td>${Math.round(cap.landfillRemaining).toLocaleString()} t landfill · ` +
+      `${cap.incinPerMonth.toLocaleString()} t/mo burned</td></tr>`;
+  }
   // GP3b: jobs reachable + hop distance to the nearest job gate, read from the
   // serving road's jobDist (em-dash off-grid, the existing shape)
   const qnr = city.nearestRoad(i);
@@ -2024,6 +2080,7 @@ function renderQuery() {
     ${waterProvRow}
     ${megaRow}
     ${portRow}
+    ${wasteRow}
     ${transitRow}
     <tr><td>Powered</td><td>${city.powered[i] ? "⚡ yes" : "no"}</td></tr>
     ${transitAccessRow}

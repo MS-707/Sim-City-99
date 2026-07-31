@@ -1066,6 +1066,15 @@ const ORDINANCES = [
   { id: "smoke", name: "Smoke-Detector Mandate", icon: "🚨", champion: "safety", minTier: 2,
     blurb: "Fires are caught early — they burn out faster.",
     cost: (c) => Math.round(c.resTiles * 1.5), mods: { fireBurn: 1 } },
+  // GP10b: the 7th row — the renewal campaign's citywide lever. `reviveCut`
+  // shortens the boarded-lot recovery window everywhere (the district
+  // designation is the LOCAL, paid version of the same thing); demR is the
+  // small housing-demand nudge a redevelopment authority buys. NOTE that BOTH
+  // identityOrdMods() and recomputeOrdinances() must carry reviveCut or this
+  // row is silently ignored — the effect cache is a CLOSED key set.
+  { id: "renewal", name: "Urban Renewal Authority", icon: "🏗️", champion: "finance", minTier: 2,
+    blurb: "A standing redevelopment office — boarded-up lots come back twice as fast.",
+    cost: (c) => Math.round(c.pop * 0.04), mods: { reviveCut: 2, demR: 0.04 } },
 ];
 const ORD = (id) => ORDINANCES.find((o) => o.id === id);
 // identity effect cache — the shape city.ordMods always takes; folded muls
@@ -1074,7 +1083,11 @@ const ORD = (id) => ORDINANCES.find((o) => o.id === id);
 function identityOrdMods() {
   // GP9a: wasteMul defaults to 1 like the other muls — without it a city with
   // nothing enacted would put `undefined` into wasteRateAt's arithmetic.
-  return { pollMul: 1, trafficMul: 1, wasteMul: 1, crimeCut: 0, fireBurn: 0, demR: 0, demC: 0, demI: 0 };
+  // GP10b: reviveCut defaults to 0 like the other additives — without it the
+  // renewal row's mod would be dropped on the floor by recomputeOrdinances and
+  // distressTick would subtract `undefined` from the revive window.
+  return { pollMul: 1, trafficMul: 1, wasteMul: 1, crimeCut: 0, fireBurn: 0, demR: 0, demC: 0, demI: 0,
+           reviveCut: 0 };
 }
 
 // GP6: the `!TIERS[t].gate` guard is the ONE change here — a gated rung is
@@ -1584,6 +1597,41 @@ const GROWTH_GATES = Object.freeze([
     text: () => "🔥 On fire — the blaze suspends every growth check on this lot until it burns out.",
     evid: (c, i) => [["Fire", c.fire[i]]] },
 
+  /* GP10b: ABANDONED sits at INDEX 1 — after BURNING, BEFORE UNPOWERED — and
+     the placement is FORCED, not stylistic. diagnoseTile reports firstGate's
+     row as the PRIMARY verdict, and on the measured dark path every abandoned
+     tile is also unpowered, so a row below UNPOWERED could never win the walk
+     and the query box would never say the word "abandoned" at all.
+     stop:true / apply:null is mandatory: an apply() here would spend the growth
+     RNG cursor and turn a bounded, post-abandonment re-pin into a global one.
+     DECLARED CONSEQUENCES of stopping above UNPOWERED, each one intended:
+       (a) unpow[i] stops incrementing on a boarded dark lot — a lot with no
+           tenants has no dark checks to count. unpow[] IS serialized and read
+           by approvalCensus.zUnpow, so this is declared, not incidental.
+       (b) the guarded 0.35 decay draw stops. On the dark path that costs
+           EXACTLY ZERO draws: the decay line short-circuits on `c.lvl[i] > 0`
+           first, and 500 of 504 measured tiles are already at level 0 when
+           they abandon (docs/gp10b-aband-pre.json §A2).
+       (c) growthPass's unpow reset and its gridlock draw are skipped, exactly
+           as UNPOWERED already skips them — but for a POWERED abandoned lot
+           (crime/gridlock-caused) the gridlock draw is a REAL skipped draw.
+           That is the entire measured source of the bounded re-pin, and the
+           gate fences it: no seed may differ before its first abandonment. */
+  { code: "ABANDONED", sel: "any", sev: "crit", label: "Abandoned", stop: true, apply: null,
+    test: (c, i, k) => c.aband[i] > 0,
+    text: (c, i) => {
+      const d = c.distressAt(i);
+      return `🪧 Abandoned — left failing for ${ABAND_W} months` +
+        `${d.cause ? ` (${d.cause.toLowerCase()})` : ""}; boarded for ` +
+        `${c.aband[i]} more clear month${c.aband[i] === 1 ? "" : "s"}` +
+        `${c.districtRenewal(i) ? " (renewal district)" : ""}.`;
+    },
+    evid: (c, i) => {
+      const d = c.distressAt(i);
+      return [["Clear months owed", c.aband[i]], ["Cause", d.cause || "unrecorded"],
+              ["Months failed", d.n]];
+    } },
+
   { code: "UNPOWERED", sel: "any", sev: "crit", label: "No power", stop: true,
     test: (c, i, k) => !k.powered,
     apply: (c, i, k) => {
@@ -2061,6 +2109,52 @@ const DISTRESS_ABAND_W_FLOOR = 15;      // forward constraint for GP10b (D1)
 const distressBand = (n) => n <= 0 ? -1
   : n >= DISTRESS_BANDS[1] ? 2 : n >= DISTRESS_BANDS[0] ? 1 : 0;
 
+/* ================= GP10b: ABANDONMENT — the consequence GP10a measured =======
+   GP10a shipped the ruler and promised nothing. This block is the consequence,
+   and every constant here is pinned to a SHIPPED analogue rather than picked,
+   so the balance argument is "abandonment costs the city exactly what X does"
+   and not "18 felt right".
+
+   ABAND_W === DISTRESS_ABAND_W_FLOOR is a LOAD-TIME INVARIANT: the window may
+   never sit at or below DISTRESS_BANDS[1] (12) or the critical band becomes a
+   state the player can never observe. It sits at the floor because the floor is
+   also the maximum REACHABLE value — measured on the pinned FX-DARK fixture
+   (seed 4242, wire cut over x∈[30,50]) the shipped UNPOWERED decay row has
+   already stripped 500 of the 504 footprint tiles to lvl 0 by the rollover
+   distress first reaches 15, and 0 of 215 developed-at-cut lots survive to
+   rollover 20. See docs/gp10b-aband-pre.json §A2: this is WHY the abandonment
+   predicate carries NO lvl guard (roadmap decision D5) and why the derelict
+   treatment has to have a level-0 form.
+
+   REVIVE_W          === DISTRESS_BANDS[0], the shipped at-risk window: six
+                     consecutive CLEAN rollovers buy a boarded lot back.
+   RENEWAL_REVIVE_W  the designation's cut — two months instead of six.
+   ABAND_SMOG        === LF_SMELL_FULL, the saturated-tip source. A derelict
+                     block smells like a capped tip. Deliberately BELOW the
+                     fire term (100) so G3's "fire is the strongest read"
+                     hierarchy survives on the pollution plane too.
+   ABAND_CRIME       === the Teen Curfew ordinance's crimeCut. Abandonment
+                     costs the city exactly what a curfew buys back. It is far
+                     under DISTRESS_T.crime (50) ON PURPOSE: crime[] is the
+                     SAME plane the DISTRESS_CAUSES CRIME row reads, so a
+                     larger constant would hold distress > 0 forever, re-arm
+                     the countdown every rollover and make blight permanent and
+                     unescapable.
+   ABAND_LV          === LF_LV_CAP, the shipped land-value penalty cap.
+   RENEWAL_PER_TILE  §/mo per zoned tile inside a designated district.
+   REZONE_DISCOUNT   mass rezone is priced against the §100/tile REZONE cost
+                     (COST.zr), never against COST.bulldoze (§1, effectively
+                     free) — clearing a derelict block is a rezoning, at a
+                     bulk discount, not a demolition. */
+const ABAND_W = DISTRESS_ABAND_W_FLOOR;  // 15 months of unbroken failure
+const REVIVE_W = DISTRESS_BANDS[0];      // 6 clear months to come back
+const RENEWAL_REVIVE_W = 2;              // ...or 2 inside a renewal district
+const ABAND_SMOG = LF_SMELL_FULL;        // 46 — the saturated-tip source
+const ABAND_CRIME = 18;                  // === ORD("curfew").mods.crimeCut
+const ABAND_LV = LF_LV_CAP;              // 12 — the shipped land-value cap
+const RENEWAL_PER_TILE = 3;              // §/mo per zoned tile designated
+const REZONE_DISCOUNT = 0.6;             // bulk rezone multiplier on COST.zr
+
 // GP6: argmax of a plane, lowest-index tie-break, optionally restricted to an
 // eligible set. Returns null when nothing eligible carries a positive value.
 function apxArgmax(a, ok) {
@@ -2361,14 +2455,23 @@ const ADVISORY_GATES = Object.freeze([
       // same lines, so distress > 0 always carries a row — but a hand-edited
       // or truncated save must degrade to a true sentence, not a throw.
       const d = c.distressAt(i);
+      // GP10b: the HONESTY CONSTRAINT above is now satisfied by NAMING the
+      // consequence rather than by withholding it. GP10a had nothing to
+      // promise; GP10b has an exact, observable window, so the copy states the
+      // months remaining as a countdown of a rule the sim really applies. It
+      // still names the observed cause and nothing else speculative.
+      const left = ABAND_W - d.n;
       return `This block has been failing for ${d.n} straight month${d.n === 1 ? "" : "s"} — ` +
         `${d.cause ? d.cause.toLowerCase() + ", " : ""}${(d.bandName || "strained").toLowerCase()}.` +
+        ` ${left > 0 ? `${left} more month${left === 1 ? "" : "s"} of this and it boards up.`
+                     : "It boards up at the next rollover."}` +
         `${d.row >= 0 ? " " + DISTRESS_CAUSES[d.row].fix : ""}`;
     },
     evid: (c, i) => {
       const d = c.distressAt(i);
       return [["Months failing", d.n], ["Cause", d.cause || "unrecorded"],
-              ["Band", d.bandName || "Strained"]];
+              ["Band", d.bandName || "Strained"],
+              ["Months to abandonment", Math.max(0, ABAND_W - d.n)]];
     } },
 
   /* GP9b: the OVERFLOW row. Same advisory-only discipline as its five siblings
@@ -2884,6 +2987,20 @@ class City {
        must NOT re-run distressTick (that would double-count a month). */
     this.distress      = new Uint8Array(n);
     this.distressCause = new Uint8Array(n);
+    /* GP10b (save v22): ABANDONMENT, in ONE plane that COUNTS DOWN.
+         aband[i] === 0   not abandoned
+         aband[i] === k>0 boarded, with k consecutive CLEAR rollovers still owed
+       That single convention carries flag semantics (`aband[i] !== 0`), the
+       hysteresis countdown, the re-arm, the renewal district's shortened
+       window and the player-facing "boarded for N more clear months" copy —
+       out of one plane and one save key, with no second plane, no second save
+       key and no history series. Authored state, exactly like distress[]: the
+       load cascade restores it and never re-runs distressTick.
+       _abandAny is the one-bit memo (the _noiseAny idiom) that keeps a
+       blight-free city's recomputeMaps arithmetic literally bit-identical. */
+    this.aband      = new Uint8Array(n);
+    this._abandAny  = 0;
+    this._renewalZoned = 0;   // Σ zoned tiles in designated districts (distressTick)
     this.poll    = new Uint8Array(n);   // pollution 0..255
     this.landv   = new Uint8Array(n);   // land value 0..255
     this.crime   = new Uint8Array(n);   // crime 0..255
@@ -3348,7 +3465,7 @@ class City {
       this.terr[i] = TERR.WATER; this.over[i] = OV.NONE; // clears rubble
       this.lvl[i] = 0; this.anc[i] = -1; this.varnt[i] = 0;
       // GP10a clear site 1/10 (waterfill): a drowned lot carries no ledger.
-      this.distress[i] = 0; this.distressCause[i] = 0;
+      this.distress[i] = 0; this.distressCause[i] = 0; this.aband[i] = 0; // GP10b: and no countdown
       this.fill[i] = 0; // GP9b fill clear 3/3 (waterfill): a flooded tip is gone
       if (this.rail[i] !== RL.NONE) { this.rail[i] = RL.NONE; this.railDirty = true; } // M25: flooding leaves no ghost line
       this.funds -= cost;
@@ -3370,7 +3487,7 @@ class City {
       // GP10a clear site 2/10 (place footprint): re-zoning or building over a
       // tile starts its ledger at zero — otherwise a fresh lot inherits a
       // stale month count from whatever failed here before.
-      this.distress[i] = 0; this.distressCause[i] = 0;
+      this.distress[i] = 0; this.distressCause[i] = 0; this.aband[i] = 0; // GP10b: and no countdown
       // GP9b fill clear 1/3 (place footprint): building over a tile — including
       // re-painting a landfill cell — starts its tip at zero, or a fresh cell
       // would inherit whatever was buried under the last one.
@@ -3438,7 +3555,7 @@ class City {
       this.fire[j] = 0; this.unpow[j] = 0;
       // GP10a clear site 3/10 (bulldoze): rides beside the fire/unpow clear
       // that has always lived on this line, for the same reason.
-      this.distress[j] = 0; this.distressCause[j] = 0;
+      this.distress[j] = 0; this.distressCause[j] = 0; this.aband[j] = 0; // GP10b: and no countdown
       // GP9b fill clear 2/3 (bulldoze): razing a tip removes the refuse with
       // it. The tonnage already disposed of is NOT returned to the backlog —
       // burying it was a one-way transaction, and un-burying it on a bulldoze
@@ -3568,7 +3685,11 @@ class City {
     let demand = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
-      if (this.powered[i] && OV_DRAWS_POWER[t]) demand++; // GP9a: M26 crossing is not a consumer; M24 water infra never draws power; M28 a self-powered mega adds ZERO net demand; GP4a an expressway/ramp never draws power — all of it now spelled once, in ovDrawsPower
+      // GP10b: `!this.aband[i]` is a DECLARED exclusion — a boarded lot draws
+      // no current. Note the measured null result it produces on the primary
+      // dark path: an abandoned tile there is already unpowered, so it was
+      // never counted and the drop is 0, not N (docs/gp10b-aband-pre.json §A5).
+      if (this.powered[i] && OV_DRAWS_POWER[t] && !this.aband[i]) demand++; // GP9a: M26 crossing is not a consumer; M24 water infra never draws power; M28 a self-powered mega adds ZERO net demand; GP4a an expressway/ramp never draws power — all of it now spelled once, in ovDrawsPower
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -3591,7 +3712,12 @@ class City {
         // it), so the cut is a PURE hash of (seed, powerEpoch, tile) — never a
         // cursor. That is exactly what makes powered[] a pure function of
         // serialized state and lets the save omit it.
-        if (this.powered[i] && OV_BROWNOUT_ELIGIBLE[t] && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // GP9a: M26 crossing isn't a consumer to brown out; M24 water infra isn't a consumer; M28 a power island can't be browned out; GP4a an expressway/ramp isn't a consumer either
+        // GP10b: an abandoned lot is not a consumer (it was excluded from
+        // `demand` above), so it is not something a brownout can cut either —
+        // DECLARED, and placed BEFORE the hash so the short-circuit is
+        // explicit. Zero-draw either way: rngHashAt is a pure (dom, epoch, i)
+        // hash, never a cursor, so skipping it consumes nothing.
+        if (this.powered[i] && OV_BROWNOUT_ELIGIBLE[t] && !this.aband[i] && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // GP9a: M26 crossing isn't a consumer to brown out; M24 water infra isn't a consumer; M28 a power island can't be browned out; GP4a an expressway/ramp isn't a consumer either
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -3619,7 +3745,7 @@ class City {
       const yh = this.rngHashKeyFor(HZ.Y2K_CUT, this.powerEpoch); // hoisted (dom, epoch) half
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
-        if (this.powered[i] && OV_FLICKER_ELIGIBLE[t] && // GP9a: GP4a concrete has no systems to flicker — see ovFlickerEligible
+        if (this.powered[i] && OV_FLICKER_ELIGIBLE[t] && !this.aband[i] && // GP9a: GP4a concrete has no systems to flicker — see ovFlickerEligible; GP10b: a boarded lot has no systems either (declared, same zero-draw argument as the brownout cut)
             this.rngHashAt(yh, i) < 0.3) // GP1b: own domain, so it can't correlate with the brownout cut in the same epoch
           this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer; M28: a power island doesn't flicker
       }
@@ -4892,7 +5018,7 @@ class City {
         // is never zoned, so it can never carry a nonzero distress byte. It is
         // written anyway so the ten destruction sites are one uniform rule
         // rather than nine plus an exception nobody re-checks after a refactor.
-        this.distress[i] = 0; this.distressCause[i] = 0;
+        this.distress[i] = 0; this.distressCause[i] = 0; this.aband[i] = 0; // GP10b
         this.roadWear[i] = 0;
         crumbled++;
       }
@@ -4957,6 +5083,11 @@ class City {
     const wasteAny = this._wasteAny;
     const bp = wasteAny
       ? Math.min(BACKLOG_POLL_CAP, this.backlogPressure() * BACKLOG_POLL_PER_MONTH) : 0;
+    /* GP10b: the same hoisted-memo discipline as `wasteAny`/`noisy` — a city
+       that has never abandoned a lot pays one hoisted read and adds a literal
+       0, so `x + 0 === x` keeps every accumulated byte identical to pre-GP10b.
+       The memo is committed by distressTick and seeded once on load. */
+    const abandAny = this._abandAny;
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       // GP5b: clean high-tech industry emits IND_CLEAN_POLL of the dirty smog.
@@ -4986,6 +5117,10 @@ class City {
       if (t === OV.INCIN && this.powered[i]) src[i] += INCIN_SMOG;
       // GP9b: uncollected rubbish on a developed block.
       if (wasteAny && bp > 0 && OV_IS_ZONE[t] && this.lvl[i] > 0) src[i] += bp;
+      // GP10b: a derelict block smells like a capped tip — fly-tipping, damp,
+      // rot. Deliberately BELOW the fire term on the next line, so a burning
+      // lot is still the strongest source on the plane (the G3 hierarchy).
+      if (abandAny && this.aband[i]) src[i] += ABAND_SMOG;
       if (this.fire[i]) src[i] += 100;
     }
     this.diffuse(src, this.poll, 3, 0.24);
@@ -5064,7 +5199,17 @@ class City {
             // discriminating between lots. Capped, so an unbounded stock is
             // still a bounded penalty, and `x - 0 === x` on a waste-free city.
             - (wasteAny && OV_IS_ZONE[this.over[i]] && this.lvl[i] > 0
-                 ? Math.min(LF_LV_CAP, bp * BACKLOG_LV) : 0);
+                 ? Math.min(LF_LV_CAP, bp * BACKLOG_LV) : 0)
+            /* GP10b: the boarded-lot land-value hole, applied HERE in the fold
+               and deliberately NOT as a negative seed in the lv[] loop above —
+               diffuse() clamps its output into a Uint8Array, so a negative seed
+               is erased before it can spread and the penalty would silently
+               vanish. Landing it per tile after the diffusion makes the hole
+               land exactly on the derelict lot; the neighbourhood reads it
+               through the pollution term, which DOES diffuse (measured: ring-1
+               land value falls ~2.9 at ABAND_SMOG=46). `x - 0 === x` on a
+               city with nothing abandoned. */
+            - (abandAny && this.aband[i] ? ABAND_LV : 0);
       this.landv[i] = Math.max(0, Math.min(255, v));
     }
 
@@ -5074,7 +5219,15 @@ class City {
       const density = (t === OV.ZR || t === OV.ZC) ? this.lvl[i] * 40 : (t === OV.ZI ? this.lvl[i] * 20 : 0);
       // M22: Neighborhood Watch / Teen Curfew add a flat crimeCut, behaving like
       // extra police coverage; the existing [0,255] clamp bounds it (0 when off).
-      const v = density - this.polCov[i] - this.landv[i] * 0.2 - this.ordMods.crimeCut;
+      // GP10b: a boarded lot is where the trouble goes, ON THE TILE ITSELF —
+      // crime[] is a pure per-tile formula and never diffuses, so there is no
+      // such thing as a crime annulus around a derelict block; what the
+      // NEIGHBOURS feel is the land-value drop the smog plume causes, which
+      // re-enters this formula through the landv term (measured ≈ +1.25 at
+      // ring 1). Inside the existing [0,255] clamp; exactly 0 with nothing
+      // abandoned. The magnitude is bounded on purpose — see ABAND_CRIME.
+      const v = density - this.polCov[i] - this.landv[i] * 0.2 - this.ordMods.crimeCut
+              + (abandAny && this.aband[i] ? ABAND_CRIME : 0);
       this.crime[i] = Math.max(0, Math.min(255, v));
     }
   }
@@ -5561,11 +5714,26 @@ class City {
     const pa = out.portAnchors || (out.portAnchors = []);
     pa.length = 0;
     for (let i = 0; i < this.over.length; i++) {
-      if (this.over[i] === OV.ZR) { pop += RES_POP[this.lvl[i]]; resTiles++;
+      /* GP10b: `&& !this.aband[i]` on the three ARM HEADS — ONE predicate, in
+         the one place the whole economy is counted. taxes are a pure function
+         of the pop/jobs this loop commits, so this single edit takes the
+         derelict lot out of the HUD, the tier ladder, the tax take AND the
+         ordinance bases (comJobs/resTiles) with no second copy anywhere.
+         GP7a's assess accumulators live INSIDE these arms and are excluded
+         with them — a boarded lot assesses nothing — and no GP7a expression is
+         edited: only the arm head, which is a GP1-era line.
+         An abandoned ZR now falls through the whole else-if chain and lands
+         nowhere (over[i] is still ZR, so it can never be mistaken for an arco
+         anchor). MEASURED HONESTY: RES_POP[0] === COM_JOB[0] === IND_JOB[0]
+         === 0 and 500 of 504 abandoned lots are at level 0, so on the primary
+         dark path this exclusion moves pop/jobs by exactly 0. The economic
+         bite of GP10b comes from the redevelopment REFUSAL in GROWTH_GATES,
+         not from the tax base — see docs/gp10b-aband-pre.json §A3. */
+      if (this.over[i] === OV.ZR && !this.aband[i]) { pop += RES_POP[this.lvl[i]]; resTiles++;
         const b = ASSESS_R[this.lvl[i]]; rBase += b; aR += b * assessAt(this.landv[i]); }
-      else if (this.over[i] === OV.ZC) { cJobs += COM_JOB[this.lvl[i]];
+      else if (this.over[i] === OV.ZC && !this.aband[i]) { cJobs += COM_JOB[this.lvl[i]];
         const b = ASSESS_C[this.lvl[i]]; cBase += b; aC += b * assessAt(this.landv[i]); }
-      else if (this.over[i] === OV.ZI) { iJobs += IND_JOB[this.lvl[i]];
+      else if (this.over[i] === OV.ZI && !this.aband[i]) { iJobs += IND_JOB[this.lvl[i]];
         const b = ASSESS_I[this.lvl[i]]; iBase += b; aI += b * assessAt(this.landv[i]); }
       else if (this.over[i] === OV.STADIUM && this.anc[i] === i) stadiums++;
       else if (this.over[i] === OV.SCHOOL && this.anc[i] === i && this.powered[i]) schools++;
@@ -5765,10 +5933,16 @@ class City {
       if (d.demR != null) m.demR += d.demR;
       if (d.demC != null) m.demC += d.demC;
       if (d.demI != null) m.demI += d.demI;
+      if (d.reviveCut != null) m.reviveCut += d.reviveCut; // GP10b
     }
     m.pollMul = Math.max(0.5, m.pollMul);
     m.trafficMul = Math.max(0.5, m.trafficMul);
     m.wasteMul = Math.max(0.5, m.wasteMul); // GP9a: same defensive floor
+    // GP10b: the same defensive discipline as the mul floors, on the other
+    // side — no stack of policies may cut the revive window to zero (which
+    // would make abandonment instantaneous-to-recover and the countdown a lie).
+    // distressTick also floors the window at 1, so this is belt and braces.
+    m.reviveCut = Math.min(REVIVE_W - 1, m.reviveCut);
     this.ordMods = m;
   }
 
@@ -5998,7 +6172,7 @@ class City {
           for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
             const j = this.idx(ax + dx, ay + dy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
-            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 5/10 (fire burnout)
+            this.distress[j] = 0; this.distressCause[j] = 0; this.aband[j] = 0; // GP10a clear site 5/10 (fire burnout)
           }
           this.powerDirty = true;
         } else if (this.terr[i] === TERR.FOREST) {
@@ -6184,7 +6358,7 @@ class City {
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
             const j = this.idx(ax + ddx, ay + ddy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
-            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 6/10 (tornado)
+            this.distress[j] = 0; this.distressCause[j] = 0; this.aband[j] = 0; // GP10a clear site 6/10 (tornado)
           }
           this.powerDirty = true;
         } else if (this.terr[i] === TERR.FOREST && rh.chance(0.4)) {
@@ -6211,7 +6385,7 @@ class City {
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
             const j = this.idx(ax + ddx, ay + ddy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
-            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 7/10 (quake)
+            this.distress[j] = 0; this.distressCause[j] = 0; this.aband[j] = 0; // GP10a clear site 7/10 (quake)
           }
           this.powerDirty = true;
         }
@@ -6246,7 +6420,7 @@ class City {
             for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
               const j = this.idx(ax + ddx, ay + ddy);
               this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
-              this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 8/10 (flood)
+              this.distress[j] = 0; this.distressCause[j] = 0; this.aband[j] = 0; // GP10a clear site 8/10 (flood)
               if (d.flooded.indexOf(j) === -1) d.flooded.push(j);
             }
             this.powerDirty = true;
@@ -6275,7 +6449,7 @@ class City {
           for (let ddy = 0; ddy < s; ddy++) for (let ddx = 0; ddx < s; ddx++) {
             const j = this.idx(ax + ddx, ay + ddy);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
-            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 9/10 (riot)
+            this.distress[j] = 0; this.distressCause[j] = 0; this.aband[j] = 0; // GP10a clear site 9/10 (riot)
           }
           this.powerDirty = true;
         }
@@ -6299,7 +6473,7 @@ class City {
           for (let ddy2 = 0; ddy2 < s; ddy2++) for (let ddx2 = 0; ddx2 < s; ddx2++) {
             const j = this.idx(ax + ddx2, ay + ddy2);
             this.over[j] = OV.RUBBLE; this.lvl[j] = 0; this.anc[j] = -1;
-            this.distress[j] = 0; this.distressCause[j] = 0; // GP10a clear site 10/10 (monster)
+            this.distress[j] = 0; this.distressCause[j] = 0; this.aband[j] = 0; // GP10a clear site 10/10 (monster)
           }
           this.powerDirty = true;
         }
@@ -6893,15 +7067,46 @@ class City {
      decision D3): `share` over zoned tiles is the honest citywide number, and
      `devShare` over built lots is what the tile wash, the advisory and the
      complaint are restricted to, because a level-0 lot has no building to
-     describe. */
+     describe.
+
+     ---- GP10b: THE CONSEQUENCE, folded into this same loop ----
+     No new pass, no second O(n) scan, and the ZERO-RNG clause above is
+     unbroken: the abandon/revive arm draws nothing at all. distressTick stays
+     the read-only ruler — it still writes only into its own planes, of which
+     there are now three.
+
+     THE STATE MACHINE, per zoned tile, AFTER the shipped counter update:
+       not abandoned + distress >= ABAND_W  ->  aband = W   (the flip)
+       abandoned     + distress === 0       ->  aband--     (a clear month)
+       abandoned     + distress  >  0       ->  aband = W   (RE-ARM, not resume)
+       aband hits 0                         ->  revived
+     W is the tile's own window: RENEWAL_REVIVE_W inside a designated district,
+     REVIVE_W outside, less the renewal ordinance's reviveCut, floored at 1.
+     The RE-ARM is the whole point of the hysteresis: a boarded lot that fails
+     again does not pick up where it left off, it starts its clear run over.
+
+     A tile that is no longer zoned drops its countdown with its ledger (the
+     non-zoned arm above) — the same rule the ten destruction sites follow. */
   distressTick() {
     const n = this.over.length;
     let zoned = 0, distressed = 0, dev = 0, devDistressed = 0;
     const byCause = [0, 0, 0, 0];
+    /* GP10b: the designation lookup, hoisted O(#districts) — one small
+       Uint8Array indexed by district id, so the per-tile cost is one district[]
+       read and one array index, never a find() over districts[]. Also carries
+       the per-district zoned tally collectBudget charges the renewal line
+       from, so the campaign's §/mo rides this existing sweep as well. */
+    const renewalById = this._renewalLut || (this._renewalLut = new Uint8Array(DIST_MAX + 1));
+    renewalById.fill(0);
+    let anyRenewal = 0;
+    for (const d of this.districts) if (d.renewal && d.id >= 0 && d.id <= DIST_MAX) { renewalById[d.id] = 1; anyRenewal = 1; }
+    const revCut = this.ordMods.reviveCut | 0;
+    let abandoned = 0, revived = 0, abandNow = 0, renewalZoned = 0, anyA = 0, touched = 0;
     for (let i = 0; i < n; i++) {
       const t = this.over[i];               // the ONE over[] read per tile
       if (t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) {
         this.distress[i] = 0; this.distressCause[i] = 0;
+        if (this.aband[i]) { this.aband[i] = 0; touched = 1; }
         continue;
       }
       zoned++;
@@ -6910,12 +7115,26 @@ class City {
       let row = -1;
       for (let g = 0; g < DISTRESS_CAUSES.length; g++)
         if (DISTRESS_CAUSES[g].test(this, i, t)) { row = g; break; }
-      if (row < 0) { this.distress[i] = 0; this.distressCause[i] = 0; continue; }
-      const v = this.distress[i] + 1;
-      this.distress[i] = v > DISTRESS_MAX ? DISTRESS_MAX : v;
-      this.distressCause[i] = row + 1;
-      distressed++; byCause[row]++;
-      if (lv > 0) devDistressed++;
+      if (row < 0) { this.distress[i] = 0; this.distressCause[i] = 0; }
+      else {
+        const v = this.distress[i] + 1;
+        this.distress[i] = v > DISTRESS_MAX ? DISTRESS_MAX : v;
+        this.distressCause[i] = row + 1;
+        distressed++; byCause[row]++;
+        if (lv > 0) devDistressed++;
+      }
+      // ---- GP10b: the abandonment arm (zero RNG, own plane only) ----
+      const inRenewal = anyRenewal && renewalById[this.district[i]];
+      if (inRenewal) renewalZoned++;
+      const W = Math.max(1, (inRenewal ? RENEWAL_REVIVE_W : REVIVE_W) - revCut);
+      if (this.aband[i]) {
+        if (this.distress[i] === 0) {
+          if (--this.aband[i] === 0) { revived++; touched = 1; }
+          else { abandNow++; anyA = 1; }
+        } else { this.aband[i] = W; abandNow++; anyA = 1; }   // RE-ARM, not resume
+      } else if (this.distress[i] >= ABAND_W) {
+        this.aband[i] = W; abandoned++; abandNow++; anyA = 1; touched = 1;
+      }
     }
     // the sweep-honesty observable: every tile on the map, every rollover
     this.distressVisits = n;
@@ -6923,7 +7142,30 @@ class City {
       zoned, distressed, share: zoned ? distressed / zoned : 0,
       dev, devDistressed, devShare: dev ? devDistressed / dev : 0,
       byCause,
+      // GP10b: DERIVED, never serialized — the same policy as every other
+      // census field here. `abandoned`/`revived` are this month's flips.
+      abandoned, revived, abandTotal: abandNow,
+      abandShare: zoned ? abandNow / zoned : 0,
     };
+    this._abandAny = anyA;
+    this._renewalZoned = renewalZoned;
+    /* A flip or a revival changes what the night layer and the growth walk
+       see, and changes powered[] bookkeeping (an abandoned lot stops drawing
+       current) — so schedule the same two refreshes every other structural
+       edit schedules. Only on an actual transition: a steady-state blighted
+       city pays nothing extra per rollover. */
+    if (touched) { this.powerDirty = true; this.devRev++; }
+  }
+
+  /* GP10b: is tile i inside a district the mayor has designated for renewal?
+     Defensive `!!d.renewal` at the read (a pre-GP10b districts[] record simply
+     has no such field), O(#districts) and called only from copy/UI paths —
+     the per-tile hot path uses distressTick's hoisted lookup instead. */
+  districtRenewal(i) {
+    const id = this.district[i];
+    if (!id) return false;
+    const d = this.districts.find((x) => x.id === id);
+    return !!(d && d.renewal);
   }
 
   /* O(1) pure read of the ledger at one tile, for the UI and the render wash.
@@ -7155,10 +7397,17 @@ class City {
     // WORKING port (a dark or cut-off terminal is charged nothing at all), so a
     // portless city's net and funds are bit-identical to pre-GP2.
     const pb = this.portsBudget();
+    /* GP10b: the RENEWAL DESIGNATION's standing charge — §RENEWAL_PER_TILE per
+       zoned tile inside every designated district, per month. The tally rides
+       distressTick's EXISTING sweep (which runs earlier in this same %24 block,
+       so the figure describes THIS month), so the campaign's §/mo costs no new
+       pass. Exactly the integer 0 with nothing designated, which is what keeps
+       every pre-GP10b funds trajectory integer-identical. */
+    const renewalCost = (this._renewalZoned | 0) * RENEWAL_PER_TILE;
     // GP9b: wasteCost joins the SAME expression — exactly the integer 0 on a
     // city with no landfill and no incinerator, so `x - 0 === x` keeps every
     // pre-GP9b net and every funds trajectory integer-identical.
-    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - wasteCost - debt + ob.net + trade + pb.net;
+    const net = taxes - roadCost - serviceCost - plantCost - waterCost - transitCost - wasteCost - renewalCost - debt + ob.net + trade + pb.net;
     this.funds += net;
     this.lastBudget = { taxes, roads: roadCost, power: plantCost, services: serviceCost,
       water: waterCost, transit: transitCost, debt, net, // M24 water / M25 transit upkeep lines
@@ -7170,6 +7419,8 @@ class City {
       ports: pb.net, portsRev: pb.rev, portsCost: pb.cost,
       // GP9b: the disposal upkeep line charged this month
       waste: wasteCost,
+      // GP10b: the renewal-designation line charged this month (0 = none designated)
+      renewal: renewalCost, renewalTiles: this._renewalZoned | 0,
       // M23: the per-department breakdown actually charged this month
       dept: { police: dc.police, fire: dc.fire, roads: dc.roads,
               edu: dc.edu, health: dc.health, water: dc.water, transit: dc.transit } };
@@ -7577,6 +7828,93 @@ class City {
     this.distRev++;
   }
 
+  /* ---------- GP10b: THE RENEWAL CAMPAIGN — three levers ----------
+     (a) DESIGNATION. `d.renewal` (plus `d.renewalSince`, the month it was
+     declared) live on the districts[] RECORD, which serializes wholesale and
+     restores through a field-preserving Object.assign — so the designation
+     rides the save for free, with NO new save key and no version test. A
+     pre-GP10b record simply has no `renewal` field and every read is written
+     defensively (`!!d.renewal`).
+     Enabling it CLAMPS every live countdown in the district down to the short
+     window immediately, so the lever reads as an intervention rather than as a
+     policy that only affects the next lot to fail. Charged monthly by
+     collectBudget at §RENEWAL_PER_TILE per zoned tile.
+     Returns the new state (false when the id is unknown). */
+  setDistrictRenewal(id, on) {
+    const d = this.districts.find((x) => x.id === id);
+    if (!d) return false;
+    const want = !!on;
+    if (!!d.renewal === want) return want;
+    if (want) {
+      d.renewal = true;
+      d.renewalSince = this.year * 12 + this.month;
+      const W = Math.max(1, RENEWAL_REVIVE_W - (this.ordMods.reviveCut | 0));
+      for (let i = 0; i < this.district.length; i++)
+        if (this.district[i] === id && this.aband[i] > W) this.aband[i] = W;
+    } else {
+      delete d.renewal; delete d.renewalSince;
+    }
+    this.distRev++;
+    return want;
+  }
+
+  /* (b) MASS CLEAR-AND-REZONE. The bulk version of what a patient mayor would
+     do by hand: doze the derelict lots and re-lay the same zone. Priced
+     against the §100/tile REZONE (COST.zr) at REZONE_DISCOUNT, NEVER against
+     COST.bulldoze — a §1 bulldoze would make the whole campaign free and the
+     "beats waiting" gate meaningless.
+     over[] is KEPT: re-laying the same zone IS the rezone. lvl/distress/
+     distressCause/aband are cleared, so the block starts from a clean sheet at
+     the next growth pass. Refuses (and charges nothing) when funds are short
+     or nothing in range is abandoned. Zero RNG.
+     Respects the M25 anchor rule by construction — a zoned tile carries
+     anc === -1 — but the guard is written out anyway so a future multi-tile
+     zone cannot silently peel a footprint. */
+  renewBlock(x0, y0, x1, y1) {
+    const ax = Math.max(0, Math.min(x0, x1)), ay = Math.max(0, Math.min(y0, y1));
+    const bx = Math.min(MAP - 1, Math.max(x0, x1)), by = Math.min(MAP - 1, Math.max(y0, y1));
+    const hits = [];
+    for (let y = ay; y <= by; y++) for (let x = ax; x <= bx; x++) {
+      const i = y * MAP + x;
+      if (!this.aband[i]) continue;
+      const t = this.over[i];
+      if (t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) continue;
+      if (this.anc[i] >= 0 && this.anc[i] !== i) continue;   // never peel a footprint
+      hits.push(i);
+    }
+    return this._renewTiles(hits);
+  }
+
+  // The whole-district form of renewBlock — same pricing, same clears.
+  rezoneDistrict(id) {
+    const hits = [];
+    for (let i = 0; i < this.district.length; i++) {
+      if (this.district[i] !== id || !this.aband[i]) continue;
+      const t = this.over[i];
+      if (t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) continue;
+      if (this.anc[i] >= 0 && this.anc[i] !== i) continue;
+      hits.push(i);
+    }
+    return this._renewTiles(hits);
+  }
+
+  // shared body: price, charge, clear. { ok, n, cost } either way.
+  _renewTiles(hits) {
+    const n = hits.length;
+    if (!n) return { ok: false, n: 0, cost: 0, why: "nothing abandoned in range" };
+    const cost = Math.round(COST.zr * n * REZONE_DISCOUNT);
+    if (this.funds < cost) return { ok: false, n, cost, why: "funds" };
+    for (let k = 0; k < n; k++) {
+      const i = hits[k];
+      this.aband[i] = 0; this.distress[i] = 0; this.distressCause[i] = 0;
+      this.lvl[i] = 0; this.unpow[i] = 0;
+    }
+    this.funds -= cost;
+    this.powerDirty = true;
+    this.devRev++;
+    return { ok: true, n, cost };
+  }
+
   deleteDistrict(id) {
     const idx = this.districts.findIndex((d) => d.id === id);
     if (idx < 0) return;
@@ -7601,6 +7939,9 @@ class City {
     // GP10a: the distress ledger folded into the EXISTING single pass — two
     // counters and a 4-slot cause tally, all pure plane reads.
     let distressed = 0, distressedDev = 0;
+    // GP10b: the boarded count and its zoned denominator, folded into the same
+    // single pass — two more plane reads, no new scan.
+    let abandoned = 0, zonedTiles = 0;
     const causeN = [0, 0, 0, 0];
     for (let i = 0; i < this.district.length; i++) {
       if (this.district[i] !== id) continue;
@@ -7616,6 +7957,7 @@ class City {
       sumEdu += this.eduCov[i]; sumMed += this.medCov[i];
       sumPol += this.polCov[i]; sumFire += this.fireCov[i];
       if (ov === OV.ROAD || ov === OV.WIREROAD) { sumTraffic += this.traffic[i]; roadTiles++; }
+      if (this.aband[i]) abandoned++;
       if (ov === OV.ZR) { zr++; if (lv > 0) { pop += RES_POP[lv]; developed++; if (this.powered[i]) poweredDev++; } }
       else if (ov === OV.ZC) { zc++; if (lv > 0) { jobs += COM_JOB[lv]; developed++; if (this.powered[i]) poweredDev++; } }
       else if (ov === OV.ZI) { zi++; if (lv > 0) { jobs += IND_JOB[lv]; developed++; if (this.powered[i]) poweredDev++; } }
@@ -7631,9 +7973,15 @@ class City {
     let dominantCause = "None", cBest = 0;
     for (let k = 0; k < causeN.length; k++)
       if (causeN[k] > cBest) { cBest = causeN[k]; dominantCause = DISTRESS_CAUSES[k].label; }
+    zonedTiles = zr + zc + zi;
+    const dRec = this.districts.find((x) => x.id === id);
     return {
       tiles, developed, pop, jobs,
       distressed, distressedDev, dominantCause,
+      // GP10b: the district's blight cut and its renewal designation
+      abandoned, zoned: zonedTiles,
+      renewal: !!(dRec && dRec.renewal),
+      renewalCost: (dRec && dRec.renewal) ? zonedTiles * RENEWAL_PER_TILE : 0,
       landv: avg(sumLv), poll: avg(sumPoll), crime: avg(sumCrime),
       edu: avg(sumEdu), med: avg(sumMed), pol: avg(sumPol), fire: avg(sumFire),
       traffic: roadTiles ? Math.round(sumTraffic / roadTiles) : 0,
@@ -7719,7 +8067,7 @@ class City {
        simply carries neither key, unpackU8 no-ops, and the city loads with an
        all-zero ledger that starts counting at its next rollover. */
     return JSON.stringify({
-      v: 21, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 22, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,
@@ -7836,6 +8184,27 @@ class City {
          the city loads with an all-zero fill plane and a zero backlog — i.e.
          with NO retroactive overflow penalty. */
       fill: packU8(this.fill), garbageBacklog: this.garbageBacklog,
+      /* ---- GP10b (save v22) ---- appended STRICTLY AFTER garbageBacklog under
+         the ladder rule, so the ENTIRE v21 prefix of the payload above stays
+         character-stable. ONE key, and only one: the countdown plane.
+           aband  0 = not abandoned, k>0 = boarded with k clear rollovers owed.
+                  AUTHORED state, exactly like distress[] — how far through its
+                  recovery a boarded lot has got IS accumulated history, and a
+                  rebuild would either hand the player back a healthy block or
+                  restart every countdown from scratch. Mostly-zero small-valued
+                  Uint8: packU8's sparse mode-3 workload.
+         The DESIGNATION needs no key at all — `renewal`/`renewalSince` ride the
+         wholesale districts[] serialization above and the field-preserving
+         Object.assign restore (measured byte-intact through three round trips).
+         _abandAny and distressCensus.aband* are DERIVED: deserialize seeds the
+         memo with one O(n) scan, the census republishes at the next rollover.
+         The version literal is LIVE+1 (21 -> 22): GP9b already emits 21 from
+         this tree, so 21 cannot be reclaimed without two structurally different
+         payloads sharing an integer. No `v === 22` test anywhere in
+         deserialize: a pre-v22 save simply carries no `aband` key, unpackU8
+         no-ops, and the city loads with nothing boarded — i.e. with NO
+         retroactive blight. */
+      aband: packU8(this.aband),
     });
   }
 
@@ -8042,6 +8411,22 @@ class City {
     unpackU8(d.fill, c.fill);
     if (typeof d.garbageBacklog === "number") c.garbageBacklog = d.garbageBacklog;
     c.recomputeWasteDerived();
+    /* GP10b (save v22): the abandonment countdown plane, restored beside the
+       overlays above under the identical defensive contract — unpackU8 REJECTS
+       a malformed/absent pack and leaves the ctor's zeroed plane standing, so a
+       pre-v22 save loads with nothing boarded and no `v === 22` test is needed
+       anywhere. Placed BEFORE the recomputeMaps below, which is where the
+       pollution / land-value / crime terms read it, and BEFORE recomputeDemand,
+       whose census excludes boarded lots — get it backwards and the first
+       post-load frame shows a blight-free map on a blighted save.
+       The _abandAny memo is seeded here by the ONE new O(n) walk GP10b adds
+       anywhere, and it is a one-shot on the load path, never per tick.
+       distressTick is deliberately NOT re-run (the GP10a rule: re-sweeping on
+       load would count the saved month twice). */
+    unpackU8(d.aband, c.aband);
+    let aa = 0;
+    for (let i = 0; i < c.aband.length; i++) if (c.aband[i]) { aa = 1; break; }
+    c._abandAny = aa;
     /* GP3b (save v14): overlay the two commute scalars the cascade's
        recomputeTraffic just re-derived — its rebuild ran against lvl[] that
        may sit up to 4 ticks past trafficEpoch, so the recomputed values can

@@ -851,7 +851,10 @@ const MM_LEGENDS = {
   // carries its month edge — this overlay draws from render.js BLIGHT_MIN (3
   // consecutive failing months), not from month one, and a legend that did not
   // say so would be describing a different picture than the one on screen.
-  blight: '<i class="sw" style="background:#2e3a44"></i>healthy <i class="sw" style="background:#e34a22"></i>strained 3+ <i class="sw" style="background:#ff7f66"></i>at risk 6+ <i class="sw" style="background:#ffbaa8"></i>critical 12+ <i class="sw" style="background:#013"></i>water',
+  // GP10b: the fifth swatch — abandoned — appended in the SAME edit as
+  // render.js's MM_BLIGHT_BANDS (the one-edit rule). No new mode, so MM_NAMES
+  // and the chip strip are untouched.
+  blight: '<i class="sw" style="background:#2e3a44"></i>healthy <i class="sw" style="background:#e34a22"></i>strained 3+ <i class="sw" style="background:#ff7f66"></i>at risk 6+ <i class="sw" style="background:#ffbaa8"></i>critical 12+ <i class="sw" style="background:#8c7ba8"></i>abandoned <i class="sw" style="background:#013"></i>water',
 };
 
 // GP5a: legend mode names — with 15 map modes the abbreviated buttons alone
@@ -1295,6 +1298,9 @@ function fillBudgetTable() {
     <tr><td>Power plants</td><td>${f(-dc.plants)}</td></tr>
     <tr><td>Water system</td><td>${f(-dc.water)}</td></tr>
     <tr><td>Waste disposal</td><td>${f(-dc.waste)}</td></tr>
+    <!-- GP10b: the renewal-designation line, beside waste. Reads the figure
+         collectBudget actually charged (0 with nothing designated). -->
+    <tr><td>Renewal districts${b.renewalTiles ? ` (${b.renewalTiles} lots)` : ""}</td><td>${f(-(b.renewal || 0))}</td></tr>
     <tr><td>Transit (${fd.transit}%)</td><td>${f(-dc.transit)}</td></tr>
     <tr><td>City ordinances</td><td>${f(city.ordinanceBudget().net)}</td></tr>
     <tr><td>Regional power trade</td><td>${f(city.lastBudget.trade || 0)}</td></tr>
@@ -1474,8 +1480,15 @@ function fillDistricts() {
   // button enable/disable states
   const has = UI.curDistrict > 0;
   document.getElementById("dist-new").disabled = city.districts.length >= DIST_MAX;
-  for (const b of ["dist-rename", "dist-color", "dist-delete", "dist-jump"])
+  // GP10b: the two campaign levers ride the same has-a-district enable rule
+  for (const b of ["dist-rename", "dist-color", "dist-delete", "dist-jump",
+                   "dist-renewal", "dist-rezone"])
     document.getElementById(b).disabled = !has;
+  if (has) {
+    const dd = city.districts.find((x) => x.id === UI.curDistrict);
+    document.getElementById("dist-renewal").textContent =
+      dd && dd.renewal ? "End Renewal" : "Renewal";
+  }
   // stats panel
   fillDistrictStats();
 }
@@ -1512,6 +1525,14 @@ function fillDistrictStats() {
     // districtStats accumulates in its existing single pass.
     `<tr><td>Distressed lots</td><td>${s.distressedDev} of ${s.developed} developed` +
     `${s.distressed ? ` · ${s.dominantCause}` : ""}</td></tr>` +
+    // GP10b: the boarded count against the district's ZONED footprint (the
+    // ledger's own denominator — a level-0 abandoned lot is still abandoned),
+    // plus the renewal designation and its live monthly charge.
+    `<tr><td>Abandoned</td><td>${s.abandoned} of ${s.zoned} zoned</td></tr>` +
+    `<tr><td>Renewal</td><td>${s.renewal
+      ? `designated · §${s.renewalCost.toLocaleString()}/mo · lots come back in ` +
+        `${Math.max(1, RENEWAL_REVIVE_W - (city.ordMods.reviveCut | 0))} clear months`
+      : `not designated (§${(s.zoned * RENEWAL_PER_TILE).toLocaleString()}/mo)`}</td></tr>` +
     `<tr class="total"><td colspan="2" class="dim">${quip}</td></tr>`;
 }
 
@@ -1557,6 +1578,49 @@ function bindDistricts() {
   });
   document.getElementById("dist-paint").addEventListener("click", () => {
     setTool("district"); hideDlg("dlg-districts"); Snd.click();
+  });
+  /* GP10b: the DESIGNATION toggle. Charged monthly by collectBudget at
+     §RENEWAL_PER_TILE per zoned tile, so the status line quotes the bill the
+     mayor is signing up for rather than leaving it to the budget dialog. */
+  document.getElementById("dist-renewal").addEventListener("click", () => {
+    if (!UI.curDistrict) return;
+    const d = city.districts.find((x) => x.id === UI.curDistrict);
+    if (!d) return;
+    const on = city.setDistrictRenewal(UI.curDistrict, !d.renewal);
+    const s = city.districtStats(UI.curDistrict);
+    Snd.click();
+    setStatus(on
+      ? `🏗️ ${d.name} designated for renewal — §${(s.zoned * RENEWAL_PER_TILE).toLocaleString()}/mo, ` +
+        `boarded lots come back in ${Math.max(1, RENEWAL_REVIVE_W - (city.ordMods.reviveCut | 0))} clear months.`
+      : `🏗️ Renewal ended in ${d.name}.`);
+    fillDistricts();
+  });
+  /* GP10b: MASS CLEAR-AND-REZONE. Confirms first (it razes buildings and
+     charges real money), prices through the sim so the dialog can never
+     disagree with the ledger, and reports the refusal reason on the denied
+     path instead of silently doing nothing. */
+  document.getElementById("dist-rezone").addEventListener("click", () => {
+    if (!UI.curDistrict) return;
+    const d = city.districts.find((x) => x.id === UI.curDistrict);
+    if (!d) return;
+    const s = city.districtStats(UI.curDistrict);
+    if (!s.abandoned) { Snd.denied(); setStatus("⛔ Nothing abandoned in that district."); return; }
+    const price = Math.round(COST.zr * s.abandoned * REZONE_DISCOUNT);
+    uiConfirm(`Clear and re-zone ${s.abandoned} abandoned lot${s.abandoned === 1 ? "" : "s"} ` +
+      `in ${d.name} for §${price.toLocaleString()}?`, () => {
+      const r = city.rezoneDistrict(UI.curDistrict);
+      if (!r.ok) {
+        Snd.denied();
+        setStatus(r.why === "funds"
+          ? `⛔ Not enough funds — clearing ${r.n} lots costs §${r.cost.toLocaleString()}.`
+          : "⛔ Nothing abandoned in that district.");
+        return;
+      }
+      Snd.bulldoze();
+      setStatus(`🏗️ ${r.n} lot${r.n === 1 ? "" : "s"} cleared and re-zoned in ${d.name} for ` +
+        `§${r.cost.toLocaleString()} — the ground is ready to build on again.`);
+      fillDistricts();
+    });
   });
 }
 
@@ -1642,7 +1706,15 @@ function buildAlmanacRows() {
         `${city.distressCensus.zoned} zoned lots failing ` +
         `(${Math.round(city.distressCensus.share * 100)}%) · ` +
         `${city.distressCensus.devDistressed} of ${city.distressCensus.dev} built ` +
-        `(${Math.round(city.distressCensus.devShare * 100)}%)</td></tr>`
+        `(${Math.round(city.distressCensus.devShare * 100)}%) · ` +
+        // GP10b: the boarded count against the SAME zoned denominator the line
+        // already uses, plus this month's two flips — so the reader can see
+        // whether the city is losing lots or winning them back right now.
+        `${city.distressCensus.abandTotal || 0} abandoned ` +
+        `(${Math.round((city.distressCensus.abandShare || 0) * 100)}%)` +
+        `${city.distressCensus.abandoned || city.distressCensus.revived
+          ? ` · +${city.distressCensus.abandoned || 0} / −${city.distressCensus.revived || 0} this month` : ""}` +
+        `</td></tr>`
       : `<tr><td colspan="5">Blight: — (not swept yet — the ledger reads at ` +
         `the month rollover)</td></tr>`);
 }
@@ -2071,11 +2143,20 @@ function renderQuery() {
   // isCleanInd() the pollution source, the tax premium and spriteFor read.
   const industryRow = city.over[i] === OV.ZI
     ? `<tr><td>Industry</td><td>${city.isCleanInd() ? "High-tech (clean)" : "Conventional"}</td></tr>` : "";
+  /* GP10b: the boarded-lot row — the countdown, stated as a number, plus the
+     renewal designation when one applies. Two plane reads and one O(#districts)
+     lookup, and ONLY on an abandoned tile, so a healthy city's query panel is
+     character-identical to pre-GP10b. */
+  const abandRow = city.aband[i]
+    ? `<tr><td>Abandoned</td><td>🪧 boarded · ${city.aband[i]} clear month` +
+      `${city.aband[i] === 1 ? "" : "s"} owed` +
+      `${city.districtRenewal(i) ? " · renewal district" : ""}</td></tr>` : "";
   document.getElementById("query-table").innerHTML = `
     <tr><td>Tile</td><td>${x}, ${y}</td></tr>
     <tr><td>Terrain</td><td>${terrName}</td></tr>
     <tr><td>Zone/Building</td><td>${ovName}${city.lvl[i] ? " (level " + city.lvl[i] + ")" : ""}</td></tr>
     ${industryRow}
+    ${abandRow}
     ${plantRow}
     ${waterProvRow}
     ${megaRow}
@@ -2588,7 +2669,15 @@ function hoverReadout() {
   const advis = v && v.advisories && v.advisories.length
     ? v.advisories.map(a => " " + ({ crit: "⛔", warn: "⚠", ok: "ℹ" }[a.severity] || "⚠") +
         " " + GATE_LABEL[a.code]).join("") : "";
-  const text = `(${h.x}, ${h.y}) ${what}${lvl}${mark ? " — " + mark : ""}${advis}`;
+  /* GP10b: the boarded lot carries its COUNTDOWN into the status bar, not just
+     its label. GATE_LABEL already supplies the word "Abandoned" through the
+     verdict `mark` above (free — the ABANDONED row is a GROWTH_GATES row), but
+     the number is the actionable half: it is what tells the mayor whether
+     fixing the cause now still gets the block back. Pure plane read off the
+     SAME memoized entry, zero extra diagnoseTile calls. */
+  const board = city.aband[i]
+    ? ` · ${city.aband[i]} clear month${city.aband[i] === 1 ? "" : "s"} owed` : "";
+  const text = `(${h.x}, ${h.y}) ${what}${lvl}${mark ? " — " + mark : ""}${board}${advis}`;
   hoverMemo = { key, text, city };
   return text;
 }

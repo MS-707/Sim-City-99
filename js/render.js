@@ -1002,6 +1002,15 @@ function renderFrame(city, uiState, clearBG) {
             // G3: burning buildings char — darkened while city.fire[i] is
             // set, reverting the moment the fire ends
             if (city.fire[i]) drawChar(spr, wx, wy);
+            // GP10b: the BOARDED treatment, inserted between fire and the
+            // blight wash in strict precedence order. Fire still dominates
+            // (an `else`), and a boarded lot is never ALSO washed — abandonment
+            // is a terminal state, not the fourth rung of the distress ladder.
+            // Two forms, because 500 of 504 measured abandoned lots are at
+            // level 0: a building gets boarded, an empty lot gets its zone
+            // marker boarded. Pure function of city.aband[i] + city.lvl[i], so
+            // all four rotations are free (M32a/b).
+            else if (city.aband[i]) drawBoarded(spr, wx, wy, city.lvl[i] > 0);
             // GP10a: the blight wash — a lot that has been failing for months
             // grimes over. FIRE DOMINATES (an `else`): a burning building must
             // keep the char as its single unambiguous read. Skipped at level 0
@@ -1054,7 +1063,13 @@ function renderFrame(city, uiState, clearBG) {
             // the ground pool — unless the tile in front blocks the spill
             if (ov === OV.ROAD || ov === OV.WIREROAD || ov === OV.XWAY || ov === OV.RAMP) { // M26: crossing gets a street lamp like a road; GP4a: highway lighting rides the same additive lamp (night-layer key already includes devRev)
               nightAdd(SPR.lamp, wx, wy);
-            } else if (spr && spr.night && city.powered[i] && !city.fire[i]) {
+              // GP10b: `!city.aband[i]` — a boarded lot contributes literally
+              // ZERO to the night layer. ONE condition, and deliberately not a
+              // dimming: nobody is home. nightPunch above STAYS (the shell
+              // still occludes glow behind it), so G1/G2 legibility is
+              // untouched and the night-layer cache key is unchanged — the
+              // devRev bump distressTick raises on a flip is what invalidates it.
+            } else if (spr && spr.night && city.powered[i] && !city.fire[i] && !city.aband[i]) {
               // (burning buildings show fire, not tidy lit windows — G3)
               nightAdd(spr.night, wx, wy);
               if (spr.pool && !poolBlocked(city, x, y))
@@ -1431,6 +1446,77 @@ function drawBlight(spr, wx, wy, band) {
   ctx.globalAlpha = BLIGHT_ALPHA[band];
   ctx.drawImage(spr.blight, wx - spr.ox, wy - spr.oy);
   ctx.globalAlpha = 1;
+}
+
+/* GP10b S4: the BOARDED treatment — the drawChar/drawBlight cache tier exactly
+   ONE entry wider (`spr.aband`), and for the same structural reason: a new
+   sprite BAKE would consume ART_RNG/R() draws and re-pin every frozen sprite
+   anchor downstream of it. This path bakes nothing, draws no random numbers
+   and is a pure function of (aband[i], lvl[i]) — so all four camera rotations
+   and all four seasons are free and the shipped sprite set is byte-unchanged.
+   Day-layer only; the night side is one `!city.aband[i]` in the tile loop.
+
+   TWO FORMS, and the level-0 form is MANDATORY, not decorative. The measured
+   truth (docs/gp10b-aband-pre.json §A2) is that the shipped UNPOWERED decay
+   strips a failing lot to level 0 LONG before it reaches the 15-month window:
+   500 of 504 tiles on the pinned dark fixture abandon as EMPTY LOTS. A
+   treatment that only boarded buildings would therefore be invisible on 99% of
+   the blight it is supposed to describe.
+     lvl > 0  the sprite's own silhouette refilled (source-in) with a grey
+              condemned-hoarding colour at BOARD_ALPHA — heavier than
+              BLIGHT_ALPHA[2] (0.52), so the ladder ends somewhere new rather
+              than at "a slightly dirtier critical lot" — plus the planks.
+     lvl = 0  the 64x32 zone marker (1328 opaque px measured) takes the same
+              silhouette fill; the planks then cross the empty lot like a
+              hoarding around a cleared site.
+   THE PLANKS are drawn live in SCREEN space at FIXED offsets from the tile
+   origin — no sprite, no cache, no randomness, and no rotation term, so an
+   X of boards reads identically at cam.r 0..3 (the tile diamond is rotationally
+   symmetric about its own centre, which is exactly why a fixed-offset cross
+   works here and a directional mark would not). */
+const BOARD_ALPHA = 0.66;
+const BOARD_WOOD = "#6b5334";      // weathered pine hoarding
+const BOARD_FILL = "#3b3a36";      // condemned grey, cooler than blight's soot
+function drawBoarded(spr, wx, wy, built) {
+  if (!spr.aband) {
+    const c = document.createElement("canvas");
+    c.width = spr.c.width; c.height = spr.c.height;
+    const g = c.getContext("2d");
+    g.drawImage(spr.c, 0, 0);
+    g.globalCompositeOperation = "source-in";
+    g.fillStyle = BOARD_FILL;
+    g.fillRect(0, 0, c.width, c.height);
+    spr.aband = c;
+  }
+  ctx.globalAlpha = BOARD_ALPHA;
+  ctx.drawImage(spr.aband, wx - spr.ox, wy - spr.oy);
+  ctx.globalAlpha = 1;
+  // the planks: two crossed boards on a building's face, a low hoarding rail
+  // across an empty lot. Fixed offsets, integer widths, no state.
+  ctx.save();
+  ctx.strokeStyle = BOARD_WOOD;
+  ctx.lineCap = "butt";
+  if (built) {
+    const h = Math.min(30, Math.max(12, (spr.c.height - HH) * 0.5));
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(wx - 13, wy - h - 6); ctx.lineTo(wx + 13, wy - h + 8);
+    ctx.moveTo(wx - 13, wy - h + 8); ctx.lineTo(wx + 13, wy - h - 6);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(wx - 15, wy - 4); ctx.lineTo(wx + 15, wy - 4);
+    ctx.stroke();
+  } else {
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(wx - 16, wy - 3); ctx.lineTo(wx + 16, wy - 3);
+    ctx.moveTo(wx - 16, wy + 4); ctx.lineTo(wx + 16, wy + 4);
+    ctx.moveTo(wx - 10, wy - 8); ctx.lineTo(wx - 10, wy + 8);
+    ctx.moveTo(wx + 10, wy - 8); ctx.lineTo(wx + 10, wy + 8);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // flames as three stacked hue bands — wide dark-red base, orange mid,
@@ -2191,6 +2277,14 @@ function distColLookup(city) {
 function drawDistrictTint(city, minWX, maxWX, minWY, maxWY) {
   if (!city.districts.length) return;
   const col = distColLookup(city);
+  /* GP10b: which ids are designated for renewal, resolved ONCE per pass off
+     the same districts[] the colour lookup walks (defensive `!!d.renewal`, so
+     a pre-GP10b record simply reads false). Nothing here reads cam or cam.r —
+     the chevron is stamped at fixed offsets from the tile's own world origin,
+     so all four rotations paint the identical mark. */
+  const ren = [];
+  let anyRen = false;
+  for (const d of city.districts) if (d.renewal) { ren[d.id] = true; anyRen = true; }
   ctx.globalAlpha = 0.16;
   for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
     const id = city.district[y * MAP + x];
@@ -2202,6 +2296,23 @@ function drawDistrictTint(city, minWX, maxWX, minWY, maxWY) {
     ctx.moveTo(wx, wy - HH); ctx.lineTo(wx + HW, wy);
     ctx.lineTo(wx, wy + HH); ctx.lineTo(wx - HW, wy);
     ctx.closePath(); ctx.fill();
+  }
+  // the renewal hatch: a second, brighter pass so a designated neighbourhood
+  // reads as UNDER WORKS rather than merely as a different colour — the
+  // construction-hoarding chevron, on the same tiles, in the same world space.
+  if (anyRen) {
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = "#ffd27a";
+    ctx.lineWidth = 2;
+    for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+      const id = city.district[y * MAP + x];
+      if (!id || !ren[id]) continue;
+      const wx = worldX(x, y), wy = worldY(x, y);
+      if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
+      ctx.beginPath();
+      ctx.moveTo(wx - 12, wy + 4); ctx.lineTo(wx, wy - 4); ctx.lineTo(wx + 12, wy + 4);
+      ctx.stroke();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -2452,7 +2563,19 @@ const MM_WASTE_BANDS = ["#14240f", "#7a4a12", "#a08a52", "#e39a5e", "#f0e4c0"];
    Re-derived against every shipped band ramp: nearest waste entry now 41.5 /
    26.2 / 25.9, nearest value 71.3 / 60.4 / 51.1, nearest risk 48.3 / 44.4 /
    21.6, and the cool healthy swatch is unchanged at 24.5 from waste. */
-const MM_BLIGHT_BANDS = ["#2e3a44", "#e34a22", "#ff7f66", "#ffbaa8"];
+/* GP10b: the FIFTH swatch, appended — ABANDONED, and it deliberately steps OFF
+   the scorch ramp instead of extending it. The three distress bands are a
+   HEAT ladder (a lot getting hotter); abandonment is a different KIND of
+   state, not a hotter one, so it takes a desaturated condemned violet-grey
+   that reads as "switched off" beside the ramp rather than as its top rung —
+   the same argument that makes the boarded treatment a grey fill rather than a
+   heavier soot wash. It sits at the END of the array so every existing index
+   (0 healthy, 1..3 = 1 + distressBand) is untouched. MM_LEGENDS.blight in
+   ui.js gains its swatch in the SAME edit (the one-edit rule); NO new mode and
+   no new chip, so the pending minimap-strip overflow decision stays out of
+   this milestone entirely. */
+const MM_BLIGHT_BANDS = ["#2e3a44", "#e34a22", "#ff7f66", "#ffbaa8", "#8c7ba8"];
+const MM_ABAND = 4;
 
 /* GP8a: the Risk band buffer, memoised in MODULE scope — deliberately NOT a
    field on City. That is what makes GP8a's read-only proof structural: the
@@ -2667,8 +2790,15 @@ function renderMinimap(city, mode) {
          floor a zoned lot takes the healthy swatch — it is failing, and every
          COUNTING surface (hover, district row, almanac, graph) says so from
          month one; the two PICTURE surfaces wait for the quarter. */
+      /* GP10b: the boarded lot takes the fifth swatch and takes it FIRST —
+         a terminal state outranks the ladder it came off, exactly as the tile
+         treatment makes abandonment an `else if` above the wash rather than a
+         fourth alpha rung. It is NOT subject to BLIGHT_MIN: the ledger's
+         expression floor exists so a one-month dip does not paint the map, and
+         abandonment is fifteen months old by construction. */
       const dn = city.distress[i];
-      col = dn >= BLIGHT_MIN ? MM_BLIGHT_BANDS[1 + distressBand(dn)]
+      col = city.aband[i] ? MM_BLIGHT_BANDS[MM_ABAND]
+        : dn >= BLIGHT_MIN ? MM_BLIGHT_BANDS[1 + distressBand(dn)]
         : apxZone(city, i) ? MM_BLIGHT_BANDS[0]
         : (city.terr[i] === TERR.WATER ? "#013" : "#111");
     } else if (mode === "dist") {

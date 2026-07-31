@@ -6,6 +6,58 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
+- **GP10b — Abandonment & the Renewal Campaign** *(built, verification
+  incomplete)*: the BEHAVIOUR half of GP10. GP10a shipped a ruler that counted
+  decline and promised nothing; GP10b is the consequence it was built to
+  measure. **One plane, counting down**: `aband[i] === 0` means not abandoned,
+  `aband[i] === k > 0` means boarded with *k consecutive clear rollovers still
+  owed* — which gets flag semantics, the hysteresis countdown, the re-arm, the
+  renewal district's shortened window and the player-facing copy out of one
+  plane and one save key (**v22** — LIVE+1; GP9b already emits 21 from this
+  tree, so `GP10a+1` would have made two structurally different payloads share
+  an integer, and that collision is **recorded, not silently resolved**). Every
+  constant is pinned to a shipped analogue rather than picked: `ABAND_W` = 15
+  (`DISTRESS_ABAND_W_FLOOR`, GP10a's own forward constraint, at its floor),
+  `REVIVE_W` = 6 (`DISTRESS_BANDS[0]`), `ABAND_SMOG` = `LF_SMELL_FULL`,
+  `ABAND_CRIME` = the Teen Curfew's `crimeCut`, `ABAND_LV` = `LF_LV_CAP`.
+  **The measurement that decided the design**: the *shipped* `UNPOWERED` decay
+  strips a failing lot to level 0 long before its distress counter reaches 15,
+  so a `lvl > 0` abandonment guard would make abandonment a few-percent
+  curiosity — and scope §1's justification for it ("the tile keeps `lvl[]` so
+  the derelict sprite has a size") was **already false on HEAD** before this
+  milestone touched anything. Hence **no level guard**, and hence the derelict
+  treatment has **two forms**: a boarded building, and a boarded *empty lot* —
+  the shipped blight wash measures **0.00%** of the bbox at level 0, the new
+  level-0 hoarding measures **17.32%** against a 2% bar. `ABANDONED` is
+  inserted at `GROWTH_GATES` **index 1**, above `UNPOWERED`, because
+  `diagnoseTile` reports `firstGate`'s row as the *primary* verdict and every
+  abandoned tile on the dark path is also unpowered — a row below it could
+  never say the word. That placement skips a real gridlock draw on *powered*
+  abandoned lots, which is the entire declared re-pin, and it is fenced
+  exactly: over the full 20-seed corpus the first differing byte lands at tick
+  **360** and the first abandonment at tick **359**, 20 of 20, zero tolerance.
+  The campaign is three levers priced against real sinks — a **district
+  designation** (§3/mo per zoned tile, cuts the recovery window from 6 clear
+  months to 2, and rides the existing `districts[]` round-trip with *no* new
+  save key), a **mass clear-and-rezone** (`round(COST.zr × n × 0.6)`, priced
+  against the §100/tile rezone and never against the §1 bulldoze), and a 7th
+  ordinance whose `reviveCut` needed **both** halves of the closed effect-cache
+  key set or it would have been silently ignored. Measured hysteresis:
+  undesignated latency **exactly 6**, designated **exactly 2**, and a lot that
+  fails again **re-arms** rather than resuming. `ABAND_CRIME` feeds the same
+  `crime[]` plane the distress `CRIME` row reads, so a value over 50 would have
+  made blight permanent and unescapable — at 18 the boarded stock falls 983 →
+  162 within twelve rollovers of the cause being removed. **The economic bite
+  is honestly reported**: `RES_POP[0]` is 0 and nearly every abandoned lot is
+  at level 0, so the census exclusion moves pop and jobs by *exactly zero* on
+  the primary path; the cost comes from the redevelopment **refusal** — today a
+  neighbourhood left dark for 18 months rebuilds itself for free in about five.
+  Pre-measurement, the fixtures and every number live in
+  `docs/gp10b-aband-pre.json`, which also records **one refuted gate
+  precondition** (C1 assumed no corpus seed abandons unsabotaged; all 20 do, at
+  rollover 15 exactly, because the pinned build script leaves ~943 zoned tiles
+  chronically dark) and the gates this pass did **not** run.
+
 - **GP9b — Somewhere To Put It** *(built, awaiting verification)*: the
   BEHAVIOUR half of GP9. GP9a published a garbage *ruler* and deliberately
   consumed none of it; GP9b gives the tonnage a destination, a stock and a

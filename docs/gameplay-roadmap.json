@@ -1371,6 +1371,48 @@
       "priority_rank": 18,
       "touches_save_format": true,
       "status": "todo",
+      "implementation_record": {
+        "landed_against": "127e74a (js tree c773c624dd0ffe2f141f5379434222ab8af45c24)",
+        "pre_measurement_artifact": "docs/gp10b-aband-pre.json",
+        "process_deviation": "C0 could not be satisfied: the pass ran under an explicit do-NOT-commit instruction, so the pre-artifact and the code share one working tree with no commit boundary. C0's second clause (git rev-parse HEAD:js === c773c624) WAS checked before any edit landed. Reported, not claimed.",
+        "save_version_shipped": 22,
+        "save_version_note": "LIVE+1. GP9b already emits 21 from this tree, so the plan's second rule (GP10a+1 = 21) would have made two structurally different payloads share an integer. Decision D6 resolved to 22 and is recorded in the artifact rather than resolved silently.",
+        "new_state": "ONE Uint8 plane, aband[] \u2014 0 = not abandoned, k>0 = boarded with k consecutive clear rollovers still owed. The designation (d.renewal / d.renewalSince) rides the existing districts[] round-trip and adds NO save key. Zero new history series, so both normaliseHistory copies stay untouched.",
+        "growth_gates": "ABANDONED inserted at index 1 (after BURNING, before UNPOWERED), stop:true / apply:null. The placement is forced by the primary-verdict requirement and is the entire source of the declared bounded re-pin.",
+        "campaign_levers": [
+          "setDistrictRenewal(id, on)",
+          "rezoneDistrict(id) / renewBlock(x0,y0,x1,y1)",
+          "the 7th ORDINANCES row \"renewal\" (reviveCut 2, demR 0.04)"
+        ],
+        "gates_measured_and_passing": [
+          "C1 fence: 20/20 corpus seeds, firstDiffTick 360 >= firstAbandTick 359, zero tolerance",
+          "C3 hysteresis: undesignated latency === REVIVE_W (6) exactly; designated latency === RENEWAL_REVIVE_W (2) exactly on 420/423; re-arm confirmed; no permanent blight (983 -> 162 boarded over 12 rollovers once the cause was removed)",
+          "C6 pricing identities: rezone charge === round(COST.zr x n x REZONE_DISCOUNT) exactly; lastBudget.renewal === zoned x RENEWAL_PER_TILE exactly",
+          "C7 ordinance effect-cache (both edits landed) and Object.keys(OV).length === OV_NAMES.length === 36",
+          "C8 browser: 4 rotations, level-0 boarded form 17.32% of bbox against a 2% bar (the shipped wash is 0.00% there), night layer strictly darker at all 4 rotations, 0 canvases created per frame in steady state, 0 console errors",
+          "C10 (a) v === LIVE+1 and 0 version-equality tests, (b) a v21 save loads with sum(aband) === 0, (c) s1 === s2 === s3, (f) designation survives round-trip, (h) 0 console errors",
+          "C11 diagnoseTile returns ABANDONED as the PRIMARY verdict on both the lvl>0 and the lvl===0 lot",
+          "C12 the countdown integer and the word Abandoned render at hover, query verdict box, query info table, district readout and almanac"
+        ],
+        "gates_NOT_run": [
+          "C0 clause 1",
+          "C2",
+          "C4",
+          "C5",
+          "C6 horizon arm",
+          "C9",
+          "C10 (d)(e)(g)",
+          "C13 wall-time and blighted-save-size"
+        ],
+        "gate_precondition_refuted": "C1 Arm A assumed no corpus seed abandons unsabotaged at 600 ticks. MEASURED: all 20 do, at rollover 15 exactly \u2014 the pinned build_script deliberately leaves ~943 zoned tiles chronically dark (distressCensus.byCause[0]), so the 15-month window fires with no sabotage at all. The meaningful clause (first divergence never precedes first abandonment) holds 20/20 at zero tolerance. Reported for the user to re-specify; NOT amended by the implementing pass.",
+        "decisions_shipped": {
+          "D5": "no lvl guard (scope \u00a71's literal text) + the two-form derelict expression \u2014 the only predicate reachable at ABAND_W >= 15",
+          "D6": "save v22",
+          "D7": "abandoned tiles REMAIN fire candidates; no code change at either fire site, so cand.length is provably invariant",
+          "D8": "ABAND_SMOG = 46 (= LF_SMELL_FULL)",
+          "D9": "the GP7b assessed-value floor stays DROPPED from the survivability gate and is reported, not amended"
+        }
+      },
       "split_of": "GP10 (preflight-authored S3 split, grounded against the live source 2026-07-30)",
       "gate_respecs_from_GP10a": {
         "note": "Authored during GP10a from measurements on 80b8957. These replace the corresponding GP10b gate clauses; each one is either unmeasurable as written or refuted by measurement.",
@@ -1424,7 +1466,8 @@
         "GP6 citizen-opinion-poll (approval composite layer) \u2014 9/10 gates; blocked on 2 user decisions (GP6.blocker). NOT shipped.",
         "GP7a assessed-value shadow ledger \u2014 15/16 gates; blocked on the C2 provenance clause (orchestrator-caused; property independently re-verified 7/7) + decision U2. NOT shipped.",
         "GP8a civil-defense risk ruler (save-neutral) \u2014 18/21 then fix-pass green; blocked on design decision D1 and the C14 memo-hit-rate clause. NOT shipped.",
-        "GP9b waste chain (landfill/incinerator/overflow) \u2014 11/17 gates then six fix-pass defects resolved; blocked on design decisions D1/D2 and three measured gate-scale conflicts recorded in GP9b.blocker. NOT shipped."
+        "GP9b waste chain (landfill/incinerator/overflow) \u2014 11/17 gates then six fix-pass defects resolved; blocked on design decisions D1/D2 and three measured gate-scale conflicts recorded in GP9b.blocker. NOT shipped.",
+        "GP10b abandonment + blight radius + renewal campaign implement pass \u2014 checkpointed mid-workflow, NOT shipped; certified or fixed/reverted by running workflow wf_336977fd-080. Its pinned pre-measurement docs/gp10b-aband-pre.json landed ALONE first, js/ tree hash verified identical to baseline 127e74a."
       ],
       "artifact_reflects": "this ship (bundle rebuilt at GP10a close) \u2014 CONTAINS the three uncertified layers above, disclosed rather than presented as certified"
     }

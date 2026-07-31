@@ -6,115 +6,11 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## In progress
 
-- **GP6 — Citizen Opinion Poll** *(gameplay roadmap 10/14, implemented
-  2026-07-30 — LIVE in the tree, verify + panel pass still open, so NOT yet
-  marked done)*: the headline "how am I doing" number stops being a tax
-  readout in costume. The cosmetic `70 - taxRate*2.4 + (demand.r>0?10:-8)`
-  is **gone**; approval is now computed by the sim from live state — one
-  frozen table, `APPROVAL_TERMS`, of **15 weighted grievances whose weights
-  sum to exactly 100** (pollution, power, congestion 12 each; tax 10; police
-  and fire coverage 9 each; unemployment and crime 8; commute 5; water 4;
-  schools and clinics 3; rubble and disaster 2; treasury 1), so
-  `target = 100 - Σ w·p` is an exact percentage with no normalisation fudge.
-  The published number is a **mood**: a 1/4-rate EMA of that target, moved
-  once per month rollover, path-dependent by construction — which is exactly
-  why the carry, the two streaks and the recall latch all serialize.
-  The Vitals approval cell is now a button into a new **City Survey**
-  dialog: headline %, a mood band, and the **top 5 problems ranked by
-  weighted severity**, each with a severity bar, a "% of citizens name this"
-  figure, a plain-language blurb carrying the proving number, and a **Show
-  me** button that switches the minimap to that grievance's documented mode
-  and swings the camera onto its worst cluster (continuous rows jump to the
-  plane's argmax; indicator rows to the 5×5 window with the greatest sum —
-  both pure, deterministic and rotation-invariant). The two aspatial rows
-  (tax rate, treasury) open the budget instead, because a tax RATE has no
-  argmax tile. The whole O(MAP²) census runs at rollover and at dialog-open
-  **only** — `refreshHUD` is a pure read of the serialized scalar.
-  Sustained collapse (under 40% — the survey's own "ready to march on City
-  Hall" line — for six straight months) files a **recall petition** front
-  page, exactly once per city, latched on a serialized flag so a save/load
-  cannot republish it. Every severity scale is anchored to a MEASURED range
-  rather than an array's type range, and every share and coverage mean is
-  taken over the **zoned footprint** rather than the developed one, so a
-  grievance lasts as long as the neglect instead of healing itself as the
-  dark blocks abandon (measured: 544 zoned tiles / 168 dark, constant across
-  24 months, where the developed-zone ratio decayed 0.309 → 0.000). Smog and
-  crime read their planes over the inhabited city (a whole-map mean dilutes
-  them tenfold with wilderness) and congestion reads the SHARE of streets at
-  or past the traffic report's own 80 threshold. All six mood bands are
-  reachable on measurement: 94 on the reference city down to a sustained
-  36.7 on a wrecked one. And the ladder finally
-  grows a rung above Metropolis: **Megalopolis**, gated on 12,000 residents
-  **and** approval held at or above 65% for 24 straight months **and** a
-  city that either moves (avg commute ≤ 12) or breathes (smog ≤ 55).
-  `tierForPop` skips every gated row, so the pop-only ladder is unchanged
-  for tiers 0–4 and 12,000 residents alone can never buy the rung; the
-  existing `nt > tier` ratchet keeps it monotonic once earned.
-  **Approval gates nothing** — no demand term, no growth fit, no gate table
-  reads it (charging crime, pollution, tax and coverage twice would break the
-  causal chain this milestone exists to make legible; GP8 owns the riot
-  coupling). Zero RNG on the whole path. Save v17: four scalars appended
-  after `eduLevel` plus the `approv` history series, with `normaliseHistory`
-  **and** its second copy in `collectBudget`'s 240-cap trim loop both
-  extended; a v16 save loads with approval seeded from its first computed
-  target and the series recording forward.
-
-- **GP7a — The Assessed-Value Shadow Ledger & the Equilibrium Spike**
-  *(gameplay roadmap 11/14 — the read-only half of GP7; implemented
-  2026-07-31, LIVE in the tree, verify + panel pass still open, so NOT yet
-  marked done)*: ship the **ruler** before anything bills on it. The city now
-  carries a second, parallel tax book that **nothing is charged from**:
-  `City.assessedLedger()` values every developed lot as
-  `base(zone, level) × assessment(landv)` with `assessment(v) = 0.5 + v/128`,
-  so a blighted lot assesses at half and prime ground at ~1.34× — and the
-  per-sector totals, the headcount bill they would replace, and the
-  scale-free `ratio` ("your city is assessed at **76%** of what it is
-  billed") print as a clearly-labelled **preview block in the budget dialog**
-  next to the bill you actually pay. It is a **pure read**: the six
-  accumulators are *fused into `computeDemandParts`' existing loop* (the GP2
-  `portAnchors` precedent — writes only into `out`, allocates nothing) and
-  the ledger reads that committed `_dparts` snapshot, so there is **no fifth
-  whole-map scan** and a funding-slider drag re-runs **zero** censuses.
-  The shipped `value` minimap is **quantized into five named wealth bands**
-  (Blighted / Cheap / Modest / Prime / Gold, edges 20/40/60/80 from the
-  measured distribution of the pinned reference city), the inspector grows an
-  advisory-only `LANDV_BAND` row printing a lot's headcount bill against its
-  would-be assessment, and the monthly shadow take records as
-  `history.assess` with a matching **"Assessed take"** graph series (off by
-  default, so the default graph render is pixel-unchanged).
-  There is now **exactly one** arithmetic site for today's take —
-  `City.taxTake(rate)` — which `collectBudget` and `advTaxesAt` both
-  delegate to; that closes the measured drift where the advisor silently
-  **omitted `cleanTax`** and disagreed with the bill by exactly §852 on a
-  clean-industry city. `taxRate` finally gets the `typeof` load guard every
-  sibling field already had (measured: a save with `taxRate` deleted
-  NaN-poisons demand for **300/300** ticks on the old build, **0/300** now).
-  **Nothing the sim does changed**: 20 corpus seeds × 600 ticks are
-  byte-identical to the baseline on all ten planes and every scalar, and 200
-  ledger calls leave `serialize()` byte-identical with all four RNG cursors
-  untouched and `Math.random` called zero times. The **spike was published
-  first, on the unchanged build** (`docs/gp7-spike.json`, 420 rows = 21 rates
-  × 20 seeds): the residential bar is **pinned against `clampD`'s ceiling**
-  at every rate below 15, so `jobsAvail/220` — not `taxMod` — is what binds
-  equilibrium, and the revenue-maximising rate on this corpus is **14, not
-  20**. Save **v18**; `normaliseHistory` now **left-pads** every short series
-  to the longest **with `null`**, because the "loads as `[]` and records
-  forward" idiom is silently broken once a city hits the 240-entry cap (the
-  trim shifts every key, so an empty series pushes one sample and loses it
-  again, forever) — and because the graph stretches each series across the
-  full canvas by its own index, so an unpadded short series would trace the
-  wrong years. `null` is the **"not measured"** sentinel: it holds the month
-  slot open and draws **nothing** (the trace breaks across it; the legend
-  reports the last real sample). A first cut zero-filled and was measured to
-  invent history — five months of **0% approval** after loading a v13 save,
-  and **"Assessed take: §0"** for up to 240 months on a city whose live
-  ledger reads ~§10,000/month; that is the defect the sentinel removes. A
-  save with **no history at all** still loads `assess === []`. One
-  consequence remains a **user decision, not a worker call** (recorded in
-  `gameplay-roadmap.json` → GP7a → `design_user_decisions`): the same pad
-  retroactively repairs `commute` / `avgcom` / `approv` on mature pre-v17
-  saves — strictly additive, idempotent, and beyond the milestone's declared
-  surface.
+- **Three milestones built, awaiting adjudication**: GP6 (9/10 gates), GP7a
+  (15/16) and GP8a (18/21 then fix-pass green) are implemented and live in the
+  tree but NOT shipped — every blocker is a gate *clause* that proved
+  unmeasurable or self-contradictory, plus one design question. See each
+  milestone's blocker field in `docs/gameplay-roadmap.json`.
 
 ## Open
 
@@ -187,6 +83,21 @@ Queue policy: keep at least 5 open improvements at all times.
 
 
 ## Done
+
+- [x] **GP9a — The Waste Ledger** *(gameplay roadmap 15/18, certified
+  2026-07-31)*: before you can build a single landfill, the city already tells
+  you **how much garbage it makes** — by zone, by level, per tile, and plotted
+  every month you have played — and the power pie stops claiming its four
+  slices sum to supply once regional trade is live. The recycling ordinance
+  finally delivers what its blurb promises: per-tile rounding meant the
+  advertised 25% cut was landing at −15.3% on the reference city and *zero* on
+  a level-1 house, so the rate table was rebased onto a quarter grid where the
+  round is exact at any zone mix. Sim proven byte-identical across 20 seeds ×
+  600 ticks with real randomness, three separate re-runs, 480/480 hashes equal.
+  Its pinned pre-measurement was committed **before** the implementation, in
+  its own commit whose `js/` tree hashes identically to the baseline — so git
+  history itself proves the ruler predates the thing it measures, which is the
+  provenance GP7a could not establish.
 
 - [x] **GP5b — Service Strain & the Education Payoff** *(gameplay roadmap
   9/13, certified 2026-07-30 — the GP5 pair complete, the declared re-pin of

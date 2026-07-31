@@ -988,8 +988,9 @@
       "preflight_verdict": "needs-revision",
       "priority_rank": 15,
       "touches_save_format": true,
-      "status": "todo",
-      "split_of": "GP9 (preflight-authored S3 split, grounded against the live source 2026-07-30)"
+      "status": "done",
+      "split_of": "GP9 (preflight-authored S3 split, grounded against the live source 2026-07-30)",
+      "certified": "2026-07-31 certified & shipped (wf_ceb0da9e). READ half of the waste milestone: WASTE_RATE quarter-grid table + wasteRateAt/wasteCensus pure reads, history.waste (save v19 \u2014 read off the TREE, not the spec, which still said v17), Garbage minimap mode + legend, graph series, per-tile query readout, an honest power pie (the shipped \"four values sum to powerSupply\" comment was false once trade is live), and the crosstalk-audit predicate mirrors. PROVENANCE DONE RIGHT: the pinned pre-measurement docs/gp9a-waste-pre.json landed in its OWN commit 18aa05b whose js/ tree hashes identically to the 7def71d baseline \u2014 git history itself proves it predates the implementation. This is the process rule adopted after GP7a, and it worked. Verify 16/18 first pass; BOTH failures traced to ONE arithmetic fact \u2014 wasteRateAt() rounds PER TILE, so at the recycling multiplier K=0.75 a rate that is not a multiple of 4 rounds unevenly (a level-1 house dropped 0%, a level-1 shop 33.3%), landing the citywide cut at -15.272% while the ordinance blurb promised the mayor -25%, and simultaneously starving C3's level-sweep bar. Fixed by rebasing the table onto a quarter grid (ZR [0,8,24,52], ZC [0,12,32,68], ZI [0,36,76,140]); the per-tile round is then exact and every city at every zone mix drops by exactly 25.0%. The multiple-of-4 property is recorded as a correctness constraint on any future retune. Re-verified green: C1 byte-identical 20 seeds x 600 ticks UNSTUBBED, 480/480 sample hashes equal across three separate re-runs, save diff exactly {v 19 vs 18, history.waste}; C2 census === independent harness recomputation field-for-field on 5 fixtures with sum(wasteRateAt) === total exactly; C3 level sweep 2.10x; C4 recycling -25.000% dead on the bar. Panel: 2 of 3 lenses refuted, 5 defects fixed and re-measured. Independent post-workflow smoke (orchestrator, own harness): save v19, per-tile sum === census total, recycling cuts exactly -25.000% with wasteMul 0.75/1 and an exact restore, round-trip idempotent, waste history present and loading, zero console errors. DISCLOSED, not silently changed: (a) the new \"Gar\" map-mode button is 0px visible at the default viewport because the strip is hard-capped to the minimap width and scrolls \u2014 already true pre-GP9a for GP8a's Risk button; the growth policy is design decision D3, surfaced for the user. (b) Gate 6's literal \"a pre-GP9a save loads with history.waste === []\" is stale gate TEXT: the shipped GP7a convention left-pads with nulls so the new series stays month-aligned with its eleven siblings; making it [] would reintroduce the desync the pad exists to prevent."
     },
     {
       "id": "GP9b",
@@ -1375,18 +1376,15 @@
   "baseline_ledger": {
     "purpose": "Docs may NEVER disagree with the tree. Every ship AND every checkpoint that leaves code live must update this ledger in the same commit. This rule exists because GP1b was parked as blocked while its code stayed live, and the next milestone was briefed against a false baseline.",
     "current": {
-      "commit": "(GP6 implement pass \u2014 live in the working tree; last SHIP commit is a702c92, GP5b)",
-      "save_version": 17,
-      "save_version_in_tree": 19,
-      "save_version_note": "17 is the CERTIFIED ladder integer (GP5b, last ship a702c92). The working tree writes v:19 because the GP7a (v18) and GP9a (v19) implement passes are both live-but-uncertified; the two agree again the moment those ship or are reverted.",
-      "certified_through": "GP5b (service strain & the education payoff \u2014 the GP5 pair complete). GP6 (citizen opinion poll) is LIVE in the tree at save v17 and is NOT yet certified \u2014 its verify + panel pass owns that promotion; see live_but_uncertified below.",
+      "commit": "(this ship commit \u2014 GP9a)",
+      "save_version": 19,
+      "certified_through": "GP9a (waste ledger, read half) \u2014 BUT note three earlier layers remain live-but-uncertified below; GP9a itself is certified against them as its baseline",
       "live_but_uncertified": [
-        "GP6 citizen-opinion-poll (save v17) \u2014 9/10 gates; blocked on 2 user decisions (GP6.blocker). NOT shipped.",
-        "GP7a assessed-value shadow ledger (save v18) \u2014 15/16 gates; blocked on the C2 provenance clause (orchestrator-caused, property independently re-verified 7/7) + decision U2. NOT shipped.",
-        "GP8a civil-defense risk ruler (save-neutral) \u2014 18/21 gates, then the fix pass took C4/C5/C9 and C14 perf green; blocked on design decision D1 (odds-vs-exposure presentation) and the C14 memo-hit-rate clause, both recorded in GP8a. Soak artifact landed first at 88d2675. NOT shipped.",
-        "GP9a waste ledger implement pass (waste census + history series, honest power pie, crosstalk audit mirrors; sim.js/ui.js/render.js/sprites.js/index.html) \u2014 checkpointed mid-workflow, NOT shipped; certified or fixed/reverted by running workflow wf_ceb0da9e-78a. Its pinned pre-measurement docs/gp9a-waste-pre.json landed in its OWN commit first, whose js/ tree is byte-identical to the 7def71d baseline \u2014 the provenance GP7a could not establish."
+        "GP6 citizen-opinion-poll (save v17 layer) \u2014 9/10 gates; blocked on 2 user decisions (GP6.blocker). NOT shipped.",
+        "GP7a assessed-value shadow ledger (save v18 layer) \u2014 15/16 gates; blocked on the C2 provenance clause (orchestrator-caused; property independently re-verified 7/7) + decision U2. NOT shipped.",
+        "GP8a civil-defense risk ruler (save-neutral) \u2014 18/21 then fix-pass green; blocked on design decision D1 and the C14 memo-hit-rate clause. NOT shipped."
       ],
-      "artifact_reflects": "this ship (bundle rebuilt at GP5b close)"
+      "artifact_reflects": "this ship (bundle rebuilt at GP9a close) \u2014 CONTAINS the three uncertified layers above, disclosed rather than presented as certified"
     }
   },
   "process_scaffolding": [

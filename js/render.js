@@ -2270,10 +2270,20 @@ const RISK_BANDS = ["#243a2a", "#2f7e78", "#e0a028", "#ffd2e0"];
 
 /* GP9a S4: the five GARBAGE bands the "garbage" overlay paints, indexed by
    sim.js's wasteBand() — the ONE band definition the map uses, whose edges are
-   derived from the shipped WASTE_RATE table itself (trace / light / moderate /
-   heavy / extreme, anchored to a house block, a level-3 tower and a level-2 and
-   level-3 factory) so a retune of the tonnage table cannot leave the ladder
-   describing a rate scale that no longer exists.
+   derived from the shipped WASTE_RATE table itself (trace / light / mid /
+   heavy / peak, anchored to a level-1 shop, a level-1 factory, a level-3
+   shopping tower and a level-3 factory) so a retune of the tonnage table cannot
+   leave the ladder describing a rate scale that no longer exists.
+   FIX PASS: those anchors are the RECALIBRATED ones. The first ladder was
+   anchored to residential archetypes and put every level-1 tile in the bottom
+   two bands, so on ten separately grown corpus cities the bright half of this
+   ramp — #a08a52, #e39a5e, #f0e4c0 — painted ZERO pixels and the overlay read
+   as a two-tone near-black stipple. The colours below are unchanged (their
+   measured luminance/CIEDE2000 story still holds verbatim); what changed is
+   which tiles reach them: a grown city now lights bands 0..2 (measured 906-1276
+   developed tiles across seeds 4242/7/101/2024/555 at 600 and 1500 ticks, every
+   one of them three-band) and the minimap carries 6 distinct pixel values,
+   against 7 for `value` and 5 for `risk` on the same city.
    A refuse story that rises in brightness the way every GQ11 overlay does:
    compost green -> landfill mud -> dust -> tan -> ash.
    MEASURED. Rec.709 luminance strictly rising 31.1 / 80.2 / 138.6 / 165.2 /
@@ -2281,7 +2291,7 @@ const RISK_BANDS = ["#243a2a", "#2f7e78", "#e0a028", "#ffd2e0"];
    >= 50 apart in at least one channel between adjacent bands (102 / 64 / 67 /
    98), so the ladder survives deuteranopia on luminance alone. Worst CIEDE2000
    pair among all SIX declared categories (5 bands + the standard water swatch
-   #013) is 17.0 (moderate vs heavy), over this codebase's 13 bar.
+   #013) is 17.0 (mid vs heavy), over this codebase's 13 bar.
    NO BAND IS PURE #ffffff — deliberately. The rotation gate masks the UNION of
    pure-white pixels (the camera-viewport stroke drawn below); a white band
    would be eaten by that mask and the gate would pass on nothing.

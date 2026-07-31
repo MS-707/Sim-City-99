@@ -815,8 +815,14 @@ const MM_LEGENDS = {
   // GP9a: monthly garbage tonnage — the five bands renderMinimap paints
   // (render.js MM_WASTE_BANDS, indexed by sim.js's wasteBand()) plus the
   // standard water swatch, per the G8 contract that the strip echoes the exact
-  // branch colours.
-  garbage: '<i class="sw" style="background:#14240f"></i>trace <i class="sw" style="background:#7a4a12"></i>light <i class="sw" style="background:#a08a52"></i>moderate <i class="sw" style="background:#e39a5e"></i>heavy <i class="sw" style="background:#f0e4c0"></i>extreme <i class="sw" style="background:#013"></i>water',
+  // branch colours. FIX PASS: six entries is one more than any other legend
+  // carries, and with the long words ("moderate"/"extreme") the strip wrapped
+  // to a THIRD line whose break orphaned the `moderate` swatch onto the end of
+  // the `light` line — a swatch visually paired with the wrong label. The band
+  // NAMES are now the short ladder trace/light/mid/heavy/peak (the same five
+  // words sim.js's WASTE_BAND_EDGES block documents), measured at 23px — the
+  // exact two-row height of value/risk/svc/transit/commute.
+  garbage: '<i class="sw" style="background:#14240f"></i>trace <i class="sw" style="background:#7a4a12"></i>light <i class="sw" style="background:#a08a52"></i>mid <i class="sw" style="background:#e39a5e"></i>heavy <i class="sw" style="background:#f0e4c0"></i>peak <i class="sw" style="background:#013"></i>water',
 };
 
 // GP5a: legend mode names — with 15 map modes the abbreviated buttons alone

@@ -7,25 +7,40 @@
   "provenance_note": "The measurements below were taken by two instruments. (a) HEADLESS: js/sim.js evaluated in a node vm with a DOM-free global set, driving the pinned build_script from docs/gp1-baseline.json .protocol and the scripted fixtures defined here. This is what produced every sim-side number (crosstalk truth table, census figures, power matrix, normaliseHistory behaviour, trim behaviour, determinism corpus). The baseline arm reads `git show 7def71d:js/sim.js` verbatim. (b) BROWSER (chromium-1194 / playwright, served :8901 + a :8902 worktree of 7def71d): the DOM/canvas numbers — .mm strip geometry, minimap ImageData, rotation hashes, the perf noise floor. The browser numbers in `carried_from_design` were measured during the GP9a design pass and are carried forward here; they must be RE-READ by the verify pass rather than trusted, and any that disagree with a fresh reading are the fresh reading's.",
   "process_deviation": "This artifact was written by the implement pass under an explicit 'do NOT commit' instruction, so it could not be landed in its own commit ahead of the code as C18 requires. C18's commit-ordering clause is therefore NOT satisfiable from inside this pass and must be honoured by whoever commits: land docs/gp9a-waste-pre.json alone first, then the implementation.",
 
+  "fix_pass_changes": {
+    "why": "The verify pass reported C3 and C4 unmet and an adversarial panel reported the Garbage overlay reading as a two-tone map, the power legend mixing denominators, a false pie-slice swatch on the regional-trade row, a three-line legend with an orphaned swatch, and a reproducible ~7-8% deptStrain cost. Every item below is a change to the IMPLEMENTATION, not to a bar.",
+    "1_WASTE_RATE_retuned_onto_a_quarter_grid": "ZR 8/24/52, ZC 12/32/68, ZI 36/76/140 (was 2/5/9, 3/7/12, 6/14/26). Fixes C4 (per-tile Math.round is now exact at K = 0.75, so the drop is -25.000% on every city at every zone mix, and the shipped ordinance blurb's 'divert a quarter of the tonnage' becomes literally true) and C3 (the LVL1 lvl1->3 ZR sweep rises 12000 -> 25200 = 2.10x against the >= 2.0x bar; it was 1.875x).",
+    "2_WASTE_BAND_EDGES_recalibrated": "[ZC[1], ZI[1], ZC[3], ZI[3]] = [12, 36, 68, 140] (was [ZR[1]+1, ZR[3], ZI[2], ZI[3]] = [3, 9, 14, 26]). The three level-1 archetypes now land in three DIFFERENT bands, so grown cities light bands 0..2 instead of 0..1 and the bright half of MM_WASTE_BANDS is reachable. MM_WASTE_BANDS itself is UNCHANGED — no colour moved, so its measured luminance/CIEDE2000/deutan story stands verbatim.",
+    "3_band_names_shortened": "trace/light/mid/heavy/peak. #mm-legend offsetHeight 36 -> 23, the house two-row height.",
+    "4_power_legend_denominator": "fillPowerMix prints a `Plant output N MW` subtotal directly under the five plant rows whenever a trade row prints, so the percent column's denominator is stated where it is used and the ledger reads plants -> trade -> supply as one column. Rides the SAME non-zero-net condition, so a city with no deal renders byte-identically to the pre-GP9a legend.",
+    "5_trade_row_is_not_a_slice": "The regional-trade row lost its #8d6bb0 <i class=\"sw\"> swatch (no purple wedge exists, and an export cannot be a slice at all) and is now typographically distinct: an italic signed marker. Every remaining swatch in that legend maps 1:1 onto a wedge in the pie beside it.",
+    "6_predicate_lookup_tables": "ovTable() bakes each of the nine hoisted predicates into a 256-entry Uint8Array once, at module evaluation, and the per-tile call sites index the table: OV_CONDUCTS / OV_DRAWS_POWER / OV_BROWNOUT_ELIGIBLE / OV_FLICKER_ELIGIBLE / OV_FEEDS_PUMP (recomputePower), OV_FIRE_CANDIDATE (startDisaster), OV_WIRE_JOINS (sprites.js wireMask, 4x per wire tile PER FRAME), OV_IS_ZONE / OV_IS_STRUCTURE (deptStrain's fire-load census). The arrows remain the single source of truth — the tables are generated FROM them, City.ovCrosstalk() still reports the arrows, and C6 still asserts against the arrows — so no rule has a second copy. 256 entries covers the whole domain of an over[] byte, so table and arrow agree on every value the plane can physically hold. WHY: the hoist as first shipped replaced inline comparison chains with a CALL at each per-tile site, which measured +7-8% on deptStrain and +5-6% on recomputePower against 7def71d — both over gate 8's WRITTEN 5% bar, whatever the re-specified 10% one allowed. RE-MEASURED after the tables, interleaved one-browser two-page protocol, median of 9 alternating rounds, admission control run first: deptStrain -37.2% (80x80) and -34.5% / -34.4% (the panel's own 128x128 instrument, page order swapped between replicates, same-build control 0.83%); recomputePower -25.6% (80x80) and -26.5% / -26.0% (order swapped, control -0.54%); 600-tick run -2.8%. All three now pass the ORIGINAL 5% bar, in the faster direction, reproducibly and order-independently. Byte-neutrality re-proven after the change: C1 480/480 sample hashes, C6 238/238 + 37/37, C7 powered[]/watered[] 0 diff + deptStrain field-for-field + 200/200 ignitions, the whole wireMask() plane hash-identical (mask sum 10830 both) and 8/8 main-canvas scene hashes identical across 4 rotations x day/night.",
+    "unchanged": "No gate bar was rewritten by this pass. The save ladder (v19), the history.waste plumbing, the ordinance fold, powerLedger, the crosstalk hoist semantics, the query row and the minimap branch structure are all as the implement pass shipped them."
+  },
+
   "pinned_constants": {
     "WASTE_RATE": {
       "units": "INTEGER tonnes/month per DEVELOPED zone tile, indexed [level], index 0 unused",
-      "ZR": [0, 2, 5, 9],
-      "ZC": [0, 3, 7, 12],
-      "ZI": [0, 6, 14, 26],
-      "shape_note": "Industry heaviest per the M31 design. These are the magnitudes design decision D1 asks the user to confirm; they are the table the design pass measured, and re-running that measurement on this implementation reproduces its figures exactly (see reference_city_census).",
+      "ZR": [0, 8, 24, 52],
+      "ZC": [0, 12, 32, 68],
+      "ZI": [0, 36, 76, 140],
+      "superseded_table": {"ZR": [0, 2, 5, 9], "ZC": [0, 3, 7, 12], "ZI": [0, 6, 14, 26], "why": "FIX PASS RETUNE. The first table failed two pinned bars by arithmetic rather than by defect. (1) C4: wasteRateAt rounds PER TILE, and at K = 0.75 a rate that is not a multiple of 4 rounds unevenly — ZR1 2 t dropped 0%, ZC1 3 t dropped 33.3%, ZI1 6 t dropped 16.7% — so the citywide aggregate landed wherever the zone mix put it (-15.272% on the reference city, versus the pinned -25% +/-2pp) and an all-level-1-residential city dropped EXACTLY 0% while still being billed for the ordinance. (2) C3: the ZR level-1 clause contributed only 600 of the LVL1 fixture's 2400 t, capping the lvl1->3 sweep at 1.875x against a >= 2.0x bar."},
+      "shape_note": "Industry heaviest per the M31 design (a level-1 factory at 36 t already outweighs a level-2 shop at 32 t), and EVERY ENTRY IS A MULTIPLE OF 4 — a correctness constraint, not a rounding of convenience: it is what makes the per-tile Math.round exact at K = 0.75, so every tile in every city drops by exactly a quarter under Recycling. Any D1 retune must preserve BOTH the multiple-of-4 property and the ordering the band edges assume: ZR[1] < ZC[1] <= ZC[2] < ZI[1] <= ZR[3] < ZC[3] <= ZI[2] < ZI[3].",
       "site": "js/sim.js, immediately after IND_JOB"
     },
     "recycle_wasteMul": {
       "K": 0.75,
       "site": "the EXISTING ORDINANCES `recycle` row, mods: { pollMul: 0.72, wasteMul: 0.75 }",
       "consumers": "wasteRateAt() and wasteCensus() ONLY — zero sim paths read wasteMul, so the ordinance's simulated effect is unchanged by construction",
-      "note": "D2. See measurements.recycle_drop — the AGGREGATE drop is NOT 25%, because the rate is rounded to an integer PER TILE."
+      "note": "D2. FIX PASS: the aggregate drop is now EXACTLY -25.000% on every city and every fixture, because the retuned WASTE_RATE table is a quarter grid — the per-tile Math.round is exact at K = 0.75. Measured on the reference city: 14908 -> 11181 t/mo = -25.000%, repealing returns to exactly 14908. The superseded table's mix-dependent -15.272% is recorded in measurements.recycle_drop."
     },
     "WASTE_BAND_EDGES": {
-      "value": [3, 9, 14, 26],
-      "derivation": "[ZR[1]+1, ZR[3], ZI[2], ZI[3]] — read off WASTE_RATE itself, so a D1 retune cannot leave the overlay's ladder describing a rate scale that no longer exists",
-      "band_names": ["trace", "light", "moderate", "heavy", "extreme"]
+      "value": [12, 36, 68, 140],
+      "derivation": "[ZC[1], ZI[1], ZC[3], ZI[3]] — read off WASTE_RATE itself, so a D1 retune cannot leave the overlay's ladder describing a rate scale that no longer exists. Each edge IS an archetype's exact rate: a level-1 shop, a level-1 factory, a level-3 shopping tower, a level-3 factory.",
+      "superseded_value": {"value": [3, 9, 14, 26], "derivation": "[ZR[1]+1, ZR[3], ZI[2], ZI[3]]", "why": "FIX PASS RECALIBRATION. The residential-anchored ladder put all three level-1 archetypes in the bottom TWO bands, and a naturally grown city is ~96% level-1 by tonnage, so bands 2/3/4 counted ZERO tiles on ten separately grown corpus cities (seeds 4242/7/101/2024/555 at 600 and 1500 ticks) and the bright half of MM_WASTE_BANDS painted no pixels at all. The new edges split house (8) / shop (12) / factory (36) across three DIFFERENT bands."},
+      "band_names": ["trace", "light", "mid", "heavy", "peak"],
+      "band_names_note": "Shortened from moderate/extreme in the fix pass: at six entries the #mm-legend wrapped to a THIRD line whose break orphaned the `moderate` swatch onto the end of the `light` line. Measured 36px -> 23px, the exact two-row height of value/risk/svc/transit/commute.",
+      "grown_city_band_census": "tiles per band [trace, light, mid, heavy, peak] on the pinned build_script: 4242@600 [446,230,230,0,0]; 4242@1500 [432,266,249,0,0]; 7@600 [416,280,254,0,0]; 7@1500 [388,325,274,0,0]; 101@600 [439,270,252,0,0]; 101@1500 [439,273,252,0,0]; 2024@600 [595,303,305,0,0]; 2024@1500 [560,377,339,0,0]; 555@600 [574,318,307,0,0]; 555@1500 [545,389,342,0,0] — three bands lit on every grown city, against two under the superseded ladder"
     },
     "MM_WASTE_BANDS": {
       "value": ["#14240f", "#7a4a12", "#a08a52", "#e39a5e", "#f0e4c0"],
@@ -34,7 +49,7 @@
       "adjacent_luminance_steps": [49.1, 58.4, 26.6, 62.8],
       "adjacent_max_channel_steps": [102, 64, 67, 98],
       "worst_ciede2000_among_5_bands_plus_water_013": 17.0,
-      "worst_pair": "moderate #a08a52 vs heavy #e39a5e",
+      "worst_pair": "mid #a08a52 vs heavy #e39a5e",
       "dE_to_value_ramp_gold_ffe066": 15.3,
       "dE_to_risk_ramp_severe_ffd2e0": 26.9,
       "dE_band0_vs_no_garbage_bases": {"water_013": 16.7, "land_111": 15.0},
@@ -50,7 +65,7 @@
     "EMPTY": "new City(31337, 80), untouched",
     "LVL1": "new City(31337,80) + scripted over/lvl writes: ZR1 x300, ZC1 x200, ZI1 x200 (700 developed tiles)",
     "SATURATED": "same tile set at level 3: ZR3 x300, ZC3 x200, ZI3 x200",
-    "MIXED": "ZR1 x60, ZR3 x40, ZC2 x50, ZI2 x50, ZI3 x20 — FIVE distinct (zone type, level) pairs, FIVE distinct rates {2,9,7,14,26}",
+    "MIXED": "ZR1 x60, ZR3 x40, ZC2 x50, ZI2 x50, ZI3 x20 — FIVE distinct (zone type, level) pairs, FIVE distinct rates {8,52,32,76,140} under the shipped table (they were {2,9,7,14,26} under the superseded one), landing in five DIFFERENT bands",
     "power_matrix": {
       "seed": 2024,
       "terrain": "terr filled LAND (flat)",
@@ -71,7 +86,7 @@
       "byLevel": [0, 2887, 125, 0], "tiles": 906,
       "ind_over_res": 1.357,
       "sigma_wasteRateAt_equals_total": true,
-      "D1_finding": "1.357 is BELOW the preflight's suggested 'ind:res >= 1.5 at every fixture' bar, on a correct implementation of the pinned table. The reference city is 95.9% level-1 by tonnage, and the table's ind:res ratio at level 1 is 6/2 = 3.0 while the CITY ratio is set by how many ZR vs ZI tiles the growth model actually develops. Either the table's industry weight rises (a balance change) or the bar is pinned to the fixture's measured mix. D1: the user's call."
+      "fix_pass_recensus": {"note": "Re-measured on the SHIPPED (retuned) table, same fixture, same protocol.", "total": 14908, "res": 5040, "com": 2660, "ind": 7208, "byLevel": [0, 14308, 600, 0], "tiles": 906, "ind_over_res": 1.987, "sigma_wasteRateAt_equals_total": true, "D1_status": "RESOLVED IN PASSING — ind:res on the reference city rises 1.357 -> 1.987, so the preflight's suggested >= 1.5 shape bar is now met on a correct implementation and D1 no longer forces a choice between the bar and the table."}, "D1_finding": "1.357 is BELOW the preflight's suggested 'ind:res >= 1.5 at every fixture' bar, on a correct implementation of the pinned table. The reference city is 95.9% level-1 by tonnage, and the table's ind:res ratio at level 1 is 6/2 = 3.0 while the CITY ratio is set by how many ZR vs ZI tiles the growth model actually develops. Either the table's industry weight rises (a balance change) or the bar is pinned to the fixture's measured mix. D1: the user's call."
     },
 
     "census_fixtures": {
@@ -88,7 +103,7 @@
       "K": 0.75,
       "per_tile": {"ZR1": "2 -> 2 (0.0%)", "ZR2": "5 -> 4 (20.0%)", "ZR3": "9 -> 7 (22.2%)", "ZC1": "3 -> 2 (33.3%)", "ZC2": "7 -> 5 (28.6%)", "ZC3": "12 -> 9 (25.0%)", "ZI1": "6 -> 5 (16.7%)", "ZI2": "14 -> 11 (21.4%)", "ZI3": "26 -> 20 (23.1%)"},
       "aggregate": {"reference_city_seed4242_600t": "3012 -> 2552 = -15.27%", "LVL1": "2400 -> 2000 = -16.67%", "MIXED": "2050 -> 1600 = -21.95%", "SATURATED": "10300 -> 7900 = -23.30%"},
-      "finding": "C4's bar ('total falls by exactly the pinned percentage, K=0.75 => -25%, within +/-2 percentage points') is NOT met on the pinned reference city, and the cause is the arithmetic the design itself pins: Math.round(row[l] * wasteMul) is applied PER TILE, so the aggregate drop is a tile-mix-weighted average of the nine per-tile drops above, which range 0.0%..33.3%. The worst offender is ZR level 1 (2 -> 2, no drop at all), and the reference city is 95.9% level-1. Only a table whose every entry is a multiple of 4 would make the aggregate exactly 25%. This is D2 territory: either K/the table are retuned so the drop is exact, or C4's bar is restated against the measured mix. SURFACED, NOT DECIDED.",
+      "fix_pass_resolution": "TAKEN, and it is the option this artifact itself named: the table was retuned onto a quarter grid (ZR 8/24/52, ZC 12/32/68, ZI 36/76/140), so Math.round(row[l] * 0.75) is EXACT on every entry. Re-measured after the retune — reference city 14908 -> 11181 = -25.000%; LVL1 12000 -> 9000 = -25.000%; SATURATED 57200 -> 42900 = -25.000%; MIXED 10760 -> 8070 = -25.000%; per-tile ZR 8->6/24->18/52->39, ZC 12->9/32->24/68->51, ZI 36->27/76->57/140->105, every one exactly -25.0%. The C4 (iii) byte-identity arm is unaffected: wasteMul still has zero sim consumers, and the 200-tick post-toggle run stays 8/8 hashes identical to the 7def71d baseline.", "finding": "C4's bar ('total falls by exactly the pinned percentage, K=0.75 => -25%, within +/-2 percentage points') is NOT met on the pinned reference city, and the cause is the arithmetic the design itself pins: Math.round(row[l] * wasteMul) is applied PER TILE, so the aggregate drop is a tile-mix-weighted average of the nine per-tile drops above, which range 0.0%..33.3%. The worst offender is ZR level 1 (2 -> 2, no drop at all), and the reference city is 95.9% level-1. Only a table whose every entry is a multiple of 4 would make the aggregate exactly 25%. This is D2 territory: either K/the table are retuned so the drop is exact, or C4's bar is restated against the measured mix. SURFACED, NOT DECIDED.",
       "invariants_that_DO_hold": "typeof ordMods.wasteMul === 'number' and === 0.75 enacted / === 1 repealed; Sigma wasteRateAt(i) === wasteCensus().total exactly with the ordinance ON as well as OFF; the total returns to EXACTLY its pre-enactment integer on repeal"
     },
 

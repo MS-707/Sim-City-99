@@ -4305,7 +4305,7 @@ function wireMask(city, i) {
     // this file already resolves). It is NOT ovConducts: the two differ on
     // exactly ids 22..28, the megas — a mega never routes power through itself,
     // but a wire beside one still draws its arm.
-    return ovWireJoins(city.over[city.idx(X, Y)]);
+    return !!OV_WIRE_JOINS[city.over[city.idx(X, Y)]];
   };
   if (conn(x, y - 1)) m |= 1;
   if (conn(x + 1, y)) m |= 2;

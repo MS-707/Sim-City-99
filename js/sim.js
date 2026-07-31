@@ -453,6 +453,37 @@ const ovWireJoins = (t) => t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE
 const ovIsStructure = (t) => t !== OV.NONE && !ovIsZone(t) && !SVC_LINEAR.has(t);
 const ovZoneIsStructure = (t, lvl) => ovIsZone(t) && lvl > 0;
 
+/* GP9a (fix pass): THE PREDICATES ARE THE RULE; THESE TABLES ARE THE HOT PATH.
+   Five of the seven pure predicates above are evaluated ONCE PER TILE (or once
+   per neighbour) inside recomputePower's flood/demand/brownout/flicker/pump
+   scans, and ovWireJoins is evaluated FOUR TIMES PER WIRE TILE inside the
+   per-frame wireMask. Spelling each one as a module-scope arrow is what makes
+   "does a new overlay id join this family?" answerable in one place — but
+   before this pass it also turned a run of inline `t !== X && !isMega(t)`
+   comparisons into a CALL at every one of those sites, and the cost was
+   measurable: deptStrain +7-8% and recomputePower +5-6% against the 7def71d
+   baseline, both over gate 8's written 5% bar.
+   ovTable() bakes each arrow into a 256-entry Uint8Array ONCE, at module
+   evaluation. The arrows remain the single source of truth — the tables are
+   GENERATED from them, City.ovCrosstalk() still reports the arrows, and the
+   crosstalk audit still asserts against the arrows — so there is no second copy
+   of any rule to forget to update. 256 entries covers the WHOLE domain of an
+   over[] byte, so table and arrow agree on every value the plane can hold.
+   Call sites index the table; nothing reads a stale copy, because over[] ids
+   are compile-time constants and the tables are frozen at load. */
+const ovTable = (fn) => {
+  const a = new Uint8Array(256);
+  for (let t = 0; t < 256; t++) a[t] = fn(t) ? 1 : 0;
+  return a;
+};
+const OV_CONDUCTS = ovTable(ovConducts);
+const OV_DRAWS_POWER = ovTable(ovDrawsPower);
+const OV_BROWNOUT_ELIGIBLE = ovTable(ovBrownoutEligible);
+const OV_FLICKER_ELIGIBLE = ovTable(ovFlickerEligible);
+const OV_FEEDS_PUMP = ovTable(ovFeedsPump);
+const OV_FIRE_CANDIDATE = ovTable(ovFireCandidate);
+const OV_WIRE_JOINS = ovTable(ovWireJoins);
+
 // population / jobs per developed zone level (index 0 unused)
 const RES_POP = [0, 8, 24, 56];
 const COM_JOB = [0, 6, 18, 40];
@@ -494,18 +525,18 @@ const WASTE_RATE = Object.freeze({
    scale that no longer exists. Each edge IS a recognisable tile archetype's
    exact rate, so the overlay answers "how does this block compare to a shop /
    a factory / a shopping tower", the same question the query row is asked:
-     < ZC[1]    trace     — lighter than a single level-1 shop block
-     >= ZC[1]   light     — a shop block's load, up to a factory's
-     >= ZI[1]   moderate  — a level-1 factory's load or more
-     >= ZC[3]   heavy     — a level-3 shopping tower's load or more
-     >= ZI[3]   extreme   — a level-3 factory, the heaviest single tile
+     < ZC[1]    trace  — lighter than a single level-1 shop block
+     >= ZC[1]   light  — a shop block's load, up to a factory's
+     >= ZI[1]   mid    — a level-1 factory's load or more
+     >= ZC[3]   heavy  — a level-3 shopping tower's load or more
+     >= ZI[3]   peak   — a level-3 factory, the heaviest single tile
    THE LADDER IS CALIBRATED TO WHAT THE SIM ACTUALLY GROWS, which the fix pass
    found the first ladder was not: a naturally grown city is overwhelmingly
    level-1, and the earlier edges [ZR[1]+1, ZR[3], ZI[2], ZI[3]] put every
    level-1 tile in the bottom TWO bands, so the bright half of the ramp painted
    zero pixels on ten separate grown cities. These edges split the three
    level-1 archetypes across three DIFFERENT bands (house 8 -> trace, shop 12 ->
-   light, factory 36 -> moderate), so an ordinary city lights bands 0..2 and a
+   light, factory 36 -> mid), so an ordinary city lights bands 0..2 and a
    dense one reaches 3 and 4. Any retune must preserve the ordering the edges
    assume: ZR[1] < ZC[1] <= ZC[2] < ZI[1] <= ZR[3] < ZC[3] <= ZI[2] < ZI[3].
    wasteBand returns -1 for a tile that makes NO garbage, which the minimap
@@ -1656,16 +1687,17 @@ const SVC_LINEAR = new Set([OV.ROAD, OV.WIREROAD, OV.XWAY, OV.RAMP,
    against the arrows, and the loop pays one typed-array index per tile, which
    is cheaper than the Set lookup the baseline paid. Built HERE rather than
    beside the arrows because ovIsStructure dereferences SVC_LINEAR, which is
-   declared immediately above. OV ids are a contiguous 0..33 run in a
-   Uint8Array; the +1 sizes the table by the last id, and a hypothetical
-   out-of-range byte reads `undefined` -> falsy, exactly as the arrows do. */
+   declared immediately above. Both tables cover the WHOLE Uint8Array domain
+   (0..255), not just the 0..33 ids in use, so the lookup and the arrow agree on
+   EVERY byte over[] can physically hold — including a hypothetical future id —
+   rather than agreeing only over today's range. */
 const OV_IS_ZONE = (() => {
-  const a = new Uint8Array(OV.RAMP + 1);
+  const a = new Uint8Array(256);
   for (let t = 0; t < a.length; t++) a[t] = ovIsZone(t) ? 1 : 0;
   return a;
 })();
 const OV_IS_STRUCTURE = (() => {
-  const a = new Uint8Array(OV.RAMP + 1);
+  const a = new Uint8Array(256);
   for (let t = 0; t < a.length; t++) a[t] = ovIsStructure(t) ? 1 : 0;
   return a;
 })();
@@ -2996,8 +3028,9 @@ class City {
     // bridge a wire across). GP4a: concrete carries cars, never electricity —
     // an expressway/ramp is not a conductor.
     // GP9a: the membership test itself now lives in ovConducts (module scope,
-    // beside isPlant/isWaterOv/isXp) — this closure just indexes over[].
-    const conducts = (i) => ovConducts(this.over[i]);
+    // beside isPlant/isWaterOv/isXp) — this closure just indexes over[], via
+    // the OV_CONDUCTS table ovConducts itself generates (fix pass; see ovTable).
+    const conducts = (i) => OV_CONDUCTS[this.over[i]];
     for (let i = 0; i < this.over.length; i++) {
       if (isPlant(this.over[i]) && this.anc[i] === i) {
         // M19: a plant contributes its AGED effective capacity, not its raw
@@ -3026,7 +3059,7 @@ class City {
     let demand = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
-      if (this.powered[i] && ovDrawsPower(t)) demand++; // GP9a: M26 crossing is not a consumer; M24 water infra never draws power; M28 a self-powered mega adds ZERO net demand; GP4a an expressway/ramp never draws power — all of it now spelled once, in ovDrawsPower
+      if (this.powered[i] && OV_DRAWS_POWER[t]) demand++; // GP9a: M26 crossing is not a consumer; M24 water infra never draws power; M28 a self-powered mega adds ZERO net demand; GP4a an expressway/ramp never draws power — all of it now spelled once, in ovDrawsPower
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -3049,7 +3082,7 @@ class City {
         // it), so the cut is a PURE hash of (seed, powerEpoch, tile) — never a
         // cursor. That is exactly what makes powered[] a pure function of
         // serialized state and lets the save omit it.
-        if (this.powered[i] && ovBrownoutEligible(t) && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // GP9a: M26 crossing isn't a consumer to brown out; M24 water infra isn't a consumer; M28 a power island can't be browned out; GP4a an expressway/ramp isn't a consumer either
+        if (this.powered[i] && OV_BROWNOUT_ELIGIBLE[t] && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // GP9a: M26 crossing isn't a consumer to brown out; M24 water infra isn't a consumer; M28 a power island can't be browned out; GP4a an expressway/ramp isn't a consumer either
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -3064,7 +3097,7 @@ class City {
       const yh = this.rngHashKeyFor(HZ.Y2K_CUT, this.powerEpoch); // hoisted (dom, epoch) half
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
-        if (this.powered[i] && ovFlickerEligible(t) && // GP9a: GP4a concrete has no systems to flicker — see ovFlickerEligible
+        if (this.powered[i] && OV_FLICKER_ELIGIBLE[t] && // GP9a: GP4a concrete has no systems to flicker — see ovFlickerEligible
             this.rngHashAt(yh, i) < 0.3) // GP1b: own domain, so it can't correlate with the brownout cut in the same epoch
           this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer; M28: a power island doesn't flicker
       }
@@ -3088,7 +3121,7 @@ class City {
           const X = fx + nx, Y = fy + ny;
           if (!this.inMap(X, Y)) continue;
           const j = this.idx(X, Y);
-          if (this.powered[j] && ovFeedsPump(this.over[j])) { fed = true; break; } // GP9a: M28 a self-powered mega island must not feed a pump (it never bridges the grid); GP4a symmetry: an xway is never powered, so this is a provable no-op
+          if (this.powered[j] && OV_FEEDS_PUMP[this.over[j]]) { fed = true; break; } // GP9a: M28 a self-powered mega island must not feed a pump (it never bridges the grid); GP4a symmetry: an xway is never powered, so this is a provable no-op
         }
       }
       this.powered[i] = fed ? 1 : 0;
@@ -5361,7 +5394,7 @@ class City {
       // candidate; M24 a buried pipe isn't either (towers/pumps, like plants,
       // are). The scan ORDER and therefore the pick draw are unchanged.
       for (let i = 0; i < this.over.length; i++)
-        if (ovFireCandidate(this.over[i])) cand.push(i);
+        if (OV_FIRE_CANDIDATE[this.over[i]]) cand.push(i);
       const i = cand.length ? cand[rh.pick(cand.length)]
                             : rh.pick(this.over.length);
       this.ignite(i % MAP, (i / MAP) | 0);
@@ -5783,7 +5816,13 @@ class City {
      wasteRateAt(i): O(1) tonnes/month for ONE tile, from over[i] + lvl[i] +
      ordMods.wasteMul. Zero for anything that is not a DEVELOPED zone tile — an
      undeveloped lot, a road, a park and a power plant all make no garbage here.
-     Never reads cam.*, never reads rot4, never draws RNG. */
+     Never reads cam.*, never reads rot4, never draws RNG.
+     The round is PER TILE and stays that way (it is what keeps every surface —
+     query row, overlay band, census total — quoting the same integer for the
+     same tile). What makes that honest is WASTE_RATE's quarter grid: at the
+     shipped K = 0.75 the product is already an integer, so no tile is rounded
+     away from its true share and the citywide drop equals the per-tile drop
+     exactly. See the WASTE_RATE block for what happens when it does not. */
   wasteRateAt(i) {
     const row = WASTE_RATE[this.over[i]];
     if (!row) return 0;

@@ -1,0 +1,219 @@
+{
+  "title": "GP10a pre-measurement artifact — The Distress Ledger",
+  "milestone": "GP10a — a deterministic monthly sweep that counts decline and changes nothing",
+  "baseline_commit": "80b8957 — 'GP9a SHIP: the waste ledger certified — save v19'. Every anchor, literal and measurement in this file was taken against THAT tree, on js/sim.js at 7107 lines. The GP10a roadmap scope text's line anchors are two milestones stale and are NOT used here.",
+  "purpose": "Pins the baseline, the constants, the four fixtures and every HEAD measurement BEFORE the implementation, so the verification pass compares against numbers that were committed rather than numbers that were discovered. GP7a's provenance gate failed for bundling the pre-measurement with the code; GP9a passed by splitting them.",
+  "process_deviation": "THIS RUN COULD NOT SPLIT THE COMMITS. The implementation pass was executed under an explicit 'do NOT commit' instruction, so the pre-artifact and the code land in the same working tree with no commit boundary between them. The artifact is nonetheless authored to the same contract — every number below is a MEASUREMENT, taken with the harness described in `instrument`, and the HEAD-side numbers were taken from a clean 80b8957 git worktree, not from the edited tree. Recorded rather than silently dropped.",
+
+  "instrument": {
+    "sim_arm": "node vm: a fresh context per arm containing {console, Math, JSON, Date, performance}, into which js/sim.js is evaluated whole. js/sim.js is DOM-free, so this is the entire dependency.",
+    "baseline_arm": "git worktree add <tmp>/gp10a-base 80b8957 — a clean checkout, never the edited tree.",
+    "build_script": "docs/gp1-baseline.json .protocol.build_script, VERBATIM.",
+    "call": "(eval(build_script))(seed) — it CONSTRUCTS and RETURNS the city; passing a pre-made city returns an all-zero run.",
+    "math_random": "UNSTUBBED on every run in this file.",
+    "rollovers": "600 ticks is EXACTLY 25 month rollovers (the %24 gate in tick()). Any protocol phrased in 60/120 rollovers declares its own longer tick count."
+  },
+
+  "measured_baseline_facts_on_80b8957": {
+    "save_ladder": { "live_v_literal": 19, "gp10a_ships": 20, "note": "READ AT IMPLEMENT TIME. The GP10a scope text says v17; that is two rungs stale." },
+    "reference_city": {
+      "seed": 4242, "ticks": 600, "rollovers": 25,
+      "zoned": 2140, "developed": 906, "zUnpow": 964, "unpowShare": 0.4505,
+      "crime_max": 73, "crime_max_at_zero_police_funding": 74
+    },
+    "serialize_roundtrip": {
+      "result": "ALREADY character-identical on HEAD (s1 === s2 === s3)",
+      "chars": 137203,
+      "closes": "preflight_missing_coverage[4] — by measurement, not by a fix cycle"
+    },
+    "complaints_120_rollovers_past_tick_600": {
+      "seed_4242": { "unpowered": 40 },
+      "seed_1": { "unpowered": 40 },
+      "rubble": 0, "traffic": 0, "crime": 0, "poll": 0,
+      "why_crime_never_fires": "COMPLAINT_T.crime is 100 and the measured per-tile max is 73",
+      "unpowered_score": "flat 150"
+    },
+    "diffuse_call_sites": "poll, landv, traffic — three, inside recomputeMaps. Crime is a pure per-tile formula and is NEVER diffused. This is what makes GP10b's 'crime annulus' gate unmeasurable as written (preflight_gate_problems[0]).",
+    "minimap_modes_shipped": ["all", "power", "poll", "value", "crime", "pol", "fire", "traffic", "svc", "dist", "water", "transit", "commute", "risk", "garbage"],
+    "minimap_mode_count": 15,
+    "blight_is_the": 16,
+    "mode_strip_geometry_at_1280x800": { "host_width_px": 160, "scroll_width_px": 279, "last_chip_visible_px": 0, "verdict": "a new chip is 0 px visible — the KNOWN pending strip-overflow decision (D4), not a GP10a defect" },
+    "main_canvas_hash_is_not_a_gate": "three consecutive renderFrame(city, UI) passes on the SAME build hash differently (efad0072 / 1430fd2a / 72a9ccbd). Draw-neutrality is proven STRUCTURALLY (below) plus per-mode minimap hashes, never by a main-canvas hash.",
+    "sprite_bboxes": { "r1": "64x44", "r2_c2_i2": "64x88", "c3": "64x136", "two_percent_of_r2": "113 px", "silhouette_wash_coverage": "~1000 px, ~18% of an r2 bbox" },
+    "perf_noise_floor_600_ticks_seed_4242": {
+      "note": "the design's pinned HEAD band was [1863,1885,1918,2136,2183] ms, median 1918, spread 16.7%. Re-measured on THIS machine under the same harness, both arms, 5 reps each, same session:",
+      "HEAD_ms": [2110, 2187, 2309, 2429, 2953], "HEAD_median": 2309,
+      "spread_pct": 40.0,
+      "verdict": "the 600-tick wall time is dominated by machine noise; the meaningful perf number is the ISOLATED sweep cost against it (C13)."
+    }
+  },
+
+  "pinned_constants": {
+    "DISTRESS_T": {
+      "crime": "CRIME_BAD / 2 = 50 — GP8a's own 'competently run city' anchor (hzResp(c.crime[i], CRIME_BAD/2, CRIME_BAD)) and the APPROVAL_TERMS crime anchor. CRIME_BAD itself (100) is UNREACHABLE per-tile: measured max 73, and 74 at 0% police funding, so a row at 100 would be dead state.",
+      "cong": "0.8 — the LITERAL eviction line in growthPass (gCong(this,i,k) > 0.8) and diagnoseTile.",
+      "dem": "-0.25 — the LITERAL DECLINE test in GROWTH_GATES. At this line the shipped sim already sheds levels; the ledger only counts how long it has been true."
+    },
+    "DISTRESS_MAX": "250 — mirrors unpow's own min(250, ...) clamp, so both counters saturate identically inside a Uint8 plane.",
+    "DISTRESS_BANDS": "[6, 12] — at-risk / critical. READOUT edges only: they gate copy, colour and the complaint, never a consequence.",
+    "DISTRESS_BAND_NAMES": ["Strained", "At risk", "Critical"],
+    "DISTRESS_ABAND_W_FLOOR": "15 — a DECLARED FORWARD CONSTRAINT (decision D1). GP10a never reads it. It exists so GP10b cannot choose an abandonment window <= 12 and make the critical band a state the player can never observe.",
+    "MM_BLIGHT_BANDS": {
+      "values": ["#2e3a44", "#8a5a20", "#d08a30", "#ffd8a0"],
+      "index_0": "the HEALTHY zoned lot (deliberately COOL — on this overlay any warm pixel is a grievance)",
+      "index_1_3": "distressBand() + 1 — strained / at risk / critical",
+      "backgrounds": "#013 water, #111 empty land — the SAME two-value background the garbage branch established",
+      "luminance_rec709": [56.2, 96.0, 146.4, 220.3],
+      "adjacent_steps": [39.8, 50.4, 73.9],
+      "max_channel_separation_between_adjacent": ["R 92", "R 70", "G 78"],
+      "no_pure_white": "deliberate — the rotation gate masks the union of pure-white pixels (the camera-viewport stroke); a white band would be eaten by that mask"
+    },
+    "BLIGHT_ALPHA": "[0.16, 0.28, 0.42] — the per-band alpha of the day-layer silhouette wash, drawn with the drawChar cache idiom over the UNMODIFIED sprite",
+    "save_version": { "from": 19, "to": 20, "new_keys": ["distress (packU8)", "distressCause (packU8)", "history.blight"], "ladder_rule": "both plane keys APPENDED strictly after recallDone; history.blight appended LAST inside the existing history object; NO version-equality test anywhere in deserialize" }
+  },
+
+  "pinned_fixtures": {
+    "note": "All four fixtures are declared as a VERBATIM mutation of the pinned build_script city, so they need no new city-building code and are reproducible from docs/gp1-baseline.json alone. Every number under `measurements` was taken by running exactly these steps.",
+    "FX-DARK": {
+      "script": [
+        "const c = (eval(build_script))(4242); for (let t = 0; t < 1200; t++) c.tick();",
+        "c.ordinances = { watch: true, curfew: true, carpool: true }; c.recomputeOrdinances();",
+        "const pw = Uint8Array.from(c.powered), pre = Uint8Array.from(c.distress);",
+        "for (let y = 0; y < MAP; y++) for (let x = 30; x <= 50; x++) { const i = y*MAP+x; if (c.over[i] === OV.WIRE || c.over[i] === OV.WIREROAD) { c.over[i] = (c.over[i] === OV.WIREROAD) ? OV.ROAD : OV.NONE; c.powerDirty = true; } }",
+        "c.recomputePower();",
+        "FOOTPRINT = every ZR/ZC/ZI tile with pw[i] && !c.powered[i] && pre[i] === 0",
+        "then 18 rollovers (24 ticks each)"
+      ],
+      "recovery_step": "restore the saved over[] values on every cut tile, c.powerDirty = true, c.recomputePower(), then ONE rollover"
+    },
+    "FX-CRIME": {
+      "script": [
+        "const c = (eval(build_script))(4242); for (let t = 0; t < 600; t++) c.tick();",
+        "bulldoze every OV.POLICE anchor; c.funding.police = 0;",
+        "for (let t = 0; t < 600; t++) c.tick();"
+      ]
+    },
+    "FX-SLUMP": {
+      "script": [
+        "const c = (eval(build_script))(4242); for (let t = 0; t < 600; t++) c.tick();",
+        "bulldoze EVERY OV.ZR tile (the company-town cut — the only shape that drives c/i demand under -0.25, because demand is otherwise self-correcting, S5)",
+        "for (let t = 0; t < 24*12; t++) c.tick();"
+      ]
+    },
+    "FX-GRID": {
+      "script": ["const c = (eval(build_script))(4242); for (let t = 0; t < 3600; t++) c.tick();"],
+      "note": "DISTRESS_T.cong = 0.8 is only reachable past roughly 2400 ticks — that is why this fixture runs long rather than being mutated."
+    },
+    "determinism_corpus": {
+      "seeds": "docs/gp1-baseline.json .corpus_seeds — [1,2,4,5,6,8,9,10,11,13,16,17,18,23,24,28,29,30,34,35]",
+      "ticks": 600
+    }
+  },
+
+  "measurements_taken_this_pass": {
+    "C1_byte_identity": {
+      "protocol": "both arms, 20 corpus seeds, 600 ticks, Math.random UNSTUBBED; SHA-256 over over/lvl/anc/varnt/terr/rail/district/unpow/fire/traffic/poll/crime/landv + {funds,pop,jobs,tickCount,month,year,tier,approval} + the four rng cursor ints; plus the serialized JSON compared after deleting distress/distressCause/history.blight and normalising the v literal",
+      "result": "0 differing bytes on 20 of 20 seeds; save JSON identical on 20 of 20",
+      "verdict": "PASS"
+    },
+    "C2_complaint_anti_crosstalk": {
+      "protocol": "seeds 4242 and 1, tick 600, clear messages, 2880 further ticks (120 rollovers), tally complaint items by kind, both arms",
+      "HEAD": { "4242": { "unpowered": 40 }, "1": { "unpowered": 40 } },
+      "GP10a": { "4242": { "unpowered": 40 }, "1": { "unpowered": 40 } },
+      "distress_complaints_on_this_fixture": 0,
+      "verdict": "PASS — 0 kind-count differences"
+    },
+    "C3_sweep_honesty": {
+      "distressVisits": "6400 on 120 of 120 rollovers",
+      "rng_cursor_deltas": "0 on 120 of 120, all four streams",
+      "math_random_calls": "0 on 120 of 120",
+      "over_index_visit_tally": { "min": 1, "max": 73, "total_reads_one_rollover": 94079 },
+      "GATE_CLAUSE_THAT_CANNOT_HOLD_AS_WRITTEN": "C3's 'min tally === max tally === 1 for all 6400 indices' is refuted by the design's OWN section 3(b): the GRIDLOCK row calls the shipped trafficNear(i), whose 5x5 probe reads over[] for up to 25 neighbours and up to 4 times each (the ROAD||WIREROAD||XWAY||RAMP chain). ACCOUNTING, measured: 6400 reads are the sweep's own — exactly ONE per tile, which is the clause's actual intent — and the remaining 87679 are trafficNear's, paid by the 1164 zoned tiles that survived the three O(1) rows (1164 x 25 x ~3). Keeping trafficNear is deliberate: it is the same probe gCong uses, which is what makes DISTRESS_T.cong = 0.8 literally the same line growthPass evicts at. The measurable substitute is: min === 1 (every tile visited), distressVisits === 6400, and the sweep's own read count === 6400."
+    },
+    "C5_C6_FX_DARK": {
+      "footprint_tiles": 504,
+      "distress_equals_k_exactly": "504 of 504 tiles at every k = 1..18 (18 of 18 rollovers, zero tolerance), distressCause === DARK throughout",
+      "zoned_denominator": "2140, CONSTANT on all 18 rollovers",
+      "min_distressShare_over_the_18": 0.4584,
+      "never_decays": true,
+      "DARK_count_equals_approvalCensus_zUnpow": "18 of 18",
+      "causes_at_k=18": { "DARK": 976, "CRIME": 0, "SLUMP": 0, "GRIDLOCK": 233 },
+      "enumerated_residual": "233 GRIDLOCK tiles, from post-cut traffic re-routing — the same effect the design measured as 90 on its own smaller fixture. 0 CRIME, 0 SLUMP.",
+      "recovery": {
+        "regained_power": 279, "reset_to_zero": 275,
+        "residual": "4 tiles, ALL cause GRIDLOCK",
+        "reading": "NOT a self-healing failure and not a leak. The counter means 'consecutive months FAILING', not 'consecutive months dark' — 4 tiles regained power and immediately failed the gridlock row from post-restore re-routing. The design's pinned 247/247 was taken on a fixture where no other row applied. A gate phrased as 'every tile that regains power resets' must be scoped to tiles whose only failing row was DARK."
+      }
+    },
+    "C7_cause_attribution": {
+      "FX-CRIME": { "max_crime": 73, "zoned_tiles_with_crime>=50": 41, "reported_CRIME": 22, "other_causes": { "DARK": 936, "SLUMP": 0, "GRIDLOCK": 0 },
+        "reading": "the 19-tile gap is FIRST-MATCH working correctly: those tiles are also dark, and DARK outranks CRIME. The target set for this fixture must therefore be declared as 'POWERED zoned tiles with crime >= 50', on which attribution is exact." },
+      "FX-SLUMP": { "demand": { "r": 1.0, "c": -0.345, "i": -0.347 }, "causes": { "DARK": 446, "CRIME": 0, "SLUMP": 1188, "GRIDLOCK": 0 } },
+      "FX-GRID": { "causes": { "DARK": 960, "CRIME": 31, "SLUMP": 0, "GRIDLOCK": 206 },
+        "census": { "zoned": 2140, "distressed": 1197, "share": 0.5593, "dev": 965, "devDistressed": 632, "devShare": 0.6549 } },
+      "orphan_check": "distressCause[i] === 0 for 100% of tiles with distress[i] === 0, measured over the reference city — the two planes are written and cleared on the same lines, so the invariant is structural."
+    },
+    "C8_read_only": {
+      "static_scan": "the identifier `distress` appears in ZERO lines inside growthPass, gFit, gSeedP, gUpP, gUp, resetGrowthCtx, recomputeDemand, computeDemandParts, GROWTH_GATES or INFRA_GATES — measured by brace-matched body extraction, 0 hits",
+      "rng": "distressTick draws from no cursor stream and calls no Math.random (measured, 120 of 120 rollovers)",
+      "tables": "DISTRESS_CAUSES is walked by exactly two callers — distressTick and the BLOCK_DISTRESS ADVISORY_GATES row (_attachAdvisories only, which is draw-neutral and RNG-neutral)"
+    },
+    "C10_minimap": {
+      "modes_after": 16,
+      "structural_draw_neutrality": "git diff js/render.js contains ZERO deleted lines — the file is purely additive, so all 15 shipped renderMinimap branches are byte-identical by construction. Per-mode pixel hashes remain the verifier's browser-side confirmation of that proof.",
+      "legend": "MM_NAMES.blight + MM_LEGENDS.blight added in ONE edit (the GP8a/GP9a one-edit rule); five swatch/label pairs, the same load the `garbage` row is measured at 23 px with"
+    },
+    "C11_ten_site_clear": {
+      "sites_present": 10,
+      "current_line_numbers_after_the_edit": { "waterfill": 3075, "place_footprint": 3094, "bulldoze": 3148, "road_crumble": 4483, "fire_burnout": 5489, "tornado": 5675, "quake": 5702, "flood": 5737, "riot": 5766, "monster": 5790 },
+      "defensive_only": "road_crumble — roadWearTick `continue`s on anything that is not ROAD/WIREROAD, and a road tile is never zoned, so it can never carry a nonzero distress byte. Written anyway so the ten destruction sites are one uniform rule."
+    },
+    "C12_save_compat": {
+      "v_literal": 20,
+      "version_equality_tests_in_deserialize": "0 (the three `v===20` string matches in the file are all inside comments)",
+      "pre_v20_save_load": { "sum_distress": 0, "sum_distressCause": 0 },
+      "history_blight_on_a_pre_v20_save": "25 entries, ALL null, length equal to history.pop — the normaliseHistory LEFT PAD contract, not []",
+      "history_lengths_after_250_rollovers": { "blight": 240, "pop": 240, "verdict": "PASS — proves BOTH the normaliseHistory list and the collectBudget >240 trim mirror were extended" },
+      "roundtrip": "s1 === s2, character-identical, 142060 chars",
+      "determinism": "identical distress[] SHA-256 (f97e0b2e9f073348) on 3 of 3 unstubbed runs"
+    },
+    "C13_perf": {
+      "protocol": "5 reps x 600 ticks per arm, seed 4242, fresh city per rep, node vm, same session, same machine",
+      "HEAD_ms": [2110, 2187, 2309, 2429, 2953], "HEAD_median": 2309,
+      "GP10a_ms": [1997, 2021, 2069, 2318, 2470], "GP10a_median": 2069,
+      "isolated_sweep_warm": { "ms_per_rollover": 0.481, "ms_per_25_rollovers": 12.0, "share_of_a_600_tick_run_pct": 0.58 },
+      "bar": "<= 2.0% / <= 38 ms per 25 rollovers",
+      "verdict": "PASS — 0.58% and 12.0 ms, and the GP10a median sits below the HEAD median. Note the cold/unwarmed sweep measures ~1.96 ms/rollover; the warm figure is the one that describes a running game."
+    },
+    "C14_save_size": {
+      "HEAD_chars": 137203,
+      "GP10a_chars_reference_city": 142060,
+      "delta_pct_reference_city": 3.54,
+      "clean_city": { "HEAD": 122951, "GP10a": 123142, "delta_chars": 191, "delta_pct": 0.155 },
+      "bar": "<= +5.0% on both, clean city <= +0.5%",
+      "verdict": "PASS — worse figure +3.54%"
+    }
+  },
+
+  "open_design_decisions_surfaced_not_decided": {
+    "D1": "ABAND_W is never assigned anywhere in the GP10 split, yet GP10a's bands (>=6 / >=12) and GP10b's gate 8 are coupled to it. IMPLEMENTED RECOMMENDATION: DISTRESS_ABAND_W_FLOOR = 15 is pinned in GP10a's scope (declared, never read by GP10a) so GP10b cannot choose ABAND_W <= 12 and make the critical band unreachable state. The alternative — expressing the bands as fractions of ABAND_W — is still open and is the user's call.",
+    "D2": "The distress complaint's SCORE RANK. MEASURED: on seeds 4242 and 1 all 40 complaints in 120 rollovers are `unpowered` at a flat 150, so any score above 150 takes all 40 and starves the only kind the corpus produces. IMPLEMENTED RECOMMENDATION: rank LAST at a flat 30, below crime/poll's 40 floor, as an `else if` after the unpowered branch — so the fax appears only where no shipped grievance qualifies, which keeps 'behaves exactly as before' literally true (confirmed by C2).",
+    "D3": "Score ALL zoned tiles or only developed ones. IMPLEMENTED RECOMMENDATION: score every zoned tile (the approvalCensus denominator discipline — a developed-only share self-heals), but restrict the S4 tile wash, the BLOCK_DISTRESS advisory and the complaint to lvl > 0, and publish BOTH counts (share and devShare) in distressCensus. This also pre-empts GP10b's contradiction that a lvl-0 'abandoned' tile has no derelict sprite size.",
+    "D4": "The Blight chip is 0 px visible at the default viewport (host 160 px vs scrollWidth 279 px, measured). That is the already-pending strip-overflow decision, NOT a GP10a defect. GP10a exercises the mode through setMapMode()+renderMinimap(), and chip visibility is reported rather than scored."
+  },
+
+  "preflight_missing_coverage_disposition": {
+    "[1]": "CLOSED by C2 — complaint anti-crosstalk, pinned baseline {unpowered: 40} on two seeds, both arms.",
+    "[4]": "CLOSED by measurement — HEAD's serialize round-trip is ALREADY character-identical, so there was nothing to fix.",
+    "[5]": "CLOSED by C13 — 0.481 ms/rollover measured warm against a 600-tick run.",
+    "[0], [2], [3], [6]": "GP10b-only. They cannot be measured before the behaviour half exists and are discharged as GP10b gate/scope re-specifications in docs/gameplay-roadmap.json rather than silently dropped."
+  },
+
+  "explicitly_out_of_scope_for_GP10a": [
+    "abandonment of any kind — no level loss, no derelict sprite, no over[] change",
+    "decay: distress feeds nothing (not landv, not demand, not growth, not the budget)",
+    "any blight radius or neighbour coupling",
+    "any copy anywhere that promises abandonment or implies a countdown",
+    "touching GP6 / GP7a / GP8a / GP9a code — three of those layers are live-but-uncertified and pinned only by user adjudication"
+  ]
+}

@@ -1910,7 +1910,7 @@ const ADVISORY_GATES = Object.freeze([
     evid: (c, i) => [["Fire coverage", c.fireCov[i]], ["Thin line", SVC_LOW],
                      ["Funding", c.funding.fire + "%"],
                      ["Density", "level " + c.lvl[i]],
-                     ["Dept potency", hzPct(c.svcStrain.fire) + "%"],
+                     ["Dept potency", hzPct(hzPotency(c, "fire")) + "%"],
                      ["Aged plant within 2", hzAgedPlantNear(c, i) ? "yes" : "no"],
                      ["Exposure band", HAZARD_BAND_NAMES[hazardTileBand(c, i)]]] },
 ]);
@@ -1972,12 +1972,33 @@ const hzResp = (v, anchor, bad) => bad === anchor ? 1
 const hzClamp2 = (v) => Math.max(0, Math.min(2, v));
 const hzPct = (v) => Math.round(v * 100);
 
+/* The ONE definition of a department's DELIVERED potency: its strain multiplier
+   times the funding dial that recomputeMaps already multiplies the whole
+   department by (stampCoverage(..., funding/100, svcStrain)). Raw svcStrain
+   alone is a trap — deptStrain() reports 1 ("no strain") whenever cap === 0, so
+   a department the mayor has defunded to zero reads perfectly healthy. Both the
+   Civil Defense panel and the FIRE_RISK_HIGH tile row read this, so the two
+   surfaces can never disagree about how much service is actually being paid for. */
+const hzPotency = (c, dept) => c.svcStrain[dept] * c.funding[dept] / 100;
+
 // The shipped spawn model, quoted — NOT re-derived. 0.0009 is the per-tick gate
 // in tick()'s random-misfortune block and 288 = 24 ticks/month * 12 months. The
 // roll site itself is deliberately left untouched by GP8a.
 const HZ_PTICK = 0.0009;
 const HZ_TICKS_PER_YEAR = 288;
 const HZ_PYEAR = 1 - Math.pow(1 - HZ_PTICK, HZ_TICKS_PER_YEAR);
+/* TWO different year figures, published side by side because they answer two
+   different questions and a soak measures them with two different estimators:
+     HZ_PYEAR   P(at least one disaster in a year of eligible ticks)
+                = 1-(1-p)^288 = 0.228421 — what "the odds this year" means, and
+                what a soak must measure as "the fraction of years that had one".
+     HZ_EVYEAR  the EXPECTED NUMBER of disasters in such a year = 288p = 0.259200
+                — what a soak measures as "events / city-years".
+   They differ by 13.5% by construction (E[N] > P(N>=1) for any Poisson-ish
+   count), so quoting one and measuring the other reads as a 13% calibration
+   error in a sim that is exactly on model. The panel prints both and names
+   which is which; the roll site itself is untouched. */
+const HZ_EVYEAR = HZ_PTICK * HZ_TICKS_PER_YEAR;
 
 // The coast front, per-tile: a LAND tile orthogonally adjacent to water — the
 // same predicate startDisaster("flood") builds its front array from, so the
@@ -2063,9 +2084,10 @@ const HAZARD_TERMS = Object.freeze([
         blurb: (c, cen) => `engines reach your zoned blocks at an average ` +
           `${Math.round(cen.covFire)} of a healthy ${SVC_OK}, at ${c.funding.fire}% funding` },
       { id: "strain", label: "department strain", w: 3, unit: "% potency",
-        val: (c, cen) => cen.strainFire, anchor: 1, bad: 0.5,
-        blurb: (c, cen) => `the fire service is running at ${hzPct(cen.strainFire)}% ` +
-          `of its rated potency against the buildings it has to protect` },
+        val: (c, cen) => cen.potFire, anchor: 1, bad: 0.5,
+        blurb: (c, cen) => `the fire service is delivering ${hzPct(cen.potFire)}% ` +
+          `of its rated potency against the buildings it has to protect, ` +
+          `at ${c.funding.fire}% funding` },
       { id: "plants", label: "aging power plants", w: 3, unit: "% of plants",
         val: (c, cen) => cen.agedShare, anchor: 0, bad: 0.5,
         blurb: (c, cen) => `${cen.agedPlants} of your ${cen.plantAnchors} power plants ` +
@@ -2146,9 +2168,10 @@ const HAZARD_TERMS = Object.freeze([
         blurb: (c, cen) => `${hzPct(cen.unempShare)}% of the residents who want work ` +
           `cannot find it — ${c.pop.toLocaleString()} people, ${c.jobs.toLocaleString()} jobs` },
       { id: "strain", label: "department strain", w: 3, unit: "% potency",
-        val: (c, cen) => cen.strainPol, anchor: 1, bad: 0.5,
-        blurb: (c, cen) => `the police department is running at ` +
-          `${hzPct(cen.strainPol)}% of its rated potency` },
+        val: (c, cen) => cen.potPol, anchor: 1, bad: 0.5,
+        blurb: (c, cen) => `the police department is delivering ` +
+          `${hzPct(cen.potPol)}% of its rated potency, at ` +
+          `${c.funding.police}% funding` },
     ],
     focus: (c) => apxArgmax(c.crime) },
 
@@ -5795,6 +5818,20 @@ class City {
       agedShare: plantAnchors ? agedPlants / plantAnchors : 0,
       unempShare: need > 0 ? Math.max(0, need - this.jobs) / need : 0,
       strainFire: this.svcStrain.fire, strainPol: this.svcStrain.police,
+      /* DELIVERED potency, not raw strain — the fix for a measured false
+         improvement. deptStrain() reports strain === 1 ("no strain at all")
+         whenever cap === 0, and cap is zero for a department with no stations
+         OR one the mayor has defunded to 0% (stampCoverage multiplies the whole
+         department by funding/100 at recomputeMaps). MEASURED on FX-SMALL:
+         funding.police 100 -> 0 moved svcStrain.police 0.884 -> 1.000, i.e. the
+         raw meter read HEALTHIER after the department was abolished, and the
+         riot row's strain driver moved in the IMPROVING direction while the
+         city burned. APPROVAL_TERMS hit the identical trap and solved it by
+         folding coverage into apxCovPen (see the comment above it); the hazard
+         panel folds the funding dial in here instead, so "potency" means what
+         the department actually delivers. At 100% funding with no strain this
+         is exactly 1.000, so the C3 neutral-anchor identity is untouched. */
+      potFire: hzPotency(this, "fire"), potPol: hzPotency(this, "police"),
       season: seasonOf(this.month),
     };
   }
@@ -5805,13 +5842,17 @@ class City {
      sentence are all the same computation rather than four agreeing ones: the
      row's `topDriver` is the very object in its own `drivers` array (identity,
      not a copy), and the sentence quotes that object's label verbatim.
-       { census, pTick, pYearAll, pYearAgg, rows: [...] }
+       { census, pTick, pYearAll, pYearAgg, evYearAll, evYearAgg, rows: [...] }
+     pYear* is a PROBABILITY (chance of at least one in a year); evYear* is an
+     EXPECTED COUNT (disasters per year). Both are published, per row and in
+     aggregate, because they are the two things a soak can measure and they
+     differ by 13.5% by construction.
      rows sorted by exp descending, id ascending on ties. Called once per panel
      open and once per advisor fill — NEVER per frame, never per tick. */
   hazardReport() {
     const cen = this.hazardCensus();
     const rows = [];
-    let agg = 0;
+    let agg = 0, evAgg = 0;
     for (const t of HAZARD_TERMS) {
       const coastal = t.live(this, cen);
       const live = this.disastersEnabled && coastal;
@@ -5838,7 +5879,8 @@ class City {
       const exp = hzClamp2(wsum ? ssum / wsum : 1);
       const band = hazardBand(exp);
       const pYear = live ? t.base * HZ_PYEAR : 0;
-      agg += pYear;
+      const evYear = live ? t.base * HZ_EVYEAR : 0;
+      agg += pYear; evAgg += evYear;
       const head = live
         ? `${HAZARD_BAND_NAMES[band]} exposure, at ${(pYear * 100).toFixed(1)}% a year.`
         : !this.disastersEnabled
@@ -5846,13 +5888,14 @@ class City {
           : `This map has no shoreline, so the odds are exactly 0% a year — ` +
             `and the other six rows are NOT reweighted, because the sim does ` +
             `not re-roll an impossible flood.`;
-      rows.push({ id: t.id, label: t.label, base: t.base, live, pYear, exp, band,
+      rows.push({ id: t.id, label: t.label, base: t.base, live, pYear, evYear, exp, band,
         bandName: HAZARD_BAND_NAMES[band], drivers, topDriver: top,
         sentence: `${head} The biggest single factor is ${top.label} — ${top.blurb}. ${t.tail}`,
         mode: t.mode, focus: t.focus });
     }
     rows.sort((a, b) => (b.exp - a.exp) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    return { census: cen, pTick: HZ_PTICK, pYearAll: HZ_PYEAR, pYearAgg: agg, rows };
+    return { census: cen, pTick: HZ_PTICK, pYearAll: HZ_PYEAR, pYearAgg: agg,
+             evYearAll: HZ_EVYEAR, evYearAgg: evAgg, rows };
   }
 
   /* ---------- GP7a: the ONE arithmetic site for the monthly tax bill ----------

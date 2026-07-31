@@ -2135,7 +2135,10 @@ function openCivDef() {
     ? `<div class="civdef-num">${agg}%<span class="civdef-sub">chance of SOMETHING, per year</span></div>` +
       `<div class="civdef-note">The odds below are the city's actual spawn model: ` +
       `a ${(rep.pTick * 100).toFixed(2)}% roll every tick, ${HZ_TICKS_PER_YEAR} ticks a year, ` +
-      `split by kind. <b>Nothing you build changes them.</b> What you build changes ` +
+      `split by kind — which works out to <b>${rep.evYearAgg.toFixed(3)} disasters a year</b> ` +
+      `on average, in the years the roll is live. (That is the expected COUNT; the ` +
+      `${agg}% above is the CHANCE of at least one. They are not the same number.) ` +
+      `<b>Nothing you build changes either.</b> What you build changes ` +
       `the <b>band</b> — how much of the city is standing in the way when one lands.</div>`
     : `<div class="civdef-num">0.0%<span class="civdef-sub">random disasters are OFF</span></div>` +
       `<div class="civdef-note">Random Disasters is switched off in the Disasters menu, ` +
@@ -2181,12 +2184,20 @@ function openCivDef() {
    The bookkeeping runs even with the flag off, so switching the pref on
    mid-game cannot fire on a disaster that already started. Exactly one pause
    and one jump PER START — never per tick of a 90-tick tornado. */
-let dfYear = -1, dfSeen = 0;
+let dfCity = null, dfYear = -1, dfSeen = 0;
 function disasterFocusFrame() {
   if (!city || !city.recCur) return;
   const y = city.year, n = city.recCur.disasters;
-  const started = dfYear < 0 ? false : (y !== dfYear ? n > 0 : n > dfSeen);
-  dfYear = y; dfSeen = n;
+  /* dfCity is the city the two counters describe. newCity()/loadCity()/
+     startScenario() REBIND the global, and the rollover rule below ("a changed
+     year means any nonzero count is new") cannot tell a rollover from a swap:
+     MEASURED, loading a save carrying recCur.disasters = 4 in a year 3 apart
+     paused the game with the pref on — and silently, because city.disaster is
+     null and nothing is burning, so the function returned at the `fx < 0` guard
+     before it could even say why. A swap re-seeds the counters and never fires. */
+  const started = (dfCity !== city || dfYear < 0)
+    ? false : (y !== dfYear ? n > 0 : n > dfSeen);
+  dfCity = city; dfYear = y; dfSeen = n;
   if (!started || !UI.prefs.disasterFocus) return;
   setSpeed(0);
   // The moving/stationary kinds carry the head position; a fire sets no

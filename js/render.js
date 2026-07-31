@@ -2271,23 +2271,49 @@ const RISK_BANDS = ["#243a2a", "#2f7e78", "#e0a028", "#ffd2e0"];
 /* GP8a: the Risk band buffer, memoised in MODULE scope — deliberately NOT a
    field on City. That is what makes GP8a's read-only proof structural: the
    milestone adds ZERO keys to the City object and ZERO keys to the save.
-   The key is every sim revision counter that can move a band, plus the
-   recomputeMaps period (14 ticks — the coverage planes cannot change faster
-   than that), so the buffer is rebuilt at most once per plane refresh and never
-   twice for the same state. `riskBuf` stays at module scope so a rotation gate
-   can hash the BUFFER: hashing the minimap canvas is invalid, because the
-   camera-viewport rect below routes four screen corners through the
-   rotation-aware screenToTileF and therefore differs at every rotation. */
-let riskBuf = null, riskKey = "";
+   `riskBuf` stays at module scope so a rotation gate can hash the BUFFER:
+   hashing the minimap canvas is invalid, because the camera-viewport rect below
+   routes four screen corners through the rotation-aware screenToTileF and
+   therefore differs at every rotation.
+
+   THE KEY IS EXACTLY buildTerrainLayer's KEY (terrRev|devRev|tickCount, ~140
+   lines above) plus the city's own identity, and that is a CORRECTION, not a
+   preference. The first cut keyed on the revision counters plus (tickCount/14),
+   the recomputeMaps period, on the theory that the coverage planes cannot move
+   faster than that. hazardTileScore also reads lvl[], and ORGANIC ZONE GROWTH
+   moves lvl WITHOUT bumping devRev — MEASURED on the pinned reference city:
+   0 devRev bumps against 135 lvl changes over 120 ticks, which left the painted
+   map disagreeing with the tile inspector on 29 of those 120 ticks (tick 313,
+   tile (30,27): the minimap pixel said High while openQuery on the same tile
+   said Severe). That directly falsified the "so the map and the tile readout
+   can never disagree" claim 40 lines above, so the stale window is gone: every
+   input hazardTileScore reads is either mutated inside tick() (tickCount moves)
+   or by place()/bulldoze()/waterfill (devRev or terrRev moves).
+   The identity check is the trainMemo idiom (js/render.js:105): two City
+   objects can agree on all three counters — a freshly loaded city resets
+   terrRev/devRev to 0 — and without it one city could paint the other's bands.
+   Cost of exactness: on a GROWING city the buffer is rebuilt once per repaint,
+   because something relevant really has changed. That is the honest hit rate;
+   an unchanged city (paused, or simply not growing this tick) still pays
+   nothing. MEASURED on an 80x80: the bake costs ~0.63 ms (a repaint that bakes
+   is 3.45 ms against 2.82 ms for one that does not, and 2.80 ms for the shipped
+   "value" overlay) and it runs at the minimap's 4 Hz repaint cadence — never
+   per frame, never per tick, and the census is never called from either. */
+let riskBuf = null, riskKey = "", riskCity = null;
 function riskBands(city) {
-  const key = `${city.devRev}|${city.terrRev}|${city.powerEpoch}|${city.trafficEpoch}|` +
-    `${(city.tickCount / 14) | 0}|${city.funding.fire},${city.funding.police}|` +
-    `${city.disastersEnabled ? 1 : 0}|${city.year}`;
-  if (riskBuf && riskKey === key && riskBuf.length === city.over.length) return riskBuf;
+  /* terrRev|devRev|tickCount is buildTerrainLayer's key verbatim; the two extra
+     terms cover the ONLY two ways the derived planes move with the clock
+     STOPPED — a coverage-department funding commit and an ordinance toggle both
+     call recomputeMaps() straight out of the dialog handler (js/ui.js:1023 and
+     :1041) so the overlays react while paused. Without them the Risk map would
+     be the one overlay that ignored the budget slider until the next tick. */
+  const key = `${city.terrRev}|${city.devRev}|${city.tickCount}|` +
+    `${city.funding.fire},${city.funding.police}|${Object.keys(city.ordinances).join(",")}`;
+  if (riskBuf && riskCity === city && riskKey === key && riskBuf.length === city.over.length) return riskBuf;
   const n = city.over.length;
   if (!riskBuf || riskBuf.length !== n) riskBuf = new Uint8Array(n);
   for (let i = 0; i < n; i++) riskBuf[i] = hazardTileBand(city, i);
-  riskKey = key;
+  riskKey = key; riskCity = city;
   return riskBuf;
 }
 

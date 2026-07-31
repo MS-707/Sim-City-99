@@ -1,0 +1,716 @@
+{
+  "title": "GP8a \u2014 Civil Defense hazard soak & measurement artifact",
+  "milestone": "GP8a \u2014 Civil Defense: the honest risk ruler (read-first, save-neutral, byte-identical)",
+  "established": "2026-07-31",
+  "pinned_baseline": "f74b6e0 (GP7a checkpoint 3) \u2014 the tree every M-number below was measured against unless the row says otherwise",
+  "provenance_rule": {
+    "rule": "C20 requires this file to be committed ALONE, before any file under js/ / index.html / css/ is touched, and to be a strict ancestor of every implementation commit.",
+    "status_in_this_pass": "NOT SATISFIED \u2014 the implementing session was instructed not to commit anything. The artifact and the implementation therefore sit in one uncommitted working tree. Whoever commits must land this file (plus docs/gameplay-roadmap.json) in its own commit FIRST, then the js/ + index.html + css/ changes, or C20 fails on provenance alone.",
+    "artifact_files": [
+      "docs/gp8a-hazard-soak.json",
+      "docs/gameplay-roadmap.json"
+    ]
+  },
+  "harness": {
+    "kind": "DOM-free node vm \u2014 js/sim.js evaluated in a fresh vm context per seed, Math.random UNSTUBBED",
+    "build_script": "docs/gp1-baseline.json .protocol.build_script, run VERBATIM as (eval(build_script))(seed)",
+    "note": "sim.js is DOM-free and loads in a bare vm context with only the standard globals plus btoa/atob (serialize() packs planes to base64)."
+  },
+  "fixtures": {
+    "FX-CORPUS": {
+      "seeds": [
+        1,
+        2,
+        4,
+        5,
+        6,
+        8,
+        9,
+        10,
+        11,
+        13,
+        16,
+        17,
+        18,
+        23,
+        24,
+        28,
+        29,
+        30,
+        34,
+        35
+      ],
+      "map": 80,
+      "build": "(eval(build_script))(seed) then disastersEnabled=true, funds=9e9",
+      "measured": "all 20 seeds are COASTAL \u2014 coast front 459..742 tiles, water 941..2547 tiles, 0 landlocked seeds"
+    },
+    "FX-REF": {
+      "definition": "FX-CORPUS seed 4 at tick 600",
+      "measured": {
+        "pop": 6776,
+        "jobs": 4856,
+        "water_tiles": 1143,
+        "coast_front": 530,
+        "zoneZ": 2285,
+        "devTiles": 1415,
+        "dev1": 1355,
+        "dev2plus": 60,
+        "covFire": 0.0,
+        "covPol": 0.0,
+        "pollLocal": 14.6512,
+        "crimeLocal": 18.7904,
+        "plantAnchors": 4,
+        "agedPlants": 0
+      },
+      "note": "the pinned build script places NO fire or police stations, so the reference city genuinely runs at coverage 0 \u2014 that is a property of the fixture, not a bug in the ruler."
+    },
+    "FX-LAND": {
+      "definition": "FX-REF with every TERR.WATER tile overwritten to TERR.GRASS before the first tick",
+      "measured": {
+        "water_tiles_overwritten": 1143,
+        "coast_front": 0
+      }
+    },
+    "FX-SMALL": {
+      "definition": "80x80, 2 coal plants + wire mesh, water main rows on a 5 pitch, a 3-pitch street grid over a 20x20 zoned block at (20,20), 3 fire stations + 2 police, 600 ticks",
+      "measured": {
+        "pop": 232,
+        "jobs": 224,
+        "zoneZ": 62,
+        "devTiles": 60,
+        "covFire": 15.68,
+        "covPol": 9.18,
+        "crimeLocal": 22.66
+      }
+    },
+    "FX-EXPOSED": {
+      "definition": "FX-SMALL with every station bulldozed, funding.fire = funding.police = 0, every plant aged 45 years, then 24 ticks",
+      "measured": {
+        "covFire": 0.0,
+        "crimeLocal": 26.5,
+        "fire_row_exp_before": 1.2988,
+        "fire_row_exp_after": 1.5714,
+        "band_before": "High",
+        "band_after": "Severe",
+        "boundary_crossed": true
+      }
+    }
+  },
+  "measurements": {
+    "M1": {
+      "what": "MENUS.disasters().length on the pinned baseline",
+      "value": 5,
+      "detail": "4 arrays + 1 separator \u2014 [Start Fire], [Tornado], [UFO Visit], '-', [Random Disasters]. 3 kinds -> 7 kinds therefore gives 9 rows (8 arrays + 1 separator), NOT the 8 the stale gate text asserts.",
+      "measured_in_this_pass": true,
+      "how": "source read of gp8a-base/js/ui.js"
+    },
+    "M2": {
+      "what": "Object.keys(MM_NAMES).length / MM_LEGENDS / document.querySelectorAll('.mm').length on the baseline",
+      "value": [
+        13,
+        13,
+        13
+      ],
+      "measured_in_this_pass": true,
+      "how": "source + index.html count; after GP8a all three read 14"
+    },
+    "M3": {
+      "what": "JSON.parse(city.serialize()).v",
+      "value": 18,
+      "key_count": 51,
+      "detail": "The roadmap's GP8a gate text still says v:17; GP7a is live and the tree writes 18. The design brief's '40 keys' is also stale \u2014 the live payload carries 51 keys. GP8a leaves BOTH untouched.",
+      "measured_in_this_pass": true
+    },
+    "M4": {
+      "what": "RNG cursor streams",
+      "value": [
+        "growth",
+        "fire",
+        "hazard",
+        "build"
+      ],
+      "detail": "each an int .s on city.rng (RngStream)",
+      "measured_in_this_pass": true
+    },
+    "M5": {
+      "what": "aggregate disaster rate, 20 corpus seeds x 50 sim-years x 288 ticks, Math.random UNSTUBBED, disasters ON",
+      "events": 238,
+      "total_ticks": 288000,
+      "eligible_ticks": 265370,
+      "eligible_city_years": 921.42,
+      "measured_rate_per_year": 0.2583,
+      "published_pYearAgg": 0.2284213823,
+      "relative_error": 0.1308,
+      "poisson_95_ci_count": [
+        208.7,
+        270.2
+      ],
+      "poisson_95_ci_rate": [
+        0.2265,
+        0.29324
+      ],
+      "verdict": "published 0.22842 lies INSIDE the measured 95% rate interval [0.22652, 0.29328]; relative error +13.1% is inside the 20% bar",
+      "measured_in_this_pass": true
+    },
+    "M6": {
+      "what": "per-kind counts and the power split from the same soak",
+      "per_kind": {
+        "fire": {
+          "observed": 139,
+          "expected_at_published_odds": 115.76,
+          "observed_share": 0.58403,
+          "published_share": 0.55,
+          "relative_error": 0.0619,
+          "poisson_95_ci_count": [
+            116.9,
+            164.1
+          ],
+          "scored": true,
+          "verdict": "SCORED: |observed share - published| / published = 6.2%, inside the 20% bar"
+        },
+        "tornado": {
+          "observed": 37,
+          "expected_at_published_odds": 27.36,
+          "observed_share": 0.15546,
+          "published_share": 0.13,
+          "relative_error": 0.1959,
+          "poisson_95_ci_count": [
+            26.0,
+            51.0
+          ],
+          "scored": false,
+          "verdict": "NOT RESOLVABLE AT THIS SAMPLE: expected 27.4 events is under the power floor of 30; observed 37, exact Poisson 95% CI [26.0, 51.0]. Reported, never scored."
+        },
+        "ufo": {
+          "observed": 20,
+          "expected_at_published_odds": 21.05,
+          "observed_share": 0.08403,
+          "published_share": 0.1,
+          "relative_error": -0.1597,
+          "poisson_95_ci_count": [
+            12.2,
+            30.9
+          ],
+          "scored": false,
+          "verdict": "NOT RESOLVABLE AT THIS SAMPLE: expected 21.0 events is under the power floor of 30; observed 20, exact Poisson 95% CI [12.2, 30.9]. Reported, never scored."
+        },
+        "quake": {
+          "observed": 17,
+          "expected_at_published_odds": 16.84,
+          "observed_share": 0.07143,
+          "published_share": 0.08,
+          "relative_error": -0.1071,
+          "poisson_95_ci_count": [
+            9.9,
+            27.2
+          ],
+          "scored": false,
+          "verdict": "NOT RESOLVABLE AT THIS SAMPLE: expected 16.8 events is under the power floor of 30; observed 17, exact Poisson 95% CI [9.9, 27.2]. Reported, never scored."
+        },
+        "flood": {
+          "observed": 10,
+          "expected_at_published_odds": 14.73,
+          "observed_share": 0.04202,
+          "published_share": 0.07,
+          "relative_error": -0.3998,
+          "poisson_95_ci_count": [
+            4.8,
+            18.4
+          ],
+          "scored": false,
+          "verdict": "NOT RESOLVABLE AT THIS SAMPLE: expected 14.7 events is under the power floor of 30; observed 10, exact Poisson 95% CI [4.8, 18.4]. Reported, never scored."
+        },
+        "riot": {
+          "observed": 11,
+          "expected_at_published_odds": 11.58,
+          "observed_share": 0.04622,
+          "published_share": 0.055,
+          "relative_error": -0.1597,
+          "poisson_95_ci_count": [
+            5.5,
+            19.7
+          ],
+          "scored": false,
+          "verdict": "NOT RESOLVABLE AT THIS SAMPLE: expected 11.6 events is under the power floor of 30; observed 11, exact Poisson 95% CI [5.5, 19.7]. Reported, never scored."
+        },
+        "monster": {
+          "observed": 4,
+          "expected_at_published_odds": 3.16,
+          "observed_share": 0.01681,
+          "published_share": 0.015,
+          "relative_error": 0.1204,
+          "poisson_95_ci_count": [
+            1.1,
+            10.2
+          ],
+          "scored": false,
+          "verdict": "NOT RESOLVABLE AT THIS SAMPLE: expected 3.2 events is under the power floor of 30; observed 4, exact Poisson 95% CI [1.1, 10.2]. Reported, never scored."
+        }
+      },
+      "power_floor": "expected count >= 30 -> SCORED; below -> observed count + exact Poisson 95% CI is REPORTED and never scored",
+      "scored_kinds": [
+        "fire"
+      ],
+      "unscored_kinds": [
+        "tornado",
+        "ufo",
+        "quake",
+        "flood",
+        "riot",
+        "monster"
+      ],
+      "note": "At 921 eligible city-years only FIRE clears the floor. That is the whole of preflight #1: a per-kind +/-20% bar is unachievable at any feasible sample for monster (expected 3.2) or riot (11.6).",
+      "measured_in_this_pass": true
+    },
+    "M7": {
+      "what": "coastline of all 20 corpus fixtures",
+      "coast_front_range": [
+        459,
+        742
+      ],
+      "water_tile_range": [
+        941,
+        2547
+      ],
+      "landlocked_seeds": 0,
+      "per_seed": {
+        "1": {
+          "front": 622,
+          "water": 1610
+        },
+        "2": {
+          "front": 584,
+          "water": 1674
+        },
+        "4": {
+          "front": 530,
+          "water": 1143
+        },
+        "5": {
+          "front": 681,
+          "water": 1674
+        },
+        "6": {
+          "front": 668,
+          "water": 1846
+        },
+        "8": {
+          "front": 660,
+          "water": 1876
+        },
+        "9": {
+          "front": 459,
+          "water": 941
+        },
+        "10": {
+          "front": 647,
+          "water": 1855
+        },
+        "11": {
+          "front": 553,
+          "water": 1338
+        },
+        "13": {
+          "front": 614,
+          "water": 2547
+        },
+        "16": {
+          "front": 688,
+          "water": 1544
+        },
+        "17": {
+          "front": 617,
+          "water": 1748
+        },
+        "18": {
+          "front": 619,
+          "water": 1319
+        },
+        "23": {
+          "front": 528,
+          "water": 1581
+        },
+        "24": {
+          "front": 525,
+          "water": 1080
+        },
+        "28": {
+          "front": 607,
+          "water": 1427
+        },
+        "29": {
+          "front": 742,
+          "water": 1825
+        },
+        "30": {
+          "front": 615,
+          "water": 1207
+        },
+        "34": {
+          "front": 597,
+          "water": 1904
+        },
+        "35": {
+          "front": 596,
+          "water": 2042
+        }
+      },
+      "measured_in_this_pass": true
+    },
+    "M8": {
+      "what": "ELIGIBLE ticks (disastersEnabled && pop > 200 at the roll) per 14,400-tick soak",
+      "per_seed": {
+        "1": 14388,
+        "2": 14392,
+        "4": 14395,
+        "5": 14394,
+        "6": 14396,
+        "8": 14395,
+        "9": 14394,
+        "10": 3019,
+        "11": 14393,
+        "13": 14394,
+        "16": 14394,
+        "17": 14394,
+        "18": 14395,
+        "23": 14396,
+        "24": 14395,
+        "28": 9755,
+        "29": 14395,
+        "30": 7897,
+        "34": 14395,
+        "35": 14394
+      },
+      "final_pop": {
+        "1": 1648,
+        "2": 2744,
+        "4": 5600,
+        "5": 2832,
+        "6": 3352,
+        "8": 2840,
+        "9": 472,
+        "10": 0,
+        "11": 4176,
+        "13": 4640,
+        "16": 3400,
+        "17": 5056,
+        "18": 3808,
+        "23": 3744,
+        "24": 2184,
+        "28": 152,
+        "29": 4464,
+        "30": 0,
+        "34": 2216,
+        "35": 4744
+      },
+      "detail": "17 of 20 seeds spent 14,388-14,396 of 14,400 ticks eligible. Seed 10 COLLAPSED to pop 0 (3,019 eligible, 79% ineligible), seed 30 collapsed late (7,897), seed 28 ran thin (9,755). The eligible-tick denominator is load-bearing, not cosmetic: dividing by calendar years would under-report the rate by 8% and fail correct code.",
+      "measured_in_this_pass": true
+    },
+    "M9": {
+      "what": "startDisaster('flood') x50 on FX-LAND",
+      "recCur_disasters_delta": 0,
+      "newsQueue_push_count": 0,
+      "rng_hazard_cursor_before": -2048144785,
+      "rng_hazard_cursor_after": -2048144785,
+      "detail": "the abort at `if (!front.length) return` spends ZERO hazard draws and does NOT re-roll \u2014 which is exactly why the other six rows must NOT be renormalised when the flood row publishes 0.",
+      "measured_in_this_pass": true
+    },
+    "M10": {
+      "what": "newsQueue drain under the live rAF loop (push 20, wait ~36 frames)",
+      "value": "19 remain, #dlg-news open",
+      "detail": "newsQueue is a CONSUMED queue, so any gate that counts RESIDENTS can never reach 20. C11 must count push CALLS via an instrumented wrapper.",
+      "measured_in_this_pass": false,
+      "source": "design brief M10 (browser measurement; this pass ran headless and could not re-measure it)"
+    },
+    "M11": {
+      "what": "minimap canvas hash at cam.r 0/1/2/3, CENTRED camera, mode 'value'",
+      "value": "identical (9c49f1b6 x4)",
+      "measured_in_this_pass": false,
+      "source": "design brief M11"
+    },
+    "M12": {
+      "what": "same, at OFF-CENTRE cameras",
+      "value": "4 DISTINCT hashes at every camera",
+      "detail": "the viewport rect in renderMinimap routes 4 screen corners through the rotation-aware screenToTileF, so hashing the CANVAS across cam.r is an invalid rotation test and would fail correct code. C13 hashes the module-scope riskBuf band buffer instead.",
+      "measured_in_this_pass": false,
+      "source": "design brief M12"
+    },
+    "M13": {
+      "what": "cost of the new read paths",
+      "hazardReport_ms_in_vm": 0.35,
+      "approvalReport_ms_in_vm": 0.22,
+      "full_map_band_bake_ms_in_vm": 8.2,
+      "vm_overhead_factor": 19.3,
+      "detail": "The node vm harness runs identical scalar arithmetic 19.3x slower than plain node (hzResp over 6400 tiles: 1.16 ms in-vm vs 0.06 ms plain), so the in-browser full-map band bake is ~0.4 ms, against the design brief's measured renderMinimap('value') cost of 3.047 ms. The bake is memoised in render.js module scope on (devRev, terrRev, powerEpoch, trafficEpoch, tickCount/14, funding.fire, funding.police, disastersEnabled, year), so a repaint that changes nothing costs one string compare.",
+      "measured_in_this_pass": true
+    },
+    "M14": {
+      "what": "coverage-plane lag after bulldozing every fire station",
+      "value": "mean fireCov over zoned tiles 2.53 -> 0 at tick 8 (recomputeMaps period 14)",
+      "measured_in_this_pass": false,
+      "source": "design brief M14; the /14 term in the render memo key is taken from it"
+    }
+  },
+  "calibration_identity": {
+    "note": "C3 is an ARITHMETIC IDENTITY, not a soak. Verified in this pass on FX-REF and on a blank city.",
+    "pTick": 0.0009,
+    "ticks_per_year": 288,
+    "pYearAll": 0.2284213823452026,
+    "pYearAgg_minus_analytic": "2.78e-17 (float noise, < 1e-12)",
+    "ladder_bases": {
+      "fire": 0.55,
+      "tornado": 0.13,
+      "ufo": 0.1,
+      "quake": 0.08,
+      "flood": 0.07,
+      "riot": 0.055,
+      "monster": 0.015
+    },
+    "ladder_sum_error": 0.0,
+    "neutral_anchor_exp": "1.000000000000 on ALL SEVEN rows, delta exactly 0",
+    "neutral_anchor_state": "a BLANK city in a non-summer, non-spring month sits on every documented anchor by construction: hazardCensus defaults covFire/covPol to SVC_OK, pollLocal to POLL_BAD/2, crimeLocal to CRIME_BAD/2, lowShare to 0.35, denseShare to 0.25, frontShare to 0 and agedShare/unempShare to 0, and svcStrain starts at 1.",
+    "landlocked_aggregate": {
+      "measured": 0.2124318855810384,
+      "expected_0.93x": 0.21243188558103843,
+      "delta": "2.8e-17"
+    },
+    "disasters_off": {
+      "pYearAgg": 0.0,
+      "all_rows_pYear_zero": true
+    }
+  },
+  "ruler_definition": {
+    "bands": {
+      "edges": [
+        0.75,
+        1.15,
+        1.35
+      ],
+      "names": [
+        "Low",
+        "Elevated",
+        "High",
+        "Severe"
+      ],
+      "zero_point": "exp 1.000 (every driver on its neutral anchor) lands in ELEVATED. The ruler's neutral is a COMPETENTLY RUN city, not a risk-free one; LOW is reserved for cities measurably better than the anchor.",
+      "one_definition": "HAZARD_BANDS is declared once in js/sim.js and read by hazardBand(), which the Risk minimap, the FIRE_RISK_HIGH advisory row and the panel chip all go through."
+    },
+    "response_curve": "hzResp(v, anchor, bad) = clamp(0, 2, 1 + (v - anchor)/(bad - anchor)) \u2014 exactly 1.000 at the neutral anchor, exactly 2.000 at the bad anchor. Direction is carried by the anchor pair, never a sign flag.",
+    "weight_invariant": "Inside any one row, w_max < 2 * w_min. A driver on its bad anchor scores 2w while every neutral driver scores 1w, so this is exactly the condition under which a SINGLE-CAUSE city is guaranteed to name the driver that moved. Verified: fire (5,3,3,3), riot (5,4,4,3), tornado (3,2), and four single-driver rows.",
+    "contrib": "driver share of the row's OWN score, dimensionless, summing to 1 per row. The named-contributor argmax runs on contrib and NEVER on the raw val (0..255 coverage / shares / seasons are incommensurable). Ties break by ascending driver id.",
+    "rows": {
+      "fire": {
+        "base": 0.55,
+        "mode": "fire",
+        "drivers": [
+          [
+            "cov",
+            "cen.covFire",
+            5,
+            "anchor SVC_OK=96, bad 0"
+          ],
+          [
+            "strain",
+            "svcStrain.fire",
+            3,
+            "anchor 1, bad 0.5"
+          ],
+          [
+            "plants",
+            "aged plant share",
+            3,
+            "anchor 0, bad 0.5"
+          ],
+          [
+            "season",
+            "summer",
+            3,
+            "anchor 0, bad 1"
+          ]
+        ]
+      },
+      "tornado": {
+        "base": 0.13,
+        "mode": "risk",
+        "drivers": [
+          [
+            "lowrise",
+            "level-1 share of built lots",
+            3,
+            "anchor 0.35, bad 0.85"
+          ],
+          [
+            "season",
+            "spring",
+            2,
+            "anchor 0, bad 1"
+          ]
+        ]
+      },
+      "ufo": {
+        "base": 0.1,
+        "mode": "all",
+        "drivers": [
+          [
+            "nothing",
+            "constant 1",
+            1,
+            "anchor 1, bad 2 -> exp pinned at 1.000 forever"
+          ]
+        ]
+      },
+      "quake": {
+        "base": 0.08,
+        "mode": "risk",
+        "drivers": [
+          [
+            "density",
+            "level-2+ share of built lots",
+            1,
+            "anchor 0.25, bad 0.75"
+          ]
+        ]
+      },
+      "flood": {
+        "base": 0.07,
+        "mode": "risk",
+        "live": "cen.frontTiles > 0",
+        "drivers": [
+          [
+            "front",
+            "developed share of the coast front",
+            1,
+            "anchor 0, bad 0.60"
+          ]
+        ]
+      },
+      "riot": {
+        "base": 0.055,
+        "mode": "crime",
+        "drivers": [
+          [
+            "crime",
+            "cen.crimeLocal",
+            5,
+            "anchor 50, bad CRIME_BAD=100"
+          ],
+          [
+            "cov",
+            "cen.covPol",
+            4,
+            "anchor SVC_OK=96, bad 0"
+          ],
+          [
+            "jobs",
+            "unemployment share",
+            4,
+            "anchor 0, bad 0.25"
+          ],
+          [
+            "strain",
+            "svcStrain.police",
+            3,
+            "anchor 1, bad 0.5"
+          ]
+        ]
+      },
+      "monster": {
+        "base": 0.015,
+        "mode": "poll",
+        "drivers": [
+          [
+            "poll",
+            "cen.pollLocal",
+            1,
+            "anchor 30, bad POLL_BAD=60"
+          ]
+        ]
+      }
+    },
+    "tile_score": {
+      "weights": {
+        "fire": 6,
+        "dens": 3,
+        "aged": 2,
+        "crime": 1,
+        "poll": 1,
+        "coast": 1
+      },
+      "compound_severe": "the SEVERE band is unreachable unless fireCov < SVC_LOW (40) AND (lvl >= 2 OR an aged plant sits inside the 5x5 stamp). Everything else is held one hair under the top edge. That is what makes FIRE_RISK_HIGH strictly NARROWER than the shipped FIRE_THIN row rather than a second copy of it.",
+      "measured": {
+        "FX-REF_band_histogram": {
+          "0": 2174,
+          "2": 4166,
+          "3": 60
+        },
+        "FX-REF_FIRE_RISK_HIGH_tiles": 60,
+        "FX-SMALL_healthy_FIRE_RISK_HIGH_tiles": 0,
+        "synthetic_lvl2_no_coverage_score": 1.5738,
+        "synthetic_lvl1_aged_plant_score": 1.6095
+      }
+    }
+  },
+  "palette": {
+    "RISK_BANDS": [
+      "#243a2a",
+      "#2f7e78",
+      "#e0a028",
+      "#ffd2e0"
+    ],
+    "water": "#013",
+    "rec709_luminance": [
+      52.2,
+      108.8,
+      164.9,
+      220.6,
+      15.8
+    ],
+    "adjacent_luminance_steps": [
+      56.6,
+      56.2,
+      55.6
+    ],
+    "adjacent_max_channel_delta": [
+      68,
+      177,
+      184
+    ],
+    "worst_pairwise_ciede2000": {
+      "normal": 24.2,
+      "deuteranopia_simulated": 24.1,
+      "pair": [
+        "#243a2a",
+        "#2f7e78"
+      ]
+    },
+    "note": "SEVERE is deliberately NOT gold \u2014 the land-value ramp already owns #ffe066 at its top, and a mayor switching between 'value' and 'risk' must never read 'prime real estate' as 'about to burn'.",
+    "measured_in_this_pass": true
+  },
+  "byte_identity": {
+    "protocol": "20 corpus seeds x 600 ticks x BOTH disastersEnabled states (40 runs), checkpoints at ticks 200/400/600, Math.random UNSTUBBED, run against a git worktree of f74b6e0 and against this tree in identical harnesses.",
+    "compared": "serialize() as a raw string; pop/funds/jobs; rng.growth.s / rng.fire.s / rng.hazard.s / rng.build.s; FNV-1a hashes of over, terr, lvl, traffic, fire, poll, crime, landv, polCov, fireCov, eduCov, medCov, jobAccess, powered, watered, rail, district, plantYear, roadWear",
+    "result": {
+      "runs": 40,
+      "checkpoints": 120,
+      "differing_serialize_bytes": 0,
+      "differing_plane_hashes": 0,
+      "differing_pop_funds_jobs": 0,
+      "differing_cursor_ints": 0,
+      "planes_hashed": 19,
+      "save_version_both_sides": 18,
+      "key_sequence_character_identical": true,
+      "key_count": 51,
+      "new_keys": 0,
+      "new_history_series": 0,
+      "verdict": "PASS \u2014 0 differing bytes across all 120 checkpoints in both disastersEnabled states",
+      "measured_in_this_pass": true,
+      "harness": "scratchpad/det.js, run against a git worktree of f74b6e0 and against the edited tree"
+    }
+  },
+  "notes_for_the_verifier": [
+    "The panel publishes TWO quantities per row and says so on the face of it. ODDS are a pure function of the shipped spawn model and are city-invariant; BANDS are exposure. Any gate that expects the published odds to move with coverage is testing a lie GP8a deliberately refuses to tell.",
+    "GP8a adds ZERO fields to City and ZERO keys to the save. The Risk band buffer lives in js/render.js MODULE scope (riskBuf / riskKey), which is what makes the read-only proof structural rather than argued.",
+    "hazardReport() calls hazardCensus() exactly ONCE and deptStrain() ZERO times \u2014 the strain figures are read off city.svcStrain, which recomputeMaps already derives from one deptStrain census every 14 ticks. Re-running it would be a second computation of a published number.",
+    "The soak in this artifact is 20 seeds x 50 years = 921 ELIGIBLE city-years, not the design's 10 x 50. The larger sample still leaves six of seven kinds under the power floor."
+  ]
+}

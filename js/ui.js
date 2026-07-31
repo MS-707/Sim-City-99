@@ -128,7 +128,7 @@ const TOOLS = [
   // bound (a-z by TOOLS except q/e, which rotateView owns), so the two free
   // keys are the home-row punctuation pair ; and '. Cost chips, padlocks and
   // the F1 shortcut overlay all derive from TOOLS/COST/TOOL_TIER automatically.
-  { id: "landfill", name: "Landfill",  key: ";", icon: null, spr: () => SPR.landfill[0] },
+  { id: "landfill", name: "Landfill",  key: ";", icon: null, spr: () => SPR.landfill[0][0] },
   { id: "incin",    name: "Incinertr", key: "'", icon: null, spr: () => SPR.incin[1], minTier: TOOL_TIER.incin },
   // M25: mass transit — gated behind Town (TOOL_TIER.rail/subway/station=2), so
   // the buttons dim with a padlock until the city ranks up. Keys r/k/n are free

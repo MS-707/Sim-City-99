@@ -1669,8 +1669,17 @@ function updateSmoke(city) {
         // the drawn stack at ALL FOUR rotations (the M32a lesson: a 2x2 sprite
         // moves corners under rotation, and a plume that ignores that drifts
         // off the building). Live-pool Math.random only, NEVER inside a bake.
+        // The x offset is the DRAWN STACK's own centre line, not a guess: the
+        // hall's inset top-north corner sits at local x === ox, and
+        // incinDraw's stack is raised at tN[0] + 11 (sprites.js), so the mouth
+        // is 11 px screen-RIGHT of the back corner and the puffs have to be
+        // spawned there. It was -16 — 27 px off the centre of a 10-px-wide
+        // stack, i.e. the plume floated in open sky beside the chimney at all
+        // four rotations. The y offset keeps the shipped COAL convention:
+        // spawn ~23 px BELOW the mouth so the puff visibly climbs the flue and
+        // breaks over the cap rather than popping into existence above it.
         const b = backCorner(i % MAP, (i / MAP) | 0, sizeOf(t));
-        pushPlume(worldX(b.x, b.y) - 16, worldY(b.x, b.y) + HH - 66, Math.random() * 0.4 - 0.1);
+        pushPlume(worldX(b.x, b.y) + 11, worldY(b.x, b.y) + HH - 66, Math.random() * 0.4 - 0.1);
       // GP5b: clean high-tech industry stops smoking — spawn-gated in map
       // space (never reads cam.r), so the drop is visible at every rotation
       // and the pool drains naturally as the last dirty plumes age out.
@@ -2310,7 +2319,11 @@ function minimapCityCol(city, i) {
   // City minimap shows the tip filling up without needing a mode of its own;
   // the incinerator takes the hot ember-orange of the thing it is.
   if (t === OV.LANDFILL) return city.fill[i] >= FILL_MAX ? "#6a5a2c" : "#8a7a52";
-  if (t === OV.INCIN) return "#e8721f";
+  // ...and the incinerator a warm BRICK, deliberately pulled off the ember
+  // orange it used to carry (#e8721f): #f80 is this same function's FIRST
+  // test and means "this tile is on fire", and a permanent 1-2 px structure
+  // dot sitting 44 units from the emergency signal is a legibility trap (G8).
+  if (t === OV.INCIN) return "#a44a2e";
   if (t === OV.XWAY) return "#b8bcc8"; // GP4a: pale concrete — brighter than road grey
   if (t === OV.RAMP) return "#98a0b0"; // GP4a: the exchange, a half-step dimmer
   // GQ10: surface the M28 gap — ids 22..28 used to fall through to the

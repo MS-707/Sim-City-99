@@ -22,7 +22,10 @@ Queue policy: keep at least 5 open improvements at all times.
   excluded (`cand[rh.pick(cand.length)]` takes the array *length* as its RNG
   argument, so including it re-pins every ignition index on every seed), the
   incinerator is included. Power: the incinerator is a **wire-gated terminal
-  receiver** — the M24 pump idiom — whose pass runs *before* the demand scan,
+  receiver** — the M24 pump idiom — whose **two-phase** pass (decide every
+  anchor against the wire flood's `powered[]`, *then* light them, so no plant
+  can bootstrap another and no outcome depends on which anchor holds the lower
+  index) runs *before* the demand scan,
   so its 40 MW joins `supply` ahead of `powerTradeDelta` and is genuinely
   exportable (measured: `sold_with − sold_without === 40`, exactly). It takes a
   sixth `waste` bucket in the power mix and the budget pie, and joins
@@ -35,19 +38,42 @@ Queue policy: keep at least 5 open improvements at all times.
   traffic on the streets you actually connected, a `garbage` fax weighted
   **per tile** (the scope's flat score is a citywide scalar, which would have
   pinned the ticker's "Show me" jump to the lowest map index forever) and a
-  `WASTE_OVERFLOW` advisory row. Art: the landfill is **three** bakes indexed
-  by the same `fillBand()` the sim reads — graded earth and dozer tracks, a
-  working refuse mound, a capped mound with a glowing methane flare and gulls
-  — and the incinerator is an idle/lit **pair**, all appended at the literal
-  end of `buildSprites` on their own seeded side stream so no shipped sprite's
-  draw order moves. Pre-measurement, the pinned fixtures and every baseline
-  number live in `docs/gp9b-waste-pre.json`. **Two gate clauses are
-  unattainable by construction and are recorded rather than quietly
-  satisfied**: "a city with no waste tiles is byte-identical to baseline" is
-  the *same city* as "zero disposal accumulates overflow", and the pollution
-  gap's monotonicity clause measures a plateau. The attainable attribution —
-  `WASTE_RATE` zeroed, 20 seeds × 600 ticks, **0 differing bytes** across
-  every plane, scalar and history series — passes.
+  `WASTE_OVERFLOW` advisory row. The backlog's two consequences are read
+  through ONE `backlogPressure()` — **months of uncollected stream**, the stock
+  over the city's own flow, never raw tonnes. Against a flat divisor both
+  consequences hit their caps on the *second* rollover and stayed there: two
+  systems that are meant to be graded behaved as step functions, and the flat
+  land-value penalty (applied to every tile, including open ocean and forest)
+  drove the shipped land-value meter to its floor — 98.4% of developed lots
+  reading exactly 0. Normalised and restricted to developed zone lots (the GP2
+  jet-noise targeting the design cited), the curve rises over years instead of
+  in one month and the meter keeps discriminating. Art: the landfill is three
+  fill bands × **four seeded bakes each**, indexed by the same `fillBand()` the
+  sim reads and then by G10's `(x + 2y) & 3` four-colouring, because this is
+  the one family in the game meant to be drag-painted in bulk and a single bake
+  per band measured **0.00%** differing pixels between neighbouring cells — a
+  tip that rendered as wallpaper. Both families also carry **winter sets**
+  (they were the only structures in the game that ignored the season; twelve of
+  twelve shipped ones snow up), the capped mound is a dull grey-olive scar
+  rather than lawn green, and the incinerator's plume spawns on the **drawn
+  stack's own centre line** (it was 27 px off a 10-px-wide chimney). Everything
+  is appended at the literal end of `buildSprites` on its own seeded side
+  stream: 4,131 shipped sprites, **0 differing bytes, 0 missing**.
+  Pre-measurement, the pinned fixtures and every baseline number live in
+  `docs/gp9b-waste-pre.json`. **Three gate clauses are unattainable by
+  construction and are recorded rather than quietly satisfied**: "a city with
+  no waste tiles is byte-identical to baseline" is the *same city* as "zero
+  disposal accumulates overflow"; "the overflowing arm's garbage stream is ≥
+  the drained control's" can hold only when the overflow has no consequence at
+  all (measured: with the coefficients zeroed the two arms are identical at all
+  24 rollovers, to the tonne); and the "+25 poll / −20 land value on a 3-ring"
+  bars are 20–40× what this engine's diffusion kernel yields for the dirtiest
+  shipped structure (a 4×4 coal plant lifts its own 3-ring by **+0.58**; the
+  incinerator lifts it by +1.33). The attainable attribution — `WASTE_RATE`
+  zeroed, 20 seeds × 600 ticks, **0 differing bytes** across every plane,
+  scalar and history series — passes, and the declared re-pin is bounded:
+  pop −7.8%, jobs −7.4%, funds −3.3% against `docs/gp1-baseline.json`
+  (−3.2% / −2.9% / −0.8% against the pinned GP10a tree itself).
 
 - **GP10a — The Distress Ledger** *(built, awaiting verification)*: the RULER
   half of GP10. A deterministic O(n) monthly sweep (`distressTick`, slotted

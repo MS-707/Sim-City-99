@@ -3962,10 +3962,12 @@ function buildSprites() {
      families are baked ONCE here and only ever looked up by spriteFor — never
      rebuilt per frame.
 
-     SPR.landfill is an ARRAY OF THREE, indexed by fillBand(city.fill[i]) — the
-     SAME function the sim's pollution term and the query readout key on, so
-     the art can never claim a cell is empty while the sim is charging it for a
-     capped one:
+     SPR.landfill is THREE BANDS OF FOUR BAKES, indexed by fillBand(city.fill[i])
+     — the SAME function the sim's pollution term and the query readout key on,
+     so the art can never claim a cell is empty while the sim is charging it for
+     a capped one — and then by the G10 (x + 2y) & 3 four-colouring, so a
+     drag-painted field is never wallpaper. SPR.landfillWinter is the same
+     structure snowed over (G12/G14):
        [0] EMPTY      graded earth, a perimeter berm and fresh dozer tracks
        [1] HALF       a working refuse mound with scattered debris and a plant
        [2] SATURATED  a capped, grassed-over mound with a lit methane flare
@@ -3982,89 +3984,140 @@ function buildSprites() {
     const prevRng = ART_RNG; ART_RNG = wasteRng;
     const R2 = () => wasteRng();
 
-    // one landfill cell at band b (0 empty / 1 half / 2 capped)
-    const landfillDraw = (b) => (g, ox, oy) => {
-      // graded earth pad — sealedDiamond so adjacent cells composite to one
-      // continuous tip with no seam bleed (the terrain-tile contract)
-      sealedDiamond(g, ox, oy, "#6b5f4e");
-      // scraped lighter bands running along the NE-SW axis
-      g.save(); diamondPath(g, ox, oy); g.clip();
-      g.fillStyle = "#7a6d59";
-      for (let k = -2; k <= 2; k++) {
-        g.beginPath();
-        g.moveTo(ox - HW, oy + k * 5); g.lineTo(ox, oy - HH + k * 5);
-        g.lineTo(ox, oy - HH + k * 5 + 3); g.lineTo(ox - HW, oy + k * 5 + 3);
-        g.closePath(); g.fill();
-      }
-      // dozer tracks: paired dark hatch ticks, seeded so no two cells match
-      g.strokeStyle = "rgba(50,42,32,.55)"; g.lineWidth = 1;
-      for (let k = 0; k < 7; k++) {
-        const u = R2() * 1.6 - 0.8, v = R2() * 1.6 - 0.8;
-        const tx = ox + (u - v) * HW * 0.5, ty = oy + (u + v) * HH * 0.5;
-        g.beginPath(); g.moveTo(tx - 3, ty - 1); g.lineTo(tx + 3, ty + 1); g.stroke();
-        g.beginPath(); g.moveTo(tx - 3, ty + 1.6); g.lineTo(tx + 3, ty + 3.6); g.stroke();
-      }
-      g.restore();
-      if (b === 0) {
-        // a low back berm of pushed spoil, so an empty cell still reads as WORKED
-        // ground rather than bare dirt at every rotation
-        g.fillStyle = "#7d7059";
-        g.beginPath(); g.ellipse(ox, oy - HH + 5, 13, 4, 0, 0, 7); g.fill();
-        g.fillStyle = "#8d7f65";
-        g.beginPath(); g.ellipse(ox - 2, oy - HH + 4, 9, 2.6, 0, 0, 7); g.fill();
-        return;
-      }
-      // refuse mound — a squashed dome, taller and greener once capped
-      const ht = b === 2 ? 17 : 10;
-      const body = b === 2 ? "#6d7a52" : "#8a7f62";
-      g.fillStyle = "rgba(0,0,0,.20)";
-      g.beginPath(); g.ellipse(ox, oy + 2, 15, 6, 0, 0, 7); g.fill();
-      g.fillStyle = body;
-      g.beginPath(); g.ellipse(ox, oy - ht * 0.35, 14, ht * 0.62, 0, 0, 7); g.fill();
-      g.fillStyle = lighten(body, 0.22);   // NE-lit crown
-      g.beginPath(); g.ellipse(ox - 3, oy - ht * 0.55, 9, ht * 0.36, 0, 0, 7); g.fill();
-      g.fillStyle = shade(body, 0.78);     // SW shadow flank
-      g.beginPath(); g.ellipse(ox + 4, oy - ht * 0.18, 8, ht * 0.3, 0, 0, 7); g.fill();
-      if (b === 1) {
-        // scattered debris: little bright polys poking out of the working face
-        const junk = ["#b4423a", "#4d6fa8", "#c9c3b0", "#7a8f4a", "#c9903a"];
-        for (let k = 0; k < 9; k++) {
-          const a = R2() * Math.PI * 2, r = 3 + R2() * 10;
-          const jx = ox + Math.cos(a) * r, jy = oy - 2 + Math.sin(a) * r * 0.42;
-          g.fillStyle = junk[(R2() * junk.length) | 0];
+    /* one landfill cell at band b (0 empty / 1 working / 2 capped), in season
+       sk, drawn from the seeded side stream.
+
+       EVERY BAKE IS A DIFFERENT CELL. The landfill is the one family in the
+       game that is meant to be DRAG-PAINTED IN BULK, which makes it the family
+       G10's anti-repetition doctrine ("so identical adjacent towers never
+       render as pixel-twins", line 309) matters most for — and a single bake
+       per band measured 0.00% differing pixels between neighbouring cells: a
+       field rendered as wallpaper, with the same dome, the same debris in the
+       same places and, once capped, the same methane flare standing in perfect
+       rows. So the pad tone, the mound's centre, its radii and height, the
+       scraped-band phase, the debris and the flare's position are all drawn
+       from the stream PER BAKE, and spriteFor picks a variant by the same
+       (x + 2y) & 3 four-colouring the zone jitter uses — which guarantees that
+       no two orthogonally OR diagonally adjacent cells share a bake. */
+    const LF_PADS  = ["#6b5f4e", "#665a49", "#706352", "#635846"];
+    const landfillDraw = (b, sk) => {
+      const winter = sk === "winter";
+      // per-bake geometry, all drawn BEFORE the returned closure runs so the
+      // draw itself is a pure function of these (mkSprite may be called once)
+      const pad = LF_PADS[(R2() * LF_PADS.length) | 0];
+      const phase = R2() * 4 - 2, mdx = R2() * 5 - 2.5, mdy = R2() * 3 - 1.5;
+      const rw = 12.5 + R2() * 3, hj = 0.82 + R2() * 0.36;
+      const fdx = R2() * 12 - 6, tilt = R2() * 0.5 - 0.25;
+      const junkN = 7 + ((R2() * 5) | 0), gullN = 3 + ((R2() * 3) | 0);
+      const seeds = []; for (let k = 0; k < 40; k++) seeds.push(R2());
+      let sp = 0; const S = () => seeds[sp++ % seeds.length];
+      return (g, ox, oy) => {
+        // graded earth pad — sealedDiamond so adjacent cells composite with no
+        // seam bleed (the terrain-tile contract)
+        sealedDiamond(g, ox, oy, winter ? shade(pad, 1.34) : pad);
+        // scraped lighter bands running along the NE-SW axis
+        g.save(); diamondPath(g, ox, oy); g.clip();
+        g.fillStyle = winter ? "#c9ccd2" : lighten(pad, 0.16);
+        for (let k = -2; k <= 2; k++) {
+          const yy = k * 5 + phase;
           g.beginPath();
-          g.moveTo(jx, jy - 2.2); g.lineTo(jx + 2, jy); g.lineTo(jx, jy + 1.6); g.lineTo(jx - 2, jy - 0.4);
+          g.moveTo(ox - HW, oy + yy); g.lineTo(ox, oy - HH + yy);
+          g.lineTo(ox, oy - HH + yy + 3); g.lineTo(ox - HW, oy + yy + 3);
           g.closePath(); g.fill();
         }
-      } else {
-        // capped: methane flare pipe with a burning tip, plus gull specks
-        const fx = ox + 7, fy = oy - ht * 0.7;
-        g.fillStyle = "#5a5f52"; g.fillRect(fx - 1.5, fy - 16, 3, 16);
-        g.fillStyle = "#7d8474"; g.fillRect(fx - 1.5, fy - 16, 1.2, 16);
-        g.fillStyle = "#ff8a3a";
-        g.beginPath(); g.ellipse(fx, fy - 18, 2.2, 3.4, 0, 0, 7); g.fill();
-        g.fillStyle = "#ffd98a";
-        g.beginPath(); g.ellipse(fx, fy - 18.5, 1.1, 1.8, 0, 0, 7); g.fill();
-        if (GLOWG) { // G1: the flare is the ONE thing on a tip that glows at night
-          GLOWG.fillStyle = "#ff8a3a";
-          GLOWG.beginPath(); GLOWG.ellipse(fx, fy - 18, 2.6, 3.8, 0, 0, 7); GLOWG.fill();
+        // dozer tracks: paired dark hatch ticks
+        g.strokeStyle = "rgba(50,42,32,.55)"; g.lineWidth = 1;
+        for (let k = 0; k < 7; k++) {
+          const u = S() * 1.6 - 0.8, v = S() * 1.6 - 0.8;
+          const tx = ox + (u - v) * HW * 0.5, ty = oy + (u + v) * HH * 0.5;
+          g.beginPath(); g.moveTo(tx - 3, ty - 1); g.lineTo(tx + 3, ty + 1); g.stroke();
+          g.beginPath(); g.moveTo(tx - 3, ty + 1.6); g.lineTo(tx + 3, ty + 3.6); g.stroke();
         }
-        g.strokeStyle = "#e8e8ea"; g.lineWidth = 1;
-        for (let k = 0; k < 4; k++) {
-          const gx = ox - 10 + R2() * 20, gy = oy - ht - 4 - R2() * 9;
-          g.beginPath();
-          g.moveTo(gx - 2.4, gy + 1); g.lineTo(gx, gy - 0.8); g.lineTo(gx + 2.4, gy + 1);
-          g.stroke();
+        g.restore();
+        if (b === 0) {
+          // a low back berm of pushed spoil, so an empty cell still reads as
+          // WORKED ground rather than bare dirt at every rotation
+          g.fillStyle = winter ? "#d8dbe0" : lighten(pad, 0.22);
+          g.beginPath(); g.ellipse(ox + mdx * 0.6, oy - HH + 5, 13, 4, 0, 0, 7); g.fill();
+          g.fillStyle = winter ? "#eceef2" : lighten(pad, 0.34);
+          g.beginPath(); g.ellipse(ox - 2 + mdx * 0.6, oy - HH + 4, 9, 2.6, 0, 0, 7); g.fill();
+          return;
         }
-      }
+        // refuse mound — a squashed dome. CAPPED is duller and heavier, never
+        // brighter: a finished tip is a dead grey-olive scar, not the greenest
+        // thing on the map (it used to bake at #6d7a52, a lawn green, which
+        // read as an ornamental hillock rather than as failure).
+        const ht = (b === 2 ? 17 : 10) * hj;
+        const body = b === 2 ? "#5c6047" : "#8a7f62";
+        const cx = ox + mdx, cy = oy + mdy;
+        g.fillStyle = "rgba(0,0,0,.20)";
+        g.beginPath(); g.ellipse(cx, cy + 2, rw + 1, 6, 0, 0, 7); g.fill();
+        g.fillStyle = body;
+        g.beginPath(); g.ellipse(cx, cy - ht * 0.35, rw, ht * 0.62, 0, 0, 7); g.fill();
+        g.fillStyle = lighten(body, 0.22);   // NE-lit crown
+        g.beginPath(); g.ellipse(cx - 3, cy - ht * 0.55, rw * 0.64, ht * 0.36, 0, 0, 7); g.fill();
+        g.fillStyle = shade(body, 0.78);     // SW shadow flank
+        g.beginPath(); g.ellipse(cx + 4, cy - ht * 0.18, rw * 0.57, ht * 0.3, 0, 0, 7); g.fill();
+        if (winter) { // G12/G14: snow lies on the crown, not on the working face
+          g.fillStyle = "rgba(238,242,248,.86)";
+          g.beginPath(); g.ellipse(cx - 2, cy - ht * 0.58, rw * 0.62, ht * 0.3, 0, 0, 7); g.fill();
+          g.fillStyle = "rgba(226,232,240,.55)";
+          g.beginPath(); g.ellipse(cx - 4, cy - ht * 0.44, rw * 0.4, ht * 0.2, 0, 0, 7); g.fill();
+        }
+        if (b === 1) {
+          // scattered debris: little bright polys poking out of the working
+          // face — count, colours and positions all per bake
+          const junk = ["#b4423a", "#4d6fa8", "#c9c3b0", "#7a8f4a", "#c9903a"];
+          for (let k = 0; k < junkN; k++) {
+            const a = S() * Math.PI * 2, r = 3 + S() * 10;
+            const jx = cx + Math.cos(a) * r, jy = cy - 2 + Math.sin(a) * r * 0.42;
+            g.fillStyle = junk[(S() * junk.length) | 0];
+            g.beginPath();
+            g.moveTo(jx, jy - 2.2); g.lineTo(jx + 2, jy); g.lineTo(jx, jy + 1.6); g.lineTo(jx - 2, jy - 0.4);
+            g.closePath(); g.fill();
+          }
+        } else {
+          // capped: a methane flare stack — SHORT, thin and low-flame, so a
+          // field of finished cells reads as a scarred tip rather than as an
+          // orchard of lamps
+          const fx = cx + fdx, fy = cy - ht * 0.7;
+          g.fillStyle = "#4e5249"; g.fillRect(fx - 1.2, fy - 12, 2.4, 12);
+          g.fillStyle = "#6d7367"; g.fillRect(fx - 1.2, fy - 12, 1, 12);
+          g.fillStyle = "#e0762c";
+          g.beginPath(); g.ellipse(fx + tilt, fy - 13.4, 1.5, 2.2, 0, 0, 7); g.fill();
+          g.fillStyle = "#f2c079";
+          g.beginPath(); g.ellipse(fx + tilt, fy - 13.8, 0.8, 1.2, 0, 0, 7); g.fill();
+          if (GLOWG) { // G1: the flare is the ONE thing on a tip that glows at night
+            GLOWG.fillStyle = "#e0762c";
+            GLOWG.beginPath(); GLOWG.ellipse(fx + tilt, fy - 13.4, 1.9, 2.6, 0, 0, 7); GLOWG.fill();
+          }
+          g.strokeStyle = winter ? "#f2f4f8" : "#e8e8ea"; g.lineWidth = 1;
+          for (let k = 0; k < gullN; k++) {
+            const gx = cx - 10 + S() * 20, gy = cy - ht - 4 - S() * 9;
+            g.beginPath();
+            g.moveTo(gx - 2.4, gy + 1); g.lineTo(gx, gy - 0.8); g.lineTo(gx + 2.4, gy + 1);
+            g.stroke();
+          }
+        }
+      };
     };
     // band 2 carries the flare glow, so it goes through withNight; the other
-    // two bake flat (nothing on a working tip is lit after dark)
-    SPR.landfill = [
-      mkSprite(1, 1, 26, landfillDraw(0)),
-      mkSprite(1, 1, 26, landfillDraw(1)),
-      withNight(1, 1, 26, landfillDraw(2)),
-    ];
+    // two bake flat (nothing on a working tip is lit after dark). LF_VAR bakes
+    // per band, per season — the renderer's four-colouring needs exactly four.
+    const LF_VAR = 4;
+    const bakeBand = (b, sk) => {
+      const a = [];
+      for (let v = 0; v < LF_VAR; v++)
+        a.push(b === 2 ? withNight(1, 1, 26, landfillDraw(b, sk))
+                       : mkSprite(1, 1, 26, landfillDraw(b, sk)));
+      return a;
+    };
+    SPR.landfill = [bakeBand(0), bakeBand(1), bakeBand(2)];
+    // G12/G14: the disposal families used to be the ONLY structures in the
+    // game that ignored the season — twelve of twelve shipped ones snow up
+    // (26%-51% of their pixels change), and a bare khaki tip beside a
+    // snow-capped fire station read as "the sprites that forgot the seasons".
+    SPR.landfillWinter = [bakeBand(0, "winter"), bakeBand(1, "winter"), bakeBand(2, "winter")];
 
     /* the 2x2 waste-to-energy plant. `lit` swaps the window quota, the grate
        and the stack cap — the SILHOUETTE is identical in both, so the pair
@@ -4109,6 +4162,11 @@ function buildSprites() {
     };
     SPR.incin = [withNight(2, 2, 74, incinDraw(false)),
                  withNight(2, 2, 74, incinDraw(true))];
+    // G12/G14: the burn hall is a PRISM, so prismFrom already recorded its top
+    // faces on SNOWSPEC and makeWinter caps them exactly as it caps the coal
+    // plant beside it — night glow, ground pool and beacon layers are shared
+    // by reference, so the lit/idle G1 pair survives the season untouched.
+    SPR.incinWinter = SPR.incin.map(makeWinter);
 
     ART_RNG = prevRng; // restore the shared 0x5EED stream
   }
@@ -4200,19 +4258,26 @@ function spriteFor(city, i) {
     case OV.NUKE:     return B.nuke;
     case OV.AIRPORT:  return B.airport;
     case OV.SEAPORT:  return B.seaport;
-    /* GP9b: both disposal families are SEASON- and FACING-INVARIANT static
-       bakes (SPR.*, not B.*) — a refuse tip and a burn hall are the two
-       structures in the city that look the same from every side and in every
-       month, and keeping them out of the seasonal sets means makeWinter never
-       has to invent a snow cap for a mound of rubbish.
+    /* GP9b: both disposal families are FACING-invariant static bakes (SPR.*,
+       not the per-facing B.* sets) — a refuse tip and a burn hall look the same
+       from every side — but they are NOT season-invariant: snow lies on a
+       capped mound and caps a burn hall's roof exactly as it does on every
+       other structure (G12/G14), so each family carries a winter set of its own.
        The landfill indexes fillBand() — the SAME function the pollution term
        and the query readout use, so the sprite can never claim a cell is empty
-       while the sim is charging the player for a capped one.
+       while the sim is charging the player for a capped one — and then the
+       G10 four-colouring (x + 2y) & 3, so no two adjacent cells of a
+       drag-painted field are pixel-twins.
        The incinerator indexes powered[] AT ITS ANCHOR (not at the tile), so all
        four footprint tiles agree; the `anc[i] >= 0` guard mirrors the identical
        one in bulldoze() for a hand-edited save with a missing anchor. */
-    case OV.LANDFILL: return SPR.landfill[fillBand(city.fill[i])];
-    case OV.INCIN:    return SPR.incin[city.powered[city.anc[i] >= 0 ? city.anc[i] : i] ? 1 : 0];
+    case OV.LANDFILL: {
+      const lx = i % MAP, ly = (i / MAP) | 0;
+      return (season === "winter" ? SPR.landfillWinter : SPR.landfill)
+               [fillBand(city.fill[i])][(lx + 2 * ly) & 3];
+    }
+    case OV.INCIN:    return (season === "winter" ? SPR.incinWinter : SPR.incin)
+                               [city.powered[city.anc[i] >= 0 ? city.anc[i] : i] ? 1 : 0];
   }
   return null;
 }

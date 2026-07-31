@@ -488,10 +488,17 @@ const ovFlickerEligible = (t) => t >= OV.ZR && t !== OV.RUBBLE
 const ovFeedsPump = (t) => !isWaterOv(t) && !isMega(t) && !isXp(t) && !isWaste(t);
 /* GP9b: recomputePower INCINERATOR feed — the ninth membership site, and the
    exact analogue of ovFeedsPump one line up: a neighbour that may energize an
-   INCIN anchor as a terminal receiver. isWaste is excluded so one incinerator
-   can never bootstrap another (two adjacent plants would otherwise light each
-   other off a grid neither of them touches). */
-const ovFeedsIncin = (t) => !isWaterOv(t) && !isMega(t) && !isXp(t) && !isWaste(t);
+   INCIN anchor as a terminal receiver. A LANDFILL never carries current and is
+   excluded like the water overlays; the INCINERATOR is a GENERATOR, so as a
+   TYPE it does belong to this family and the declared table says so.
+   BOOTSTRAPPING IS PREVENTED WHERE IT ACTUALLY HAPPENS, not by lying about the
+   predicate: the receiver pass below is TWO-PHASE and reads only the powered[]
+   state the wire flood produced, in which no incinerator is ever lit. That also
+   removes the index-order dependence an in-place chain would have had (an
+   anchor at a lower index could not see a neighbour lit later in the same
+   sweep, so the same two plants would light or not light depending on which
+   one the player placed first). */
+const ovFeedsIncin = (t) => !isWaterOv(t) && !isMega(t) && !isXp(t) && t !== OV.LANDFILL;
 // startDisaster("fire"): which tiles a fire may be seeded on. NOTE the absence
 // of a mega exclusion — an arcology IS flammable, and always has been.
 // GP9b (decision D4): the ONE asymmetric site. A refuse cell is not a building
@@ -648,12 +655,16 @@ const wasteBand = (v) => {
      OVERFLOW_T             the backlog at which the city is declared to be in
                             overflow: the advisory row, the complaint kind and
                             the query readout all key on this ONE line.
-     BACKLOG_POLL_DIV/_CAP  the citywide backlog's pollution pressure, applied
+     BACKLOG_POLL_*         the citywide backlog's pollution pressure, applied
                             to DEVELOPED ZONE tiles only (rubbish piles up where
                             people are) and hard-capped so an unbounded stock
-                            can never produce an unbounded source term.
+                            can never produce an unbounded source term. The
+                            pressure is measured in MONTHS OF UNCOLLECTED
+                            STREAM, never in raw tonnes — see backlogPressure().
      BACKLOG_LV / LF_LV_CAP the same pressure as a land-value penalty, folded at
-                            the GP2 targeted-penalty site.
+                            the GP2 targeted-penalty site and, like GP2's jet
+                            noise, restricted to the tiles the grievance is
+                            actually about (developed zone lots).
      LF_UPKEEP/INCIN_UPKEEP flat monthly upkeep, NO funding slider — the M24
                             water precedent, not the police/fire one. */
 const FILL_MAX = 255;      // Uint8 ceiling: city.fill[i] saturates here
@@ -664,22 +675,39 @@ const LF_SMELL = 34;       // pollution source at fill 0 -> FILL_MAX (graded)
 const LF_SMELL_FULL = 46;  // ...and the flat source a SATURATED cell emits
 const INCIN_SMOG = 70;     // pollution source per LIT incinerator footprint tile
 const OVERFLOW_T = 2000;   // backlog (t) at which the city is "in overflow"
-const BACKLOG_POLL_DIV = 90;  // backlog -> pollution pressure divisor
-const BACKLOG_POLL_CAP = 60;  // ...hard cap on that pressure
-/* GP9b: the COMPLAINT's own cap on the same pressure, deliberately HIGHER than
-   the pollution one. The two are separate numbers because they answer separate
-   questions: BACKLOG_POLL_CAP bounds a source term that gets diffused across
-   the map, while this one has to compete on scanComplaints' ONE shared score
-   ladder, where `unpowered` sits at a flat 150 and `rubble` at 130. MEASURED
-   on the pinned reference city: with the pollution cap (60) the garbage fax
-   tops out at 100 and can NEVER be the month's complaint on any city that
-   still has a dark lot somewhere — which is every grown city — so the whole
-   kind would have been dead state. At 150 the ladder is graded instead of
-   dead: a mild overflow stays below the dark lots, and a city genuinely buried
-   in rubbish out-shouts them. */
-const BACKLOG_FAX_CAP = 150;
-const BACKLOG_LV = 0.5;    // pressure -> land-value penalty coefficient
-const LF_LV_CAP = 26;      // ...hard cap on that penalty
+/* GP9b (fix pass, D3): the backlog pressure is a RATE-NORMALISED quantity —
+   "how many months of its own rubbish is this city standing in" — not a raw
+   tonnage. MEASURED reason: with a flat divisor the pressure was a STEP
+   FUNCTION. On the pinned FIX300 fixture the backlog reads 4,512 t at rollover
+   1 and 13,772 t at rollover 2, so a /90 divisor pinned BOTH the pollution
+   source and the land-value penalty at their caps by the SECOND rollover and
+   they never moved again; on the full reference city (18,832 t/mo) the same
+   divisor capped them in the first month. Two systems that are supposed to be
+   graded were binary, and the same one-step slam is what drove the shipped
+   land-value meter to its floor (98.4% of developed lots reading exactly 0).
+   Dividing by the city's OWN monthly stream instead makes a small town and a
+   metropolis "six months behind" at the same pressure, and makes the curve
+   rise smoothly over years of neglect instead of in one month. */
+const BACKLOG_POLL_PER_MONTH = 0.35;  // pollution pressure per month of uncollected stream
+const BACKLOG_POLL_CAP = 60;          // ...hard cap (~171 months of neglect)
+const BACKLOG_FLOW_FLOOR = 250;       // divisor floor: a city that makes no rubbish
+/* GP9b: the COMPLAINT's own reading of the same months-behind pressure,
+   deliberately steeper and capped HIGHER than the pollution one. The two are
+   separate numbers because they answer separate questions: the pollution cap
+   bounds a source term that gets diffused across the map, while this one has
+   to compete on scanComplaints' ONE shared score ladder, where `unpowered`
+   sits at a flat 150 and `rubble` at 130. MEASURED: the fax is required to
+   fire within COMPLAINT_EVERY*2 rollovers of the backlog crossing OVERFLOW_T,
+   and a city that is a few months behind on its bins is genuinely a louder
+   grievance than one dark lot — so the CITYWIDE term has to be able to clear
+   150 on its own, with the per-tile weight below acting as the targeting
+   term rather than as a multiplier that crushes it (a level-1 factory weighs
+   36/140 of WASTE_REF, which turned a 150-point pressure into 39). */
+const BACKLOG_FAX_PER_MONTH = 26;  // fax pressure per month behind
+const BACKLOG_FAX_CAP = 118;       // ...cap: 40 + 118 clears `unpowered` (150) on its own
+const BACKLOG_FAX_TILE = 45;       // ...plus up to this much of per-tile targeting weight
+const BACKLOG_LV = 0.3;    // pressure -> land-value penalty coefficient
+const LF_LV_CAP = 12;      // ...hard cap on that penalty
 const LF_UPKEEP = 2;       // § per landfill CELL per month (flat)
 const INCIN_UPKEEP = 120;  // § per incinerator ANCHOR per month (flat)
 /* GP9b: the complaint weighting's denominator — the heaviest single tile on
@@ -700,8 +728,13 @@ const INCIN_TRIPS = 26;
 /* GP9b: the landfill's three ART bands, derived from the same fill plane the
    sim reads, so the sprite and the query readout can never disagree about
    whether a cell is empty, working or capped. 0 = graded earth + dozer tracks,
-   1 = a working refuse mound, 2 = capped, flared and gull-ridden. */
-const fillBand = (f) => (f >= FILL_MAX ? 2 : f >= FILL_MAX / 2 ? 1 : 0);
+   1 = a working refuse mound, 2 = capped, flared and gull-ridden.
+   The 0->1 edge is at 28% of a cell, NOT at half: wasteTick fills cells in
+   strict index order, so at any moment a working field holds exactly ONE
+   partly-filled cell, and at the old halfway edge that cell looked like an
+   untouched pad until it was 5,100 t deep — half a cell's life with no visible
+   sign that anything had been tipped into it. */
+const fillBand = (f) => (f >= FILL_MAX ? 2 : f >= FILL_MAX * 0.28 ? 1 : 0);
 
 // M28: fixed population / jobs each arcology houses. Counted EXACTLY ONCE per
 // structure in recomputeDemand (keyed anc === i), so a 4x4 Launch Arco adds its
@@ -2935,6 +2968,7 @@ class City {
     this.wasteOverflow = false;
     this._landfillAny = false;
     this._wasteAny = false;
+    this._wasteFlow = 0;
     this._incinLit = [];
     this._wasteVisit = new Int32Array(n);
     this._wasteTok = 0;
@@ -3494,7 +3528,15 @@ class City {
 
        Ascending index order, zero RNG, non-propagating (it never re-enters the
        flood queue), so a save->load->recomputePower reproduces _incinLit and
-       every MW exactly. */
+       every MW exactly.
+
+       TWO-PHASE, and that is load-bearing: phase 1 DECIDES every anchor against
+       the powered[] state the wire flood left behind, phase 2 lights them. No
+       anchor can therefore see another anchor's freshly-written footprint, so
+       one incinerator can never bootstrap another and the outcome cannot depend
+       on which of two neighbouring plants happens to hold the lower index. That
+       is what lets OV_FEEDS_INCIN describe the TYPE honestly (an incinerator IS
+       a generator) without the chaining it would otherwise imply. */
     this._incinLit.length = 0;
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] !== OV.INCIN || this.anc[i] !== i) continue;
@@ -3507,15 +3549,19 @@ class City {
           if (!this.inMap(X, Y)) continue;
           const j = this.idx(X, Y);
           // OV_FEEDS_INCIN excludes the water overlays, the megas, the
-          // expressway class and the waste family itself — so a self-powered
-          // arco island can't feed it and one incinerator can't bootstrap another.
+          // expressway class and the landfill — so a self-powered arco island
+          // can't feed it and a refuse cell (which carries no current at all)
+          // can't either. Phase 1 only READS, so a lit incinerator is never in
+          // powered[] here, which is what actually blocks the chain.
           if (this.powered[j] && OV_FEEDS_INCIN[this.over[j]]) { fed = true; break; }
         }
       }
-      if (!fed) continue;
+      if (fed) this._incinLit.push(i);
+    }
+    for (let k = 0; k < this._incinLit.length; k++) {         // phase 2: light
+      const i = this._incinLit[k], s = sizeOf(OV.INCIN), ax = i % MAP, ay = (i / MAP) | 0;
       for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++)
         this.powered[this.idx(ax + dx, ay + dy)] = 1;
-      this._incinLit.push(i);
       supply += INCIN_MW;
     }
     // demand = number of developed/zoned consumer tiles that got power
@@ -4909,7 +4955,8 @@ class City {
        ordinance's effect on garbage is carried by GP9a's wasteMul on the
        stream, one layer up. */
     const wasteAny = this._wasteAny;
-    const bp = wasteAny ? Math.min(BACKLOG_POLL_CAP, this.garbageBacklog / BACKLOG_POLL_DIV) : 0;
+    const bp = wasteAny
+      ? Math.min(BACKLOG_POLL_CAP, this.backlogPressure() * BACKLOG_POLL_PER_MONTH) : 0;
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
       // GP5b: clean high-tech industry emits IND_CLEAN_POLL of the dirty smog.
@@ -5006,11 +5053,18 @@ class City {
             // value (and so its upgrade odds via gFit), a house does not.
             // noiseCov is 0 everywhere with no working airport, and x - 0 === x.
             - (noisy && this.over[i] === OV.ZR ? this.noiseCov[i] * NOISE_LV : 0)
-            // GP9b: the citywide backlog drags land value down everywhere, at
-            // the SAME targeted-penalty site (and with the same `x - 0 === x`
-            // guarantee on a waste-free city) as the GP2 jet-noise term above.
-            // Capped, so an unbounded stock is still a bounded penalty.
-            - (wasteAny ? Math.min(LF_LV_CAP, bp * BACKLOG_LV) : 0);
+            // GP9b: the citywide backlog drags land value down — at the GP2
+            // jet-noise site AND, as of the fix pass, with GP2's TARGETING as
+            // well: it lands on DEVELOPED ZONE LOTS, the same tiles the
+            // pollution source above uses, and nowhere else. MEASURED reason:
+            // applied to every tile it subtracted a flat penalty from open
+            // ocean, forest and parkland (water 90.13 -> 63.88, park 71.16 ->
+            // 37.26), which is not a consequence of anything the player did to
+            // those tiles and which flattened the whole meter rather than
+            // discriminating between lots. Capped, so an unbounded stock is
+            // still a bounded penalty, and `x - 0 === x` on a waste-free city.
+            - (wasteAny && OV_IS_ZONE[this.over[i]] && this.lvl[i] > 0
+                 ? Math.min(LF_LV_CAP, bp * BACKLOG_LV) : 0);
       this.landv[i] = Math.max(0, Math.min(255, v));
     }
 
@@ -6520,7 +6574,12 @@ class City {
      function of fill[]/garbageBacklog/over[]. ONE definition, so the monthly
      path and the load path can never disagree about whether the city is in
      overflow or whether the fast path may be taken. */
-  recomputeWasteDerived() {
+  recomputeWasteDerived(flow) {
+    // _wasteFlow: the last MONTHLY STREAM, the divisor backlogPressure() reads.
+    // wasteTick hands in the census it already computed (no second O(n) scan on
+    // the monthly path); the load cascade calls with no argument and pays for
+    // one scan, once.
+    this._wasteFlow = flow === undefined ? this.wasteCensus().total : flow;
     this._landfillAny = this.wasteCapacity().cells > 0;
     this.wasteOverflow = this.garbageBacklog >= OVERFLOW_T;
     // _incinLit is in the disjunction because the truck deposit in
@@ -6530,6 +6589,29 @@ class City {
     // flag guards carries its own exact inner test and folds a literal 0.
     this._wasteAny = this.garbageBacklog > 0 || this._landfillAny ||
                      this._incinLit.length > 0;
+  }
+
+  /* ---------- GP9b (fix pass): THE CITYWIDE BACKLOG PRESSURE ----------
+     ONE definition, read by the pollution source, the land-value penalty and
+     the fax (each with its own coefficient and cap), so the three can never
+     disagree about how badly the city is behind.
+
+     The pressure is MONTHS OF UNCOLLECTED STREAM — the stock divided by the
+     city's own flow — not raw tonnes. That normalisation is the fix for a
+     MEASURED defect: against a flat divisor the pressure hit its cap on the
+     SECOND rollover of the pinned FIX300 fixture and on the FIRST of the
+     reference city, so two graded consequences behaved as step functions and
+     the shipped land-value meter was slammed to its floor citywide. Months
+     behind is also the quantity the readouts already speak in, and it scales
+     with the city rather than against it: a hamlet and a metropolis that are
+     each six months behind are in the same trouble.
+
+     BACKLOG_FLOW_FLOOR keeps the divisor away from 0 on a city that generates
+     no rubbish at all (every lot razed, a scenario city of pinned lvl-0 lots),
+     where the backlog can only be a residue of what it once made. */
+  backlogPressure() {
+    const flow = Math.max(BACKLOG_FLOW_FLOOR, this._wasteFlow || 0);
+    return this.garbageBacklog / flow;   // months behind; the CALLERS cap and scale
   }
 
   /* ---------- GP9b: THE MONTHLY WASTE TICK ----------
@@ -6550,7 +6632,8 @@ class City {
      capped tip never silently absorbs another tonne — while continuing to
      stink through the recomputeMaps term. */
   wasteTick() {
-    let pool = this.wasteCensus().total + this.garbageBacklog;
+    const flow = this.wasteCensus().total;
+    let pool = flow + this.garbageBacklog;
     for (let k = 0; k < this._incinLit.length; k++) {
       if (pool <= 0) break;
       pool -= Math.min(pool, INCIN_BURN);
@@ -6564,7 +6647,7 @@ class City {
       pool -= take;
     }
     this.garbageBacklog = pool;
-    this.recomputeWasteDerived();
+    this.recomputeWasteDerived(flow);
   }
 
   /* ---------- the crosstalk audit table (GP9a; GP9b: eight keys) ----------
@@ -7190,7 +7273,7 @@ class City {
        the same line the advisory row and the query readout key on), so a city
        that disposes of its rubbish never enters the new branch at all. */
     const gbp = this.garbageBacklog >= COMPLAINT_T.garbage
-      ? Math.min(BACKLOG_FAX_CAP, this.garbageBacklog / BACKLOG_POLL_DIV) : 0;
+      ? Math.min(BACKLOG_FAX_CAP, this.backlogPressure() * BACKLOG_FAX_PER_MONTH) : 0;
     let best = -1, bestKind = null, bestScore = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
@@ -7234,10 +7317,20 @@ class City {
          that actually generates the rubbish — or, at a capped landfill cell,
          from the tip itself at full weight, because a saturated cell IS the
          city's most visible garbage problem. `w > 0` keeps grass, roads and
-         undeveloped lots out. */
+         undeveloped lots out.
+         THE TWO TERMS ARE ADDED, NOT MULTIPLIED (fix pass). MEASURED defect in
+         the multiplied form: the per-tile weight is normalised by WASTE_REF
+         (a level-3 factory, 140), so on a city whose heaviest block is a
+         level-1 factory (w = 36) it scaled the WHOLE citywide pressure by
+         36/140 — the fax could not reach `unpowered`'s flat 150 until the
+         backlog was ten times past OVERFLOW_T, and the grievance arrived ten
+         rollovers late against a six-rollover bar. Added, the citywide term
+         says HOW LOUD (and can clear the ladder on its own), the per-tile term
+         says WHERE, and the targeting is unchanged — it is still a strictly
+         monotone function of the same certified ruler. */
       if (gbp > 0) {
         const w = (t === OV.LANDFILL && this.fill[i] >= FILL_MAX) ? WASTE_REF : this.wasteRateAt(i);
-        const s = 40 + Math.round(gbp * w / WASTE_REF);
+        const s = 40 + Math.round(gbp) + Math.round(BACKLOG_FAX_TILE * w / WASTE_REF);
         if (w > 0 && s > score) { kind = "garbage"; score = s; }
       }
       if (kind && score > bestScore) { best = i; bestKind = kind; bestScore = score; }

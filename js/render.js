@@ -2268,6 +2268,28 @@ const MM_VALUE_BANDS = ["#3f2f22", "#2b5a55", "#3d8c6e", "#6adabb", "#ffe066"];
    the value ramp. */
 const RISK_BANDS = ["#243a2a", "#2f7e78", "#e0a028", "#ffd2e0"];
 
+/* GP9a S4: the five GARBAGE bands the "garbage" overlay paints, indexed by
+   sim.js's wasteBand() — the ONE band definition the map uses, whose edges are
+   derived from the shipped WASTE_RATE table itself (trace / light / moderate /
+   heavy / extreme, anchored to a house block, a level-3 tower and a level-2 and
+   level-3 factory) so a retune of the tonnage table cannot leave the ladder
+   describing a rate scale that no longer exists.
+   A refuse story that rises in brightness the way every GQ11 overlay does:
+   compost green -> landfill mud -> dust -> tan -> ash.
+   MEASURED. Rec.709 luminance strictly rising 31.1 / 80.2 / 138.6 / 165.2 /
+   228.0 — steps 49.1 / 58.4 / 26.6 / 62.8, every one over the 25 bar — and
+   >= 50 apart in at least one channel between adjacent bands (102 / 64 / 67 /
+   98), so the ladder survives deuteranopia on luminance alone. Worst CIEDE2000
+   pair among all SIX declared categories (5 bands + the standard water swatch
+   #013) is 17.0 (moderate vs heavy), over this codebase's 13 bar.
+   NO BAND IS PURE #ffffff — deliberately. The rotation gate masks the UNION of
+   pure-white pixels (the camera-viewport stroke drawn below); a white band
+   would be eaten by that mask and the gate would pass on nothing.
+   It also stays clear of the two bright neighbours a mayor switches between:
+   dE 15.3 from the value ramp's #ffe066 gold and 26.9 from the risk ramp's
+   #ffd2e0 severe. */
+const MM_WASTE_BANDS = ["#14240f", "#7a4a12", "#a08a52", "#e39a5e", "#f0e4c0"];
+
 /* GP8a: the Risk band buffer, memoised in MODULE scope — deliberately NOT a
    field on City. That is what makes GP8a's read-only proof structural: the
    milestone adds ZERO keys to the City object and ZERO keys to the save.
@@ -2452,6 +2474,19 @@ function renderMinimap(city, mode) {
          band sim.js's hazardTileBand() puts it in, read straight out of the
          memoised buffer. Strictly north-up: nothing in this branch reads the camera at all. */
       col = city.terr[i] === TERR.WATER ? "#013" : RISK_BANDS[riskB[i]];
+    } else if (mode === "garbage") {
+      /* GP9a: the WASTE LEDGER made visible — tonnes/month per tile, banded.
+         city.wasteRateAt(i) is an O(1) pure read of over[i]/lvl[i]/ordMods, so
+         this branch allocates NO plane and memoises nothing — literally the
+         `mode==="poll"` idiom, down to its two-outcome base: a tile that makes
+         no garbage at all takes the standard `#013` water swatch or the neutral
+         `#111` empty-land dark the power/svc branches already use, so the map
+         has exactly TWO background values and every OTHER value on it is a
+         band. (Both bases clear the 13 bar against band 0: dE 16.7 water,
+         15.0 land.) Strictly north-up: nothing in this branch reads cam, rot4
+         or screenToTile — it is a pure function of the sim planes (G10(b)). */
+      const wb = wasteBand(city.wasteRateAt(i));
+      col = wb < 0 ? (city.terr[i] === TERR.WATER ? "#013" : "#111") : MM_WASTE_BANDS[wb];
     } else if (mode === "dist") {
       const dc = city.district[i];
       // districted tiles paint their palette color; everything else keeps the

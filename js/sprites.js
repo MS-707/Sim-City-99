@@ -4296,13 +4296,16 @@ function wireMask(city, i) {
   let m = 0;
   const conn = (X, Y) => {
     if (!city.inMap(X, Y)) return false;
-    const t = city.over[city.idx(X, Y)];
     // M24: exclude the water overlays so a power line never draws an arm toward
     // a pipe/tower/pump (the two utilities are visually separate networks).
     // GP4a: exclude the expressway class too — placement already forbids
     // contact-conduction (a wire may not cross an xway), so the cosmetic arm
     // must not suggest otherwise.
-    return t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE && !isWaterOv(t) && !isXp(t);
+    // GP9a: the membership test is now ovWireJoins (sim.js module scope, which
+    // this file already resolves). It is NOT ovConducts: the two differ on
+    // exactly ids 22..28, the megas — a mega never routes power through itself,
+    // but a wire beside one still draws its arm.
+    return ovWireJoins(city.over[city.idx(X, Y)]);
   };
   if (conn(x, y - 1)) m |= 1;
   if (conn(x + 1, y)) m |= 2;

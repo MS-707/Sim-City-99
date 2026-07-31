@@ -53,10 +53,15 @@ function setMapSize(n) { MAP = n; }
 // and re-normalising is a fixpoint, so serialize->deserialize->serialize stays
 // byte-stable. This also repairs the identical latent defect commute / avgcom /
 // approv have carried for mature pre-v17 saves.
+// GP9a (save v19): "waste" joins as the TWELFTH key, appended LAST under the
+// same ladder rule. The pad behaviour above is the CONTRACT, not an accident: a
+// MATURE pre-v19 save (L > 0) loads with history.waste === L nulls, NOT [] —
+// only a save with no history at all loads []. SECOND LIST WARNING: the key
+// list below is mirrored by collectBudget's >240 trim loop — extend BOTH.
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
-  const keys = ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess"];
+  const keys = ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess", "waste"];
   for (const k of keys) out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
   let L = 0;
   for (const k of keys) if (out[k].length > L) L = out[k].length;
@@ -395,10 +400,101 @@ const isMega = (t) => t >= OV.PLYMOUTH && t <= OV.PYRAMID;
 const isPort = (t) => t === OV.AIRPORT || t === OV.SEAPORT;
 const PORT_LABEL = { [OV.AIRPORT]: "Airport", [OV.SEAPORT]: "Seaport" };
 
+/* ---------- GP9a: THE CROSSTALK AUDIT (hoist only, zero semantic change) ----
+   SEVEN `>= OV.ZR` membership idioms were spelled out INLINE at seven sites —
+   recomputePower's conducts()/demand/brownout/y2k/pump-feed, startDisaster's
+   fire-candidate scan and sprites.js's wireMask — each one a place a NEW
+   overlay id joins a family SILENTLY. They are now the single source of truth
+   each, exactly as isPlant/isWaterOv/isXp/isMega already are, and every call
+   site below reads its named predicate instead of re-spelling the expression.
+   Each definition is its inline expression VERBATIM: the hoist must not move a
+   behavioural byte, which is what City.ovCrosstalk() + the live deptStrain /
+   powered[] / ignition probes are there to prove.
+
+   ovConducts and ovWireJoins are DELIBERATELY separate: they differ on exactly
+   ids 22..28 (the megas). A mega never routes power THROUGH itself, but a wire
+   drawn next to one still sprouts its cosmetic arm — collapsing the two into
+   one predicate would change either the grid or the art.
+
+   ovIsStructure is NOT a pure function of the byte, so it is NOT part of
+   ovCrosstalk(): deptStrain short-circuits OV.NONE before the SVC_LINEAR test,
+   and for ZR/ZC/ZI the answer depends on lvl[i]. It is therefore split in two —
+   ovIsStructure(t) for the 30 non-zone/non-NONE ids and ovZoneIsStructure(t,l)
+   for the three zone ids — so each half IS well defined and assertable.
+   (SVC_LINEAR is declared further down the file; these arrows only dereference
+   it at CALL time, long after module evaluation.) */
+const ovIsZone = (t) => t === OV.ZR || t === OV.ZC || t === OV.ZI;
+// recomputePower conducts(): a wire/wireroad/building carries the grid; NONE,
+// plain road, rubble, the water overlays, the megas and the concrete never do.
+const ovConducts = (t) => t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE
+  && !isWaterOv(t) && !isMega(t) && !isXp(t);
+// recomputePower demand scan: which powered tiles actually DRAW from the grid.
+const ovDrawsPower = (t) => t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
+  && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t);
+// recomputePower brownout cut: which consumers a capacity shortfall may darken.
+const ovBrownoutEligible = (t) => t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t)
+  && !isWaterOv(t) && !isMega(t) && !isXp(t);
+// recomputePower Y2K flicker: same family, but rubble is excluded too.
+const ovFlickerEligible = (t) => t >= OV.ZR && t !== OV.RUBBLE
+  && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t);
+// recomputePower pump feed: a neighbour that may energize a PUMP anchor as a
+// terminal receiver (it must be a real conductor, not another pump/mega/xway).
+const ovFeedsPump = (t) => !isWaterOv(t) && !isMega(t) && !isXp(t);
+// startDisaster("fire"): which tiles a fire may be seeded on. NOTE the absence
+// of a mega exclusion — an arcology IS flammable, and always has been.
+const ovFireCandidate = (t) => t >= OV.ZR && t !== OV.RUBBLE
+  && t !== OV.WIREROAD && t !== OV.XWAY && t !== OV.RAMP && t !== OV.PIPE;
+// sprites.js wireMask(): may a power line sprout a cosmetic arm toward this
+// neighbour? Identical to ovConducts EXCEPT the megas (see the note above).
+const ovWireJoins = (t) => t !== OV.NONE && t !== OV.ROAD && t !== OV.RUBBLE
+  && !isWaterOv(t) && !isXp(t);
+// deptStrain fire-load census, non-zone half: over[] that is NOT a linear/debris
+// overlay is a combustible structure. The zone half needs lvl[] as well.
+const ovIsStructure = (t) => t !== OV.NONE && !ovIsZone(t) && !SVC_LINEAR.has(t);
+const ovZoneIsStructure = (t, lvl) => ovIsZone(t) && lvl > 0;
+
 // population / jobs per developed zone level (index 0 unused)
 const RES_POP = [0, 8, 24, 56];
 const COM_JOB = [0, 6, 18, 40];
 const IND_JOB = [0, 8, 22, 48];
+
+/* GP9a: THE GARBAGE RULER — INTEGER tonnes/month a DEVELOPED zone tile puts on
+   the curb, indexed [level] with index 0 unused (an undeveloped, painted lot
+   makes no garbage at all). Sited beside RES_POP/COM_JOB/IND_JOB because it is
+   the same shape of per-tile-per-level yield table and is read the same way.
+   Industry is heaviest per the M31 design — a level-3 factory block (26 t) puts
+   out nearly three times a level-3 residential tower (9 t).
+   READ-ONLY IN GP9a: nothing in the sim consumes these numbers. The only
+   consumers are wasteRateAt()/wasteCensus() (both pure reads), the monthly
+   history.waste sample, the Garbage overlay and the tile query row. */
+const WASTE_RATE = Object.freeze({
+  [OV.ZR]: Object.freeze([0, 2, 5, 9]),
+  [OV.ZC]: Object.freeze([0, 3, 7, 12]),
+  [OV.ZI]: Object.freeze([0, 6, 14, 26]),
+});
+
+/* GP9a: the Garbage overlay's four band EDGES, derived FROM the table above so
+   a D1 retune of WASTE_RATE cannot leave the map's ladder describing a rate
+   scale that no longer exists. Each edge is a recognisable tile archetype, so
+   the overlay answers "how does this block compare to a house / a tower / a
+   factory", the same question the query row is asked:
+     < ZR[1]+1   trace     — lighter than a single level-1 house block
+     >= ZR[1]+1  light     — more than one house block, less than a tower
+     >= ZR[3]    moderate  — a level-3 residential tower's load
+     >= ZI[2]    heavy     — a level-2 factory's load
+     >= ZI[3]    extreme   — a level-3 factory, the heaviest single tile
+   wasteBand returns -1 for a tile that makes NO garbage, which the minimap
+   paints as dimmed City-mode context rather than as a band. */
+const WASTE_BAND_EDGES = Object.freeze([
+  WASTE_RATE[OV.ZR][1] + 1, WASTE_RATE[OV.ZR][3],
+  WASTE_RATE[OV.ZI][2], WASTE_RATE[OV.ZI][3],
+]);
+const wasteBand = (v) => {
+  if (v <= 0) return -1;
+  let k = 0;
+  for (let j = 0; j < WASTE_BAND_EDGES.length; j++) if (v >= WASTE_BAND_EDGES[j]) k = j + 1;
+  return k;
+};
 
 // M28: fixed population / jobs each arcology houses. Counted EXACTLY ONCE per
 // structure in recomputeDemand (keyed anc === i), so a 4x4 Launch Arco adds its
@@ -703,8 +799,13 @@ const ORDINANCES = [
     blurb: "Block captains with walkie-talkies — cuts street crime.",
     cost: (c) => Math.round(c.pop * 0.03), mods: { crimeCut: 14 } },
   { id: "recycle", name: "Citywide Recycling", icon: "♻️", champion: "environment", minTier: 1,
-    blurb: "Curbside blue bins curb industrial & roadway pollution.",
-    cost: (c) => Math.round(c.pop * 0.045), mods: { pollMul: 0.72 } },
+    blurb: "Curbside blue bins curb industrial & roadway pollution — and divert a quarter of the tonnage.",
+    // GP9a: wasteMul EXTENDS the shipped recycling row rather than adding a 7th
+    // ordinance — a second recycling policy would double-charge the player and
+    // give the environment advisor two champions. It is read by wasteRateAt /
+    // wasteCensus ONLY, so the ordinance's SIMULATED effect is unchanged by
+    // construction: nothing in the sim consumes wasteMul in GP9a.
+    cost: (c) => Math.round(c.pop * 0.045), mods: { pollMul: 0.72, wasteMul: 0.75 } },
   { id: "nostalgiaTax", name: "Arcade & Nostalgia Tax", icon: "🕹️", champion: "finance", minTier: 1,
     blurb: "Sin-tax on arcades & Beanie Babies: revenue, but dents commercial demand.",
     revenue: (c) => Math.round(c.comJobs * 0.9), mods: { demC: -0.06 } },
@@ -723,7 +824,9 @@ const ORD = (id) => ORDINANCES.find((o) => o.id === id);
 // default to 1 (no change), additives to 0. recomputeOrdinances rebuilds from
 // this, so nothing-enacted === pre-M22 arithmetic exactly.
 function identityOrdMods() {
-  return { pollMul: 1, trafficMul: 1, crimeCut: 0, fireBurn: 0, demR: 0, demC: 0, demI: 0 };
+  // GP9a: wasteMul defaults to 1 like the other muls — without it a city with
+  // nothing enacted would put `undefined` into wasteRateAt's arithmetic.
+  return { pollMul: 1, trafficMul: 1, wasteMul: 1, crimeCut: 0, fireBurn: 0, demR: 0, demC: 0, demI: 0 };
 }
 
 // GP6: the `!TIERS[t].gate` guard is the ONE change here — a gated rung is
@@ -2505,7 +2608,9 @@ class City {
     // commute under the same ladder rule (v13 prefix stays stable).
     // GP7a (save v18): assess samples assessedLedger().total — the shadow
     // ruler's monthly figure — appended LAST after approv under the ladder rule.
-    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [], approv: [], assess: [] };
+    // GP9a (save v19): waste samples wasteCensus().total — the monthly garbage
+    // tonnage — appended LAST after assess under the same ladder rule.
+    this.history = { pop: [], funds: [], net: [], tax: [], poll: [], crime: [], landv: [], commute: [], avgcom: [], approv: [], assess: [], waste: [] };
     this.lastBudget = { taxes: 0, roads: 0, power: 0, services: 0, water: 0, debt: 0, net: 0,
       trade: 0, // M27: regional power-trade line
       cleanTax: 0, // GP5b: the high-tech premium folded into taxes this month
@@ -2835,9 +2940,12 @@ class City {
     // M24 ANTI-CROSSTALK: the water overlays (PIPE/WATERTOWER/PUMP) are all
     // non-NONE/non-ROAD/non-RUBBLE, so without this exclusion they would WRONGLY
     // conduct electricity like a wire. A pipe carries water, never power.
-    const conducts = (i) => this.over[i] !== OV.NONE && this.over[i] !== OV.ROAD
-      && this.over[i] !== OV.RUBBLE && !isWaterOv(this.over[i]) && !isMega(this.over[i]) // M28: a mega footprint never routes power THROUGH itself (an arco can't bridge a wire across)
-      && !isXp(this.over[i]); // GP4a: concrete carries cars, never electricity — an expressway/ramp is not a conductor
+    // M28: a mega footprint never routes power THROUGH itself (an arco can't
+    // bridge a wire across). GP4a: concrete carries cars, never electricity —
+    // an expressway/ramp is not a conductor.
+    // GP9a: the membership test itself now lives in ovConducts (module scope,
+    // beside isPlant/isWaterOv/isXp) — this closure just indexes over[].
+    const conducts = (i) => ovConducts(this.over[i]);
     for (let i = 0; i < this.over.length; i++) {
       if (isPlant(this.over[i]) && this.anc[i] === i) {
         // M19: a plant contributes its AGED effective capacity, not its raw
@@ -2866,8 +2974,7 @@ class City {
     let demand = 0;
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
-      if (this.powered[i] && t >= OV.ZR && t !== OV.WIRE && t !== OV.RUBBLE
-          && t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t)) demand++; // M26: crossing is not a consumer; M24: water infra never draws power; M28: a self-powered mega adds ZERO net demand; GP4a: an expressway/ramp never draws power
+      if (this.powered[i] && ovDrawsPower(t)) demand++; // GP9a: M26 crossing is not a consumer; M24 water infra never draws power; M28 a self-powered mega adds ZERO net demand; GP4a an expressway/ramp never draws power — all of it now spelled once, in ovDrawsPower
     }
     // event modifiers can inflate the draw (e.g. the '97 heat wave)
     let pdMult = 1;
@@ -2890,8 +2997,7 @@ class City {
         // it), so the cut is a PURE hash of (seed, powerEpoch, tile) — never a
         // cursor. That is exactly what makes powered[] a pure function of
         // serialized state and lets the save omit it.
-        if (this.powered[i] && t >= OV.ZR && t !== OV.WIREROAD && !isPlant(t) &&
-            !isWaterOv(t) && !isMega(t) && !isXp(t) && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // M26: crossing isn't a consumer to brown out; M24: water infra isn't a consumer; M28: a power island can't be browned out; GP4a: an expressway/ramp isn't a consumer either
+        if (this.powered[i] && ovBrownoutEligible(t) && this.rngHashAt(bh, i) < cutRatio) this.powered[i] = 0; // GP9a: M26 crossing isn't a consumer to brown out; M24 water infra isn't a consumer; M28 a power island can't be browned out; GP4a an expressway/ramp isn't a consumer either
       }
       this.pushMsg("⚡ BROWNOUTS reported — the grid is over capacity! Build more power plants.");
     } else if (supply === 0 && demand === 0) {
@@ -2906,8 +3012,7 @@ class City {
       const yh = this.rngHashKeyFor(HZ.Y2K_CUT, this.powerEpoch); // hoisted (dom, epoch) half
       for (let i = 0; i < this.powered.length; i++) {
         const t = this.over[i];
-        if (this.powered[i] && t >= OV.ZR && t !== OV.RUBBLE &&
-            t !== OV.WIREROAD && !isPlant(t) && !isWaterOv(t) && !isMega(t) && !isXp(t) && // GP4a: concrete has no systems to flicker
+        if (this.powered[i] && ovFlickerEligible(t) && // GP9a: GP4a concrete has no systems to flicker — see ovFlickerEligible
             this.rngHashAt(yh, i) < 0.3) // GP1b: own domain, so it can't correlate with the brownout cut in the same epoch
           this.powered[i] = 0; // M26: crossing isn't a consumer; M24: water infra isn't a consumer; M28: a power island doesn't flicker
       }
@@ -2931,7 +3036,7 @@ class City {
           const X = fx + nx, Y = fy + ny;
           if (!this.inMap(X, Y)) continue;
           const j = this.idx(X, Y);
-          if (this.powered[j] && !isWaterOv(this.over[j]) && !isMega(this.over[j]) && !isXp(this.over[j])) { fed = true; break; } // M28: a self-powered mega island must not feed a pump (it never bridges the grid); GP4a symmetry: an xway is never powered, so this is a provable no-op
+          if (this.powered[j] && ovFeedsPump(this.over[j])) { fed = true; break; } // GP9a: M28 a self-powered mega island must not feed a pump (it never bridges the grid); GP4a symmetry: an xway is never powered, so this is a provable no-op
         }
       }
       this.powered[i] = fed ? 1 : 0;
@@ -3021,9 +3126,16 @@ class City {
     return Math.round(POWER_CAP[t] * plantAgeFactor(age));
   }
 
-  // Live per-type effective capacity feeding the grid, summed across every
-  // plant of each type (used by the budget power-mix breakdown, M19-4). The
-  // four values sum to powerSupply. A type with no plants reports 0.
+  /* Live per-type effective capacity feeding the grid, summed across every
+     plant of each type (used by the budget power-mix breakdown, M19-4). A type
+     with no plants reports 0.
+     GP9a CORRECTION: the note that used to sit here — "the four values sum to
+     powerSupply" — was wrong on two counts. There are FIVE buckets since GQ10,
+     and the sum is the PRE-TRADE PLANT supply: recomputePower assigns
+     `this.powerSupply` only AFTER folding powerTradeDelta() in, so with any open
+     M27 deal the mix sum and powerSupply legitimately differ (measured: sell x
+     surplus -200 MW, buy +200 MW). powerLedger() below is the honest statement
+     of the identity: Σ mix + tradeIn - tradeOut === powerSupply. */
   powerMix() {
     const mix = { coal: 0, solar: 0, gas: 0, wind: 0, nuke: 0 }; // GQ10: nuke bucket keeps Σ === powerSupply
     for (let i = 0; i < this.over.length; i++) {
@@ -3037,6 +3149,31 @@ class City {
       else if (t === OV.NUKE) mix.nuke += cap; // GQ10
     }
     return mix;
+  }
+
+  /* GP9a: the HONEST power ledger — the one place the displayed grid total is
+     reconciled with what the sim actually assigned to this.powerSupply:
+
+         Σ mix  +  tradeIn  -  tradeOut  ===  powerSupply
+
+     plantSupply is the pre-trade generation (Σ mix, the same aged effective
+     capacities recomputePower sums). tradeIn is firm IMPORTS, RECOMPUTED here
+     by walking conn/deals behind the identical `if (!this.conn[e].wire)
+     continue;` gate powerTradeDelta uses — deliberately NOT stashed as a new
+     City field, so this milestone adds ZERO keys to the City object and ZERO
+     risk to serialize(). tradeOut is the EXPORT powerTradeDelta already stashed
+     in the transient `_tradeSold` (capped to deliverable surplus, so it is 0
+     whenever the city has no surplus to sell). supply echoes this.powerSupply.
+     Pure read: no writes, no RNG, no recompute*. */
+  powerLedger() {
+    const mix = this.powerMix();
+    const plantSupply = mix.coal + mix.solar + mix.gas + mix.wind + mix.nuke;
+    let tradeIn = 0;
+    for (let e = 0; e < 4; e++) {
+      if (!this.conn[e].wire) continue;
+      if (this.deals[e].mode === 2) tradeIn += this.deals[e].mw; // buy → firm import
+    }
+    return { mix, plantSupply, tradeIn, tradeOut: this._tradeSold || 0, supply: this.powerSupply };
   }
 
   /* ---- end-of-life rebuild notice (M19) ----
@@ -4873,6 +5010,7 @@ class City {
       const d = o.mods || {};
       if (d.pollMul != null) m.pollMul *= d.pollMul;
       if (d.trafficMul != null) m.trafficMul *= d.trafficMul;
+      if (d.wasteMul != null) m.wasteMul *= d.wasteMul; // GP9a
       if (d.crimeCut != null) m.crimeCut += d.crimeCut;
       if (d.fireBurn != null) m.fireBurn += d.fireBurn;
       if (d.demR != null) m.demR += d.demR;
@@ -4881,6 +5019,7 @@ class City {
     }
     m.pollMul = Math.max(0.5, m.pollMul);
     m.trafficMul = Math.max(0.5, m.trafficMul);
+    m.wasteMul = Math.max(0.5, m.wasteMul); // GP9a: same defensive floor
     this.ordMods = m;
   }
 
@@ -5165,11 +5304,12 @@ class City {
       this.recCur.disasters++;
       // torch a random developed tile
       const cand = [];
+      // GP9a: the membership test is ovFireCandidate (module scope) — M26 the
+      // crossing is a road, not flammable; GP4a concrete isn't a fire
+      // candidate; M24 a buried pipe isn't either (towers/pumps, like plants,
+      // are). The scan ORDER and therefore the pick draw are unchanged.
       for (let i = 0; i < this.over.length; i++)
-        if (this.over[i] >= OV.ZR && this.over[i] !== OV.RUBBLE &&
-            this.over[i] !== OV.WIREROAD && // M26: crossing is a road, not flammable
-            this.over[i] !== OV.XWAY && this.over[i] !== OV.RAMP && // GP4a: concrete isn't a fire candidate
-            this.over[i] !== OV.PIPE) cand.push(i); // M24: a buried pipe isn't a fire candidate (towers/pumps, like plants, are)
+        if (ovFireCandidate(this.over[i])) cand.push(i);
       const i = cand.length ? cand[rh.pick(cand.length)]
                             : rh.pick(this.over.length);
       this.ignite(i % MAP, (i / MAP) | 0);
@@ -5543,17 +5683,22 @@ class City {
     const lit = { police: 0, fire: 0, edu: 0, health: 0 };
     for (let i = 0; i < this.over.length; i++) {
       const t = this.over[i];
+      // GP9a: the two membership tests are ovZoneIsStructure / ovIsStructure —
+      // the SPLIT halves of the one idiom that is NOT a pure function of the
+      // overlay byte. The control flow is unchanged statement for statement:
+      // OV.NONE still short-circuits BEFORE the SVC_LINEAR test, and the zone
+      // branch still `continue`s after accumulating its pop/job load.
       if (t === OV.NONE) continue;
-      if (t === OV.ZR || t === OV.ZC || t === OV.ZI) {
+      if (ovIsZone(t)) {
         const l = this.lvl[i];
-        if (!l) continue; // an undeveloped zone tile is a painted lot, not a structure
+        if (!ovZoneIsStructure(t, l)) continue; // an undeveloped zone tile is a painted lot, not a structure
         structures++;
         if (t === OV.ZR) popLoad += RES_POP[l];
         else if (t === OV.ZC) jobLoad += COM_JOB[l];
         else jobLoad += IND_JOB[l];
         continue;
       }
-      if (SVC_LINEAR.has(t)) continue; // roads/wires/pipes/rubble: nothing to protect
+      if (!ovIsStructure(t)) continue; // roads/wires/pipes/rubble: nothing to protect
       structures++;
       const def = SVC_DEF[t];
       if (def && this.anc[i] === i) {
@@ -5571,6 +5716,73 @@ class City {
         load, cap, strain: cap > 0 ? load / cap : null };
     }
     return out;
+  }
+
+  /* ---------- the waste ledger (GP9a) ----------
+     The GARBAGE RULER, and nothing else: GP9a measures the tonnage the city
+     already produces, it does not model collection, disposal or overflow. Both
+     readers follow the deptStrain()/deptCosts() PURITY CONTRACT verbatim — a
+     pure read that allocates nothing persistent, calls no recompute*, writes no
+     sim state and draws NO random numbers from any stream.
+
+     wasteRateAt(i): O(1) tonnes/month for ONE tile, from over[i] + lvl[i] +
+     ordMods.wasteMul. Zero for anything that is not a DEVELOPED zone tile — an
+     undeveloped lot, a road, a park and a power plant all make no garbage here.
+     Never reads cam.*, never reads rot4, never draws RNG. */
+  wasteRateAt(i) {
+    const row = WASTE_RATE[this.over[i]];
+    if (!row) return 0;
+    const l = this.lvl[i];
+    if (!l) return 0;
+    return Math.round(row[l] * this.ordMods.wasteMul);
+  }
+
+  /* wasteCensus(): ONE O(n) scan of the whole map returning the citywide
+     monthly tonnage plus its res/com/ind split, a per-LEVEL breakdown and the
+     number of contributing tiles. Written INDEPENDENTLY of wasteRateAt (the
+     ordinance multiplier is hoisted once and the per-tile round is inlined)
+     ON PURPOSE: that is what gives the "Σ wasteRateAt(i) === wasteCensus().total
+     exactly" check real content — it catches per-tile-vs-total rounding drift
+     in the ordinance fold instead of comparing a function against itself.
+     CALL SITES ONLY: collectBudget's %24 month rollover (one extra 6400-tile
+     scan per 24 ticks) and UI fills. NEVER tick / growthPass / recomputeMaps —
+     it must not join the per-14-tick sim path. */
+  wasteCensus() {
+    const mul = this.ordMods.wasteMul;
+    let total = 0, res = 0, com = 0, ind = 0, tiles = 0;
+    const byLevel = [0, 0, 0, 0];
+    for (let i = 0; i < this.over.length; i++) {
+      const t = this.over[i];
+      const row = WASTE_RATE[t];
+      if (!row) continue;
+      const l = this.lvl[i];
+      if (!l) continue;
+      const v = Math.round(row[l] * mul);
+      total += v; tiles++; byLevel[l] += v;
+      if (t === OV.ZR) res += v;
+      else if (t === OV.ZC) com += v;
+      else ind += v;
+    }
+    return { total, res, com, ind, byLevel, tiles };
+  }
+
+  /* ---------- the crosstalk audit table (GP9a) ----------
+     The SEVEN module-scope predicates that ARE pure functions of the overlay
+     byte, exposed as one table so "does a new id join this family?" is a row in
+     an assertion, not an inline expression someone has to remember to find.
+     Static because it takes a TYPE, not a tile: no city state is consulted.
+     DELIBERATELY EXCLUDES structure membership — deptStrain's census is not a
+     pure function of the byte (see ovIsStructure / ovZoneIsStructure). */
+  static ovCrosstalk(t) {
+    return {
+      conducts: ovConducts(t),
+      drawsPower: ovDrawsPower(t),
+      brownoutEligible: ovBrownoutEligible(t),
+      flickerEligible: ovFlickerEligible(t),
+      feedsPump: ovFeedsPump(t),
+      fireCandidate: ovFireCandidate(t),
+      wireJoins: ovWireJoins(t),
+    };
   }
 
   /* ---------- education slow stock (GP5b) ----------
@@ -6014,13 +6226,19 @@ class City {
     // this same tick, and lastBudget was finalized from that same census above,
     // so the two figures describe the same month.
     this.history.assess.push(this.assessedLedger().total);
-    // trim all eleven in lockstep under the one existing >240 guard so every
+    // GP9a (save v19): the garbage series, pushed LAST (after assess) so the
+    // v18 keys keep their serialized order. wasteCensus() is ONE extra 6400-tile
+    // pure scan per 24 ticks — it lives HERE and in UI fills, never in tick /
+    // growthPass / recomputeMaps, and it draws no random numbers, so it cannot
+    // perturb the growth cursor scanComplaints reads later in this same block.
+    this.history.waste.push(this.wasteCensus().total);
+    // trim all TWELVE in lockstep under the one existing >240 guard so every
     // array stays the same length and month-aligned.
     // SECOND LIST WARNING: this key list is the mirror of normaliseHistory()'s
     // (js/sim.js, top of file) — extend BOTH or the new series is silently
     // dropped on load / drifts out of month-alignment with the others.
     if (this.history.pop.length > 240)
-      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess"])
+      for (const k of ["pop", "funds", "net", "tax", "poll", "crime", "landv", "commute", "avgcom", "approv", "assess", "waste"])
         this.history[k].shift();
   }
 
@@ -6409,9 +6627,19 @@ class City {
        instead of a series the trim could never let grow. A pre-v18 save
        therefore serializes back out with nulls in the pad, which JSON carries
        natively and normaliseHistory treats as a fixpoint (round-trip measured
-       byte-stable). No v===18 test anywhere in deserialize. */
+       byte-stable). No v===18 test anywhere in deserialize.
+       GP9a (save v19): ONE new key, `history.waste` — the monthly garbage
+       tonnage — appended LAST inside the EXISTING history object, so the whole
+       v18 serialized prefix stays character-stable and NO new TOP-LEVEL key and
+       NO new City field appear at all (powerLedger recomputes tradeIn rather
+       than stashing one, and the Garbage overlay allocates no plane). Backward
+       compatibility rides the same two mechanisms assess did: normaliseHistory's
+       defensive Array.isArray guard and its null LEFT PAD, so a mature pre-v19
+       save loads with history.waste padded to L nulls — month-aligned to its
+       eleven siblings, plotted as nothing — and a save with no history at all
+       loads waste === []. No v===19 test anywhere in deserialize. */
     return JSON.stringify({
-      v: 18, size: this.size, seed: this.seed, cityName: this.cityName,
+      v: 19, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
       // M23 (save v7): per-department funding levels + road wear counters
       funding: this.funding,

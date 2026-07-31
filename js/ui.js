@@ -44,6 +44,14 @@ const UI = {
     // captions as "yr 240" instead of "yr 20"); it is the first series to need
     // the two flags apart. Annual records exist for pop/net/tax only.
     assess: { on: false, color: "#0a7d6a", key: "assess", label: "Assessed take", monthly: true },
+    // GP9a: the monthly garbage tonnage (history.waste) — the waste ledger's
+    // published number. OFF by default so the shipped default render stays
+    // pixel-identical. `idx` because tonnes are a RAW number, not §, and that
+    // is exactly the flag drawGraphLegend keys on for the no-§ caption;
+    // `monthly` because there is no annual record store, so seriesData's 100yr
+    // branch falls through to the monthly tail and the right-edge span label
+    // must still divide the point count by 12.
+    waste: { on: false, color: "#7a5c2e", key: "waste", label: "Garbage (t/mo)", idx: true, monthly: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
   // GP1a: the open Tile Info target ({x, y, at}) — null whenever the dialog is
@@ -804,16 +812,25 @@ const MM_LEGENDS = {
   // RISK_BANDS, indexed by sim.js's hazardTileBand()), plus the standard water
   // swatch, per the G8 contract that the strip echoes the exact branch colours.
   risk:    '<i class="sw" style="background:#243a2a"></i>low <i class="sw" style="background:#2f7e78"></i>elevated <i class="sw" style="background:#e0a028"></i>high <i class="sw" style="background:#ffd2e0"></i>severe <i class="sw" style="background:#013"></i>water',
+  // GP9a: monthly garbage tonnage — the five bands renderMinimap paints
+  // (render.js MM_WASTE_BANDS, indexed by sim.js's wasteBand()) plus the
+  // standard water swatch, per the G8 contract that the strip echoes the exact
+  // branch colours.
+  garbage: '<i class="sw" style="background:#14240f"></i>trace <i class="sw" style="background:#7a4a12"></i>light <i class="sw" style="background:#a08a52"></i>moderate <i class="sw" style="background:#e39a5e"></i>heavy <i class="sw" style="background:#f0e4c0"></i>extreme <i class="sw" style="background:#013"></i>water',
 };
 
-// GP5a: legend mode names — with 14 map modes the abbreviated buttons alone
+// GP5a: legend mode names — with 15 map modes the abbreviated buttons alone
 // no longer identify the view, so every non-"City" legend leads with its name.
 // GP8a: MM_NAMES, MM_LEGENDS and the updateMapLegend walk are extended in ONE
 // edit — the GP6 fix-pass comment below documents what a half-extension does.
+// GP9a: `garbage` joins under that same one-edit rule. MM_NAMES is read
+// UNCONDITIONALLY below, so a mode with a legend row but no name row captions
+// itself with the literal string "undefined".
 const MM_NAMES = { all: "City", power: "Power", poll: "Pollution",
   value: "Land value", crime: "Crime", traffic: "Traffic",
   svc: "Schools & health", pol: "Police", fire: "Fire", water: "Water",
-  transit: "Rail", commute: "Commute", dist: "Neighborhoods", risk: "Risk" };
+  transit: "Rail", commute: "Commute", dist: "Neighborhoods", risk: "Risk",
+  garbage: "Garbage" };
 
 function updateMapLegend(mode) {
   const el = document.getElementById("mm-legend");
@@ -1091,18 +1108,29 @@ function openBudget() {
 
 /* --------- power-mix breakdown (M19) ---------
    A pie plus a labeled legend of each generator type's LIVE effective
-   capacity (city.powerMix(), which folds in plant aging and sums to
-   powerSupply). Types with more/larger plants take a bigger slice; a type
-   with no plants shows a 0 slice. Rebuilt whenever the budget dialog opens. */
+   capacity (city.powerMix(), which folds in plant aging). Types with more/larger
+   plants take a bigger slice; a type with no plants shows a 0 slice. Rebuilt
+   whenever the budget dialog opens.
+   GP9a: this panel used to caption the mix sum "Total supply", which is FALSE
+   under any open M27 regional power deal — powerMix sums PRE-trade plant
+   capacity while city.powerSupply is assigned POST-trade (measured: wrong in 3
+   of 6 trade x grid cells, by ±200 MW). It now reads city.powerLedger() and
+   prints the honest ledger: the pie stays the PLANT mix (a trade is not a
+   generator and an EXPORT is negative, which cannot be a pie slice at all — the
+   arc loop below must never receive a negative sweep), regional trade gets its
+   own SIGNED legend row, and the footer states city.powerSupply itself. */
 const POWERMIX_TYPES = [
   { key: "coal",  label: "Coal",  col: "#6b6b73" },
   { key: "gas",   label: "Gas",   col: "#c9853b" },
   { key: "solar", label: "Solar", col: "#2f74c0" },
   { key: "wind",  label: "Wind",  col: "#5fb56a" },
-  { key: "nuke",  label: "Nuclear", col: "#d8c433" }, // GQ10: keeps the pie summing to powerSupply
+  { key: "nuke",  label: "Nuclear", col: "#d8c433" }, // GQ10: the fifth generator bucket (GP9a: the pie sums to the PLANT mix, not to powerSupply — see above)
 ];
 function fillPowerMix() {
-  const mix = city.powerMix();
+  const led = city.powerLedger();
+  const mix = led.mix;
+  // the PIE's denominator is the plant mix only — never the traded total, so
+  // every sweep below stays >= 0 no matter which way the deals run
   const total = POWERMIX_TYPES.reduce((s, t) => s + mix[t.key], 0);
   const cv = document.getElementById("powermix-pie");
   if (cv) {
@@ -1136,8 +1164,17 @@ function fillPowerMix() {
     return `<tr><td><i class="sw" style="background:${t.col}"></i>${t.label}</td>` +
            `<td>${mw} MW (${pct}%)</td></tr>`;
   }).join("");
+  // GP9a: the signed regional-trade line. Printed ONLY when the net is non-zero
+  // (no deal, no row — the pre-GP9a legend is unchanged on a city that trades
+  // nothing), with an explicit leading sign so an EXPORT reads as the debit it
+  // is. Σ slices + this row === the footer, exactly.
+  const net = led.tradeIn - led.tradeOut;
+  const tradeRow = net !== 0
+    ? `<tr><td><i class="sw" style="background:#8d6bb0"></i>Regional trade</td>` +
+      `<td>${net < 0 ? "-" : "+"}${Math.abs(net)} MW</td></tr>`
+    : "";
   document.getElementById("powermix-legend").innerHTML =
-    rows + `<tr class="total"><td>Total supply</td><td>${total} MW</td></tr>`;
+    rows + tradeRow + `<tr class="total"><td>Total supply</td><td>${city.powerSupply} MW</td></tr>`;
 }
 
 function fillBudgetTable() {
@@ -1931,6 +1968,7 @@ function renderQuery() {
     <tr><td>Land value</td><td>${city.landv[i]}</td></tr>
     <tr><td>Traffic</td><td>${(city.over[i] === OV.ROAD || city.over[i] === OV.WIREROAD) ? city.traffic[i] : "—"}</td></tr>
     <tr><td>Pollution</td><td>${city.poll[i]}</td></tr>
+    <tr><td>Garbage</td><td>${WASTE_RATE[city.over[i]] && city.lvl[i] ? city.wasteRateAt(i) + " t/mo" : "—"}</td></tr>
     <tr><td>Crime</td><td>${city.crime[i]}</td></tr>
     <tr><td>Education</td><td>${city.eduCov[i]}</td></tr>
     <tr><td>Health</td><td>${city.medCov[i]}</td></tr>

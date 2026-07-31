@@ -2225,13 +2225,31 @@ const MM_COMMUTE = [[70, 220, 60], [235, 160, 40], [140, 16, 28]];
 const MM_POLCOV = [[16, 24, 52], [40, 110, 190], [125, 220, 255]];   // dark navy → bright cyan-blue
 const MM_FIRECOV = [[50, 20, 12], [190, 95, 32], [255, 208, 122]];   // dark ember → bright amber-gold
 /* GP7a S4: the five land-value wealth bands the "value" overlay paints, indexed
-   by sim.js's landvBand() (edges 20/40/60/80 on landv). Blighted -> Gold, strictly
-   rising in Rec.709 luminance (39.3 / 79.6 / 121.0 / 192.0 / 230.5 — steps
-   40.3 / 41.4 / 70.9 / 38.6, every one >= 25) and >= 50 apart in at least one
-   channel between adjacent bands (50 / 50 / 78 / 78), so the
-   ladder reads under deuteranopia as well as in colour. The endpoints are the
-   shipped legend's own #1e283c and #6adabb, so the strip needs no new hues. */
-const MM_VALUE_BANDS = ["#1e283c", "#2b5a55", "#3d8c6e", "#6adabb", "#b8f5e0"];
+   by sim.js's landvBand() (edges 20/40/60/80 on landv). Blighted -> Gold,
+   strictly rising in Rec.709 luminance (49.5 / 79.6 / 121.0 / 192.0 / 221.8 —
+   steps 30.2 / 41.4 / 70.9 / 29.8, every one >= 25) and >= 50 apart in at least
+   one channel between adjacent bands (51 / 50 / 78 / 149), so the ladder reads
+   under deuteranopia as well as in colour.
+   THE TWO ENDS ARE NOT THE MIDDLE'S HUE, and that is deliberate — measured, not
+   taste. The first cut ran a single teal ramp from #1e283c to a pale #b8f5e0:
+     - #1e283c against the water swatch #013 is CIEDE2000 8.9, so lakes and
+       blighted districts merged into one dark mass at the shipped 2px/tile
+       minimap scale. "value" is the only mode whose land base shares navy with
+       water (poll #131 / crime #121 / power #111 separate by hue), so it is the
+       only mode that had to solve it in luminance+hue. #3f2f22 is dead earth:
+       dE 26.3 from water (30.0 simulated deuteranopic).
+     - #b8f5e0 was a 24.9%-saturation pastel — the lone desaturated bright end
+       in the overlay system (HSV saturation of each sibling ramp's BRIGHTEST
+       anchor: MM_POLCOV 51.0 / MM_FIRECOV 52.2 / MM_CRIME 62.4 / MM_TRAFFIC
+       72.7 / MM_POLL 80.4) and dE 10.3 from "prime", below this
+       codebase's own categorical bar of 13 (js/sim.js district palette, worst
+       pair 13.3). At the ~6px legend swatch prime and gold were not tellable
+       apart. #ffe066 is 60.0% saturated, dE 33.1 from prime (25.7 deutan), and
+       it is what the band is NAMED: a saturated VGA gold, not a mint wash.
+   WORST PAIR AMONG ALL SIX DECLARED CATEGORIES (5 bands + water) IS NOW 19.4,
+   over the 13 bar; it was 8.9. The middle three keep the shipped legend's teal
+   exactly, so the ramp still reads as one ladder. */
+const MM_VALUE_BANDS = ["#3f2f22", "#2b5a55", "#3d8c6e", "#6adabb", "#ffe066"];
 
 function mmRamp(t, s) {
   const u = t <= 0 ? 0 : t >= 1 ? 1 : t;
@@ -2276,10 +2294,12 @@ function renderMinimap(city, mode) {
          the LANDV_BAND inspector row and the assessed ledger are asked. The
          band edges come from sim.js's landvBand(), the ONE definition both the
          map and the tile readout use, so they can never disagree.
-         Palette monotonic in Rec.709 luminance (39.3 / 79.6 / 121.0 / 192.0 /
-         230.5) so the ramp survives deuteranopia, and it keeps the shipped
-         legend endpoints #1e283c -> #6adabb. Water takes the standard `#013`
-         branch the poll/crime/svc/power modes already use.
+         Palette monotonic in Rec.709 luminance (49.5 / 79.6 / 121.0 / 192.0 /
+         221.8) so the ramp survives deuteranopia, and it keeps the shipped
+         legend's teal middle. Water takes the standard `#013` branch the
+         poll/crime/svc/power modes already use — and MM_VALUE_BANDS[0] is a
+         dead-earth brown, not navy, precisely so that this branch's two dark
+         outcomes (lake, blighted lot) do not merge (see MM_VALUE_BANDS).
          A PURE FUNCTION OF city.landv / city.terr — no cam, no rot4, no
          screenToTile: this branch must stay rotation-invariant (G10(b)). */
       col = city.terr[i] === TERR.WATER ? "#013" : MM_VALUE_BANDS[landvBand(city.landv[i])];

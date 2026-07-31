@@ -98,12 +98,23 @@ Queue policy: keep at least 5 open improvements at all times.
   at every rate below 15, so `jobsAvail/220` — not `taxMod` — is what binds
   equilibrium, and the revenue-maximising rate on this corpus is **14, not
   20**. Save **v18**; `normaliseHistory` now **left-pads** every short series
-  to the longest, because the "loads as `[]` and records forward" idiom is
-  silently broken once a city hits the 240-entry cap. Two consequences are
-  **user decisions, not worker calls** (recorded in
-  `gameplay-roadmap.json` → GP7a → `design_user_decisions`): the pad writes
-  fabricated §0 months into `assess`, and it retroactively repairs
-  `commute` / `avgcom` / `approv` on mature pre-v17 saves.
+  to the longest **with `null`**, because the "loads as `[]` and records
+  forward" idiom is silently broken once a city hits the 240-entry cap (the
+  trim shifts every key, so an empty series pushes one sample and loses it
+  again, forever) — and because the graph stretches each series across the
+  full canvas by its own index, so an unpadded short series would trace the
+  wrong years. `null` is the **"not measured"** sentinel: it holds the month
+  slot open and draws **nothing** (the trace breaks across it; the legend
+  reports the last real sample). A first cut zero-filled and was measured to
+  invent history — five months of **0% approval** after loading a v13 save,
+  and **"Assessed take: §0"** for up to 240 months on a city whose live
+  ledger reads ~§10,000/month; that is the defect the sentinel removes. A
+  save with **no history at all** still loads `assess === []`. One
+  consequence remains a **user decision, not a worker call** (recorded in
+  `gameplay-roadmap.json` → GP7a → `design_user_decisions`): the same pad
+  retroactively repairs `commute` / `avgcom` / `approv` on mature pre-v17
+  saves — strictly additive, idempotent, and beyond the milestone's declared
+  surface.
 
 ## Open
 

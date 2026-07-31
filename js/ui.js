@@ -763,7 +763,7 @@ const MM_LEGENDS = {
   // wealth bands renderMinimap now paints (render.js MM_VALUE_BANDS, indexed by
   // sim.js's landvBand()), plus the standard water swatch — the G8 contract
   // that the strip echoes the exact branch colours.
-  value:   '<i class="sw" style="background:#1e283c"></i>blighted <i class="sw" style="background:#2b5a55"></i>cheap <i class="sw" style="background:#3d8c6e"></i>modest <i class="sw" style="background:#6adabb"></i>prime <i class="sw" style="background:#b8f5e0"></i>gold <i class="sw" style="background:#013"></i>water',
+  value:   '<i class="sw" style="background:#3f2f22"></i>blighted <i class="sw" style="background:#2b5a55"></i>cheap <i class="sw" style="background:#3d8c6e"></i>modest <i class="sw" style="background:#6adabb"></i>prime <i class="sw" style="background:#ffe066"></i>gold <i class="sw" style="background:#013"></i>water',
   crime:   '<i class="grad" style="background:linear-gradient(90deg,#121,#8c285a,#ff60be)"></i>safe / lawless',
   traffic: '<i class="grad" style="background:linear-gradient(90deg,#46dc3c,#eba028,#8c101c)"></i>free / jammed',
   svc:     '<i class="sw" style="background:#288cfa"></i>edu <i class="sw" style="background:#fc8c32"></i>health <i class="sw" style="background:#fcf0fa"></i>both',
@@ -1599,9 +1599,15 @@ function openGraphs() {
     .filter((s) => s.desc.on)
     .map((s) => ({ id: s.id, desc: s.desc, data: seriesData(s.desc, range) }));
   const maxLen = enabled.reduce((m, s) => Math.max(m, s.data.length), 0);
+  // GP7a: the low-data test counts REAL samples, not padded month slots — a
+  // series that is nothing but normaliseHistory's null pad (a just-upgraded
+  // save with only the new key enabled) has length but nothing to draw, and
+  // must say "collecting data" rather than render an empty frame. maxLen keeps
+  // its own meaning below: the month SPAN of the x-axis, pad included.
+  const maxReal = enabled.reduce((m, s) => Math.max(m, s.data.filter((v) => v != null).length), 0);
 
   // --- empty / low-data state: the ACTIVE range yields too few points to plot
-  if (maxLen < 2) {
+  if (maxReal < 2) {
     g.textAlign = "center"; g.textBaseline = "middle";
     g.fillStyle = "#444"; g.font = "bold 13px 'MS Sans Serif',Arial,sans-serif";
     g.fillText("Collecting data —", W / 2, H / 2 - 9);
@@ -1615,17 +1621,29 @@ function openGraphs() {
   // trace one series over its own auto-scale-to-frame so 0-255 indices and
   // 5-digit § values coexist. A series with <2 points in this range is skipped
   // (never divides by zero) but still contributes its latest value to legend.
+  // GP7a: a point may be null — normaliseHistory's left pad holds a month slot
+  // open for a series that was not being recorded yet (a pre-v18 save's assess,
+  // a pre-v17 save's approv) WITHOUT inventing a value for it. Nulls keep the
+  // series month-aligned with its siblings (px() indexes the padded array) and
+  // draw nothing: the trace breaks across them and they never reach the
+  // auto-scale max. A series of all-real numbers takes exactly the shipped
+  // path — measured pixel-identical on the default render.
   const plot = (data, color) => {
-    if (data.length < 2) return;
-    const max = Math.max(...data.map(Math.abs), 1);
+    const real = data.filter((v) => v != null);
+    if (real.length < 2 || data.length < 2) return;
+    const max = Math.max(...real.map(Math.abs), 1);
     const px = (k) => x0 + 2 + k / (data.length - 1) * (x1 - x0 - 4);
     const py = (v) => Math.max(top, Math.min(bot, bot - (v / max) * (bot - top)));
     g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
-    data.forEach((v, k) => (k ? g.lineTo(px(k), py(v)) : g.moveTo(px(k), py(v))));
+    let pen = false;                                  // false => next point starts a new segment
+    data.forEach((v, k) => {
+      if (v == null) { pen = false; return; }
+      if (pen) g.lineTo(px(k), py(v)); else { g.moveTo(px(k), py(v)); pen = true; }
+    });
     g.stroke();
     if (data.length <= 60) { // vertex dots when sparse enough to read
       g.fillStyle = color;
-      data.forEach((v, k) => { g.beginPath(); g.arc(px(k), py(v), 2, 0, 7); g.fill(); });
+      data.forEach((v, k) => { if (v == null) return; g.beginPath(); g.arc(px(k), py(v), 2, 0, 7); g.fill(); });
     }
   };
   enabled.forEach((s) => plot(s.data, s.desc.color));
@@ -1676,7 +1694,13 @@ function drawGraphLegend(enabled) {
   const el = document.getElementById("graph-legend");
   if (!el) return;
   el.innerHTML = enabled.map((s) => {
-    const v = s.data.length ? s.data[s.data.length - 1] : null;
+    // GP7a: the LAST REAL sample, skipping normaliseHistory's null pad — a
+    // padded month is "not measured", and printing it as §0 was measured to
+    // caption a live ~§10,000/month ledger as "Assessed take: §0" for up to
+    // 240 months after an upgrade load. A wholly unmeasured series prints "—",
+    // the em-dash this legend already uses for "no data".
+    let v = null;
+    for (let k = s.data.length - 1; k >= 0; k--) if (s.data[k] != null) { v = s.data[k]; break; }
     const val = v == null ? "—"
       : s.desc.idx ? String(Math.round(v))
       : (v < 0 ? "-§" : "§") + graphNum(Math.abs(v));

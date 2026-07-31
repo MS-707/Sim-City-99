@@ -404,6 +404,16 @@ input[type=range]::-moz-range-thumb {
 .rg-note.bad { color: #a02020; }
 .budget-row { margin-bottom: 4px; }
 .budget-row input[type=range] { width: 100%; }
+/* GP7a: the shipped tall-dialog idiom (#dlg-rci / #dlg-ordinances / #dlg-region
+   / #dlg-survey / #dlg-shortcuts). The seven assessed-valuation preview rows
+   grew this dialog from 824px to 972px, and .dlg is top:40% + translate(-50%,
+   -50%), so an ungoverned 972px body needs a >=1215px-tall viewport to keep its
+   titlebar on screen — MEASURED at 1280x{800,900,1080} the titlebar, its ✕ and
+   the property-tax slider all sat above y=0, and since the titlebar is the only
+   drag handle the dialog could not be pulled back down. Capping the BODY (never
+   the dialog) keeps the chrome anchored and scrolls the contents instead; the
+   tax slider is the body's first child, so it is always in view. */
+#dlg-budget .dlg-body { max-height: 76vh; overflow-y: auto; }
 /* department funding sliders (M23) */
 .fundbox { margin-top: 8px; }
 .fund-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; font-size: 12px; }

@@ -26,28 +26,33 @@ function setMapSize(n) { MAP = n; }
 // of month-alignment with the other nine. (That loop carries the mirror of this
 // comment.) A v16 save loads with approv=[] and records forward (the M30 idiom).
 // GP7a (save v18): "assess" appended LAST, after "approv", under the same
-// ladder rule. THE LEFT PAD: the M30 "loads as [] and records forward" idiom is
-// silently BROKEN once a city's history reaches the 240 cap, because the trim
-// at the end of collectBudget then fires on EVERY rollover and shifts every key
-// in its list — so a series that starts empty pushes 1 and is shifted straight
-// back to 0, forever. MEASURED on a mature v17 save: all ten shipped series pin
-// at exactly 240 and the eleventh would never grow past 0. Every SHORT series is
-// therefore left-padded with zeros up to the longest key's length, so the new
-// key is month-aligned to the others from the first load. Additive and
-// idempotent — it never truncates, so serialize->deserialize->serialize stays
-// byte-stable. This also repairs the identical latent defect that commute /
-// avgcom / approv have carried for mature pre-v17 saves.
-// WHAT THE PAD ACTUALLY DOES (measured, and it is NOT the "loads as [] and
-// records forward" idiom the ladder notes above describe — those lines record
-// each milestone's original intent and are superseded here): the pad fires
-// whenever L > 0, i.e. on EVERY save that carries any history at all, not only
-// on a capped one. MEASURED on a v17 save taken from a 120-tick city (history
-// length 5): assess loads with length 5, zero-filled. So `assess === []` holds
-// for exactly one case — a save with NO history whatsoever (L === 0, a brand-new
-// or history-less city); every other save loads assess as month-aligned zeros
-// back to the incumbent length. The zeros are fabricated months the shadow
-// ledger never measured and will plot as a flat zero run in the "Assessed take"
-// graph series until the first post-load rollover.
+// ladder rule. THE LEFT PAD, AND WHY IT PADS WITH null: the M30 "loads as []
+// and records forward" idiom is silently BROKEN once a city's history reaches
+// the 240 cap, because the trim at the end of collectBudget then fires on EVERY
+// rollover and shifts every key in its list — so a series that starts empty
+// pushes 1 and is shifted straight back to 0, forever. MEASURED on a mature v17
+// save: all ten shipped series pin at exactly 240 and the eleventh would never
+// grow past 0. A short series is therefore left-padded up to the longest key's
+// length so every key is month-aligned from the first load — which the GRAPH
+// needs independently, because ui.js plots each series across the FULL canvas
+// width by its own index (px(k) = k / (data.length - 1)), so a shorter series
+// is time-STRETCHED, not right-aligned, and a 5-point assess would trace the
+// same 20 years as a 240-point tax line.
+// THE PAD VALUE IS null, NOT 0. Zero-filling was measured to fabricate months
+// the sim never recorded: a v13 save loaded on the zero-filling build plotted
+// five months of 0% citizen approval in the shipped M30 approval graph, and a
+// v17 save loaded with 25 months of "Assessed take: §0" for a city whose live
+// ledger reads ~§10,000/month. null is the honest sentinel — it holds the month
+// slot open for alignment and draws NOTHING: ui.js's plot() breaks its trace
+// across nulls and its legend reports the last REAL sample. (Contrast the
+// commute series' own 0 sentinel, which is a genuine measured "-1 means no
+// jobs" case, not an absence.) So a v17 save loads with assess = 240 nulls that
+// plot as an empty left margin filling in one real month per rollover, and a
+// save with NO history at all (L === 0) still loads assess === [] exactly as
+// the ladder notes above describe. Additive and idempotent — it never truncates
+// and re-normalising is a fixpoint, so serialize->deserialize->serialize stays
+// byte-stable. This also repairs the identical latent defect commute / avgcom /
+// approv have carried for mature pre-v17 saves.
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
@@ -55,10 +60,10 @@ function normaliseHistory(h) {
   for (const k of keys) out[k] = Array.isArray(h[k]) ? h[k].slice() : [];
   let L = 0;
   for (const k of keys) if (out[k].length > L) L = out[k].length;
-  // "-1 records as 0 so the series stays plottable" — the same 0 sentinel.
   // L === 0 (a save with no history at all) pads nothing and every key stays
-  // []; any L > 0 zero-fills EVERY short key up to L, new and old alike.
-  for (const k of keys) { const a = out[k]; while (a.length < L) a.unshift(0); }
+  // []; any L > 0 pads EVERY short key up to L with the null "not measured"
+  // sentinel, new and old alike — never with a fabricated number.
+  for (const k of keys) { const a = out[k]; while (a.length < L) a.unshift(null); }
   return out;
 }
 
@@ -4292,6 +4297,23 @@ class City {
     // below stay character-identical, so every `dem > 0.15` comparison and the
     // growth RNG stream are untouched (G1).
     let rBase = 0, cBase = 0, iBase = 0, aR = 0, aC = 0, aI = 0;
+    /* GP7a: assessmentAt bound to a LOCAL before the loop. It is a top-level
+       function declaration, i.e. a property of the global object, so calling it
+       per tile re-resolves it through the global scope — cheap in a plain
+       browser page (+19% on this method alone, ~1.6% of a tick) but
+       pathological wherever that global is a proxy, which is exactly how this
+       repo's determinism harnesses run the sim: inside a node `vm` context the
+       call routes through V8's context interceptors on every iteration.
+       MEASURED, three interleaved rounds on the pinned reference city, the
+       SAME source differing only in this binding: 0.258-0.317 ms per call
+       un-hoisted (9.4-13.4x the b3d780c baseline's 0.024-0.028) against
+       0.032-0.036 ms hoisted (1.26-1.36x). The binding is read ONCE here; the
+       arithmetic, and therefore every accumulated bit, is unchanged (verified
+       by the 20-seed x 600-tick byte-identity run). Do not re-inline the global
+       into the loop, and note that the baseline loop calls no global inside its
+       ZR/ZC/ZI branches at all — RES_POP/COM_JOB/IND_JOB are script-scope
+       consts, which is why only the new accumulation ever paid this. */
+    const assessAt = assessmentAt;
     // GP2: port ANCHOR DISCOVERY is FUSED into this existing full-map loop, so
     // the port pass costs no new O(n) scan per tick. Reuses the caller's array
     // (zero allocation on the hot path) and stays a pure read: it writes only
@@ -4300,11 +4322,11 @@ class City {
     pa.length = 0;
     for (let i = 0; i < this.over.length; i++) {
       if (this.over[i] === OV.ZR) { pop += RES_POP[this.lvl[i]]; resTiles++;
-        const b = ASSESS_R[this.lvl[i]]; rBase += b; aR += b * assessmentAt(this.landv[i]); }
+        const b = ASSESS_R[this.lvl[i]]; rBase += b; aR += b * assessAt(this.landv[i]); }
       else if (this.over[i] === OV.ZC) { cJobs += COM_JOB[this.lvl[i]];
-        const b = ASSESS_C[this.lvl[i]]; cBase += b; aC += b * assessmentAt(this.landv[i]); }
+        const b = ASSESS_C[this.lvl[i]]; cBase += b; aC += b * assessAt(this.landv[i]); }
       else if (this.over[i] === OV.ZI) { iJobs += IND_JOB[this.lvl[i]];
-        const b = ASSESS_I[this.lvl[i]]; iBase += b; aI += b * assessmentAt(this.landv[i]); }
+        const b = ASSESS_I[this.lvl[i]]; iBase += b; aI += b * assessAt(this.landv[i]); }
       else if (this.over[i] === OV.STADIUM && this.anc[i] === i) stadiums++;
       else if (this.over[i] === OV.SCHOOL && this.anc[i] === i && this.powered[i]) schools++;
       else if (this.over[i] === OV.HOSPITAL && this.anc[i] === i && this.powered[i]) hospitals++;
@@ -4315,7 +4337,7 @@ class City {
       // GP7a (D2): the same anchor pays into the industrial assessed bucket, so
       // a Launch Arco is not invisible to the ruler while paying headcount tax.
       else if (isArco(this.over[i]) && this.anc[i] === i) { pop += ARCO_POP[this.over[i]]; iJobs += ARCO_JOB[this.over[i]];
-        const b = ASSESS_ARCO[this.over[i]]; iBase += b; aI += b * assessmentAt(this.landv[i]); }
+        const b = ASSESS_ARCO[this.over[i]]; iBase += b; aI += b * assessAt(this.landv[i]); }
       // GP2: one anchor index per port — the list recomputePorts() consumes
       else if (isPort(this.over[i]) && this.anc[i] === i) pa.push(i);
     }
@@ -5875,8 +5897,12 @@ class City {
        the census + landv, both of which already serialize, so assessedLedger()
        is exact again the instant a loaded city ticks. normaliseHistory also
        gained a LEFT PAD (see its comment): a mature save whose history sits at
-       the 240 cap loads with assess zero-filled to 240 instead of a series the
-       trim could never let grow. No v===18 test anywhere in deserialize. */
+       the 240 cap loads with assess padded to 240 with the null "not measured"
+       sentinel — month-aligned to its ten siblings, plotted as nothing —
+       instead of a series the trim could never let grow. A pre-v18 save
+       therefore serializes back out with nulls in the pad, which JSON carries
+       natively and normaliseHistory treats as a fixpoint (round-trip measured
+       byte-stable). No v===18 test anywhere in deserialize. */
     return JSON.stringify({
       v: 18, size: this.size, seed: this.seed, cityName: this.cityName,
       funds: this.funds, taxRate: this.taxRate,
@@ -6207,8 +6233,11 @@ class City {
        Placed here — after the WHOLE recompute cascade (so approvalCensus reads
        the final planes and svcStrain) and after the disaster restore (a term
        reads c.disaster) — so a v16-or-older save adopts exactly the target its
-       restored state computes, with history.approv = [] recording forward (the
-       M30 idiom), and a v17 save round-trips idempotently (the guard is
+       restored state computes, with history.approv recording forward from the
+       first post-load rollover (the M30 idiom — GP7a's normaliseHistory pad
+       now holds the earlier month slots open with nulls so the series stays
+       aligned with its siblings, and a save with no history at all still loads
+       approv === []), and a v17 save round-trips idempotently (the guard is
        `< 0`, so a saved mood is never overwritten). approvalReport draws ZERO
        randomness, so this cannot perturb the restored cursors — and the
        restoreRngCursors below re-pins them regardless. megaOk uses the exact

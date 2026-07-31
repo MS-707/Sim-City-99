@@ -1344,7 +1344,7 @@ function drawChar(spr, wx, wy) {
   ctx.globalAlpha = 1;
 }
 
-/* GP10a S4: the BLIGHT WASH — the drawChar idiom above, verbatim, with a rust
+/* GP10a S4: the BLIGHT WASH — the drawChar idiom above, verbatim, with a soot
    grime colour instead of char-black and a per-band alpha instead of one
    constant. The sprite's own silhouette is refilled (source-in) into a canvas
    cached on the sprite object at first use and blitted over the PRISTINE
@@ -1362,7 +1362,9 @@ function drawChar(spr, wx, wy) {
    THE CACHE TIER IS DECLARED, not incidental: one extra canvas per sprite
    OBJECT (`spr.blight`), built at first use and never rebuilt — measured 340
    canvases / 5.31 MB after visiting all four rotations x four seasons on a
-   TOTALLY blighted city, i.e. +4.8% on the 4,627-canvas sprite atlas. It is
+   TOTALLY blighted city, i.e. +4.8% on the 4,627-canvas sprite atlas, and
+   ZERO canvases of any kind created per frame in the steady state (128 frames
+   x 5 views on a fully blighted city, same count as the pre-GP10a arm). It is
    not a sprite BAKE (no ART_RNG, no R(), no new anchor); it is the drawChar
    tier one entry wider.
 
@@ -1371,19 +1373,24 @@ function drawChar(spr, wx, wy) {
    #6b4526 at [0.16, 0.28, 0.42] and covered 68% of the bbox while the mean
    CIE76 distance between ADJACENT bands was 2.9-3.7 with 21-41% of the
    changed pixels under the 2.3 JND — a ladder that measures but does not
-   read. Re-derived (mean dE over changed pixels, ZR L2 lot, summer/autumn/
-   winter, day and deep night):
-       healthy->strained 6.1   strained->at-risk 6.1   at-risk->critical 6.7
-       healthy->critical 18.8, against the fire char's 25.4 — so the char
-       stays the strongest read on the tile and the hierarchy G3 established
-       is preserved (a burning lot is never washed: fire is an `else`).
-       under-JND share of changed pixels: 10.5 / 10.6 / 9.9 percent.
+   read. Re-derived over ZR L2 / ZC / ZI lots in summer, autumn and winter,
+   day and deep night (mean dE over CHANGED pixels):
+       adjacent bands  healthy->strained 6.6   strained->at-risk 6.7
+                       at-risk->critical 7.2   (aggregate)
+       worst DAY view 6.06, worst deep-night view 3.50 — every one of the 18
+       views over the 2.3 JND, with 5.7% of changed pixels under it by day
+       (22.7% at deep night, where the whole scene compresses) against 41%
+       before this pass.
+       healthy->critical 10.5-33.2 per view, against the fire char's
+       16.6-47.5 on the same views — the char stays the strongest read on
+       the tile, so the hierarchy G3 established is preserved (and a burning
+       lot is never washed at all: fire is an `else`).
    The fill is #2a180d, a near-black soot-brown, for two measured reasons:
-   it keeps the wash DARKENING (3.9% of changed pixels rise in luminance, vs
-   15.4% under the old mid-rust, which turned near-black C-tower roofs milky),
-   and it flattens the SEASON dependence — winter/summer strength ran 1.8x
-   apart under the old rust (bright snow tinted far harder than summer grass)
-   and runs 1.22x apart now. */
+   it keeps the wash DARKENING (1.3% of changed pixels rise in luminance, 5.0%
+   on the worst view, vs 15.4% under the old mid-rust, which turned near-black
+   C-tower roofs milky), and it flattens the SEASON dependence — winter/summer
+   strength ran 1.8x apart under the old rust (bright snow tinted far harder
+   than summer grass) and runs 1.22x apart now. */
 /* THE EXPRESSION FLOOR — half the at-risk window, i.e. a full quarter of
    consecutive failing months before a lot grimes over at all. It is an
    EXPRESSION threshold only: the ledger, the census, history.blight, the

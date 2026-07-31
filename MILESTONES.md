@@ -120,6 +120,20 @@ Queue policy: keep at least 5 open improvements at all times.
 
 ## Done
 
+- [x] **GP10a — The Distress Ledger** *(gameplay roadmap 16/18, certified
+  2026-07-31)*: a neighbourhood can finally be seen **dying**. Every failing
+  block names why — dark, crime-ridden, demand-slumped or gridlocked — and how
+  many consecutive months it has been failing, on the tile, in the district
+  report, on a Blight overlay and in the graph. The sim itself is untouched:
+  no abandonment, no decay, no growth coupling. Every threshold reuses a
+  number the game already ships (the congestion line growth already evicts at,
+  the −0.25 decline test already in the gate table) rather than inventing new
+  magic. The wash needs three consecutive failing months, so one bad month
+  can't flicker a whole district. Its pre-measurement was again committed
+  alone, ahead of the code, with a `js/` tree hashing identically to the
+  baseline. Verified independently: zero invariant violations across all 6400
+  tiles, and distress rises on cue when the power feed is cut mid-run.
+
 - [x] **GP9a — The Waste Ledger** *(gameplay roadmap 15/18, certified
   2026-07-31)*: before you can build a single landfill, the city already tells
   you **how much garbage it makes** — by zone, by level, per tile, and plotted

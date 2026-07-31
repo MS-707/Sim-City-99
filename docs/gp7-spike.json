@@ -15927,6 +15927,63 @@
   "bars": {
    "landvGap_min": 35,
    "shadowSeparation_min": 0.35
+  },
+  "live_reproduction": {
+   "what": "ADDITIVE, GP7a design pass (D3). The .fixtures.prime/.cheap `.measured`/`.reproduced` blocks above were computed HARNESS-SIDE on the unchanged build b3d780c, with the GP7a assessment constants replicated in the harness because assessedLedger() did not exist there. This key re-runs the SAME two pinned fixture scripts, seed 1, 600 ticks, through the LIVE City.assessedLedger() on the implemented tree. Nothing above is recomputed or refreshed: .rows, .saturation and .verdict remain the pinned unchanged-build measurement GP7b's cutover is judged against.",
+   "harness": "node 22 vm context loading js/sim.js verbatim; Math.random UNSTUBBED; fixture scripts read verbatim out of this file's .fixtures.prime.script / .cheap.script",
+   "prime": {
+    "pop": 2192,
+    "jobs": 1678,
+    "developed": 321,
+    "devLandv": 73.91,
+    "taxes": 6411,
+    "assessedTotal": 7184,
+    "billed": 6411,
+    "ratio": 1.1206,
+    "headcount": 6411,
+    "cleanTax": 0,
+    "assessed": {
+     "r": 4944,
+     "c": 989,
+     "i": 1252
+    }
+   },
+   "cheap": {
+    "pop": 5632,
+    "jobs": 4088,
+    "developed": 1073,
+    "devLandv": 37.47,
+    "taxes": 16190,
+    "assessedTotal": 13317,
+    "billed": 16190,
+    "ratio": 0.8225,
+    "headcount": 16190,
+    "cleanTax": 0,
+    "assessed": {
+     "r": 9671,
+     "c": 1776,
+     "i": 1869
+    }
+   },
+   "landvGap": 36.44,
+   "shadowSeparation": 0.3624,
+   "bars": {
+    "landvGap_min": 35,
+    "shadowSeparation_min": 0.35
+   },
+   "delta_vs_harness": {
+    "prime": {
+     "assessedTotal": 0,
+     "ratio": 0.0
+    },
+    "cheap": {
+     "assessedTotal": -5,
+     "ratio": -0.0004
+    },
+    "shadowSeparation": 0.0006
+   },
+   "why_the_cheap_fixture_moves_by_5": "THE _dparts SNAPSHOT RULE, working as designed \u2014 document it, do not 'fix' it. assessedLedger() reads this._dparts, the census recomputeDemand committed at the TOP of the tick, because that is the census lastBudget was charged from; a fresh scan cannot reconcile against it (growthPass moves pop/lvl underneath it, divergence up to 0.34 for demandBreakdown) and would add a whole-map pass to a function fillBudgetTable re-runs on every funding-slider drag. The harness re-scanned AFTER growthPass, so on the denser cheap city (1,073 developed lots vs 321) it saw 5 \u00a7 of lots that had just levelled. The prime fixture is unmoved. Both live figures clear the G6 bars by more margin than the harness figures did (separation 36.24% vs 36.18%, bar 35%).",
+   "gate_status": "C8 PASSES on the live build: developed-tile mean landv gap 36.44 (bar >= 35); shadow separation 36.24% (bar >= 35%)."
   }
  }
 }

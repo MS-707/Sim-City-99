@@ -36,9 +36,18 @@ function setMapSize(n) { MAP = n; }
 // key is month-aligned to the others from the first load. Additive and
 // idempotent — it never truncates, so serialize->deserialize->serialize stays
 // byte-stable. This also repairs the identical latent defect that commute /
-// avgcom / approv have carried for mature pre-v17 saves. D3: a v17 save whose
-// history is still SHORT of the cap loads with assess === [] exactly as
-// save_version_plan says; only a capped one is padded.
+// avgcom / approv have carried for mature pre-v17 saves.
+// WHAT THE PAD ACTUALLY DOES (measured, and it is NOT the "loads as [] and
+// records forward" idiom the ladder notes above describe — those lines record
+// each milestone's original intent and are superseded here): the pad fires
+// whenever L > 0, i.e. on EVERY save that carries any history at all, not only
+// on a capped one. MEASURED on a v17 save taken from a 120-tick city (history
+// length 5): assess loads with length 5, zero-filled. So `assess === []` holds
+// for exactly one case — a save with NO history whatsoever (L === 0, a brand-new
+// or history-less city); every other save loads assess as month-aligned zeros
+// back to the incumbent length. The zeros are fabricated months the shadow
+// ledger never measured and will plot as a flat zero run in the "Assessed take"
+// graph series until the first post-load rollover.
 function normaliseHistory(h) {
   h = (h && typeof h === "object") ? h : {};
   const out = {};
@@ -47,8 +56,8 @@ function normaliseHistory(h) {
   let L = 0;
   for (const k of keys) if (out[k].length > L) L = out[k].length;
   // "-1 records as 0 so the series stays plottable" — the same 0 sentinel.
-  // L === 0 (a save with no history at all) pads nothing, so a brand-new or
-  // history-less v17 save still loads with assess === [] (D3).
+  // L === 0 (a save with no history at all) pads nothing and every key stays
+  // []; any L > 0 zero-fills EVERY short key up to L, new and old alike.
   for (const k of keys) { const a = out[k]; while (a.length < L) a.unshift(0); }
   return out;
 }
@@ -418,9 +427,16 @@ const LANDMARK_R = { [OV.STATUE]: 14, [OV.EIFFEL]: 16, [OV.PYRAMID]: 18 };
    pinned reference city) assesses at ~1.34. The slope is deliberately gentle:
    G6's separation bar is anchored to THESE constants, so it cannot be bought by
    steepening the curve.
-   MEASURED on the two committed G6 fixtures (docs/gp7-spike.json .fixtures):
-   prime developed-tile mean landv 73.91 -> ratio 1.1206; cheap 37.47 -> 0.8229;
-   land-value gap 36.44, shadow separation 36.18%. */
+   MEASURED on the two committed G6 fixtures (docs/gp7-spike.json .fixtures),
+   seed 1, 600 ticks, THROUGH THIS assessedLedger() (the file's .fixtures.*
+   .measured block is the harness-side replication taken on the unchanged build
+   and is NOT recomputed — see .fixtures.live_reproduction for both columns):
+   prime developed-tile mean landv 73.91 -> ratio 1.1206; cheap 37.47 -> 0.8225;
+   land-value gap 36.44, shadow separation 36.24%. The cheap fixture's assessed
+   total reads 13317 live against the harness's 13322 — a 5-§ delta that is the
+   _dparts SNAPSHOT RULE working as designed, not an error: the ledger reads the
+   census recomputeDemand committed at the TOP of the tick, while the harness
+   re-scanned after growthPass moved lvl[] underneath it. */
 const ASSESS_R = [0, 8 * 0.28, 24 * 0.28, 56 * 0.28];
 const ASSESS_C = [0, 6 * 0.18, 18 * 0.18, 40 * 0.18];
 const ASSESS_I = [0, 8 * 0.18, 22 * 0.18, 48 * 0.18];

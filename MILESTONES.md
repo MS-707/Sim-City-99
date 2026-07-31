@@ -59,6 +59,52 @@ Queue policy: keep at least 5 open improvements at all times.
   extended; a v16 save loads with approval seeded from its first computed
   target and the series recording forward.
 
+- **GP7a — The Assessed-Value Shadow Ledger & the Equilibrium Spike**
+  *(gameplay roadmap 11/14 — the read-only half of GP7; implemented
+  2026-07-31, LIVE in the tree, verify + panel pass still open, so NOT yet
+  marked done)*: ship the **ruler** before anything bills on it. The city now
+  carries a second, parallel tax book that **nothing is charged from**:
+  `City.assessedLedger()` values every developed lot as
+  `base(zone, level) × assessment(landv)` with `assessment(v) = 0.5 + v/128`,
+  so a blighted lot assesses at half and prime ground at ~1.34× — and the
+  per-sector totals, the headcount bill they would replace, and the
+  scale-free `ratio` ("your city is assessed at **76%** of what it is
+  billed") print as a clearly-labelled **preview block in the budget dialog**
+  next to the bill you actually pay. It is a **pure read**: the six
+  accumulators are *fused into `computeDemandParts`' existing loop* (the GP2
+  `portAnchors` precedent — writes only into `out`, allocates nothing) and
+  the ledger reads that committed `_dparts` snapshot, so there is **no fifth
+  whole-map scan** and a funding-slider drag re-runs **zero** censuses.
+  The shipped `value` minimap is **quantized into five named wealth bands**
+  (Blighted / Cheap / Modest / Prime / Gold, edges 20/40/60/80 from the
+  measured distribution of the pinned reference city), the inspector grows an
+  advisory-only `LANDV_BAND` row printing a lot's headcount bill against its
+  would-be assessment, and the monthly shadow take records as
+  `history.assess` with a matching **"Assessed take"** graph series (off by
+  default, so the default graph render is pixel-unchanged).
+  There is now **exactly one** arithmetic site for today's take —
+  `City.taxTake(rate)` — which `collectBudget` and `advTaxesAt` both
+  delegate to; that closes the measured drift where the advisor silently
+  **omitted `cleanTax`** and disagreed with the bill by exactly §852 on a
+  clean-industry city. `taxRate` finally gets the `typeof` load guard every
+  sibling field already had (measured: a save with `taxRate` deleted
+  NaN-poisons demand for **300/300** ticks on the old build, **0/300** now).
+  **Nothing the sim does changed**: 20 corpus seeds × 600 ticks are
+  byte-identical to the baseline on all ten planes and every scalar, and 200
+  ledger calls leave `serialize()` byte-identical with all four RNG cursors
+  untouched and `Math.random` called zero times. The **spike was published
+  first, on the unchanged build** (`docs/gp7-spike.json`, 420 rows = 21 rates
+  × 20 seeds): the residential bar is **pinned against `clampD`'s ceiling**
+  at every rate below 15, so `jobsAvail/220` — not `taxMod` — is what binds
+  equilibrium, and the revenue-maximising rate on this corpus is **14, not
+  20**. Save **v18**; `normaliseHistory` now **left-pads** every short series
+  to the longest, because the "loads as `[]` and records forward" idiom is
+  silently broken once a city hits the 240-entry cap. Two consequences are
+  **user decisions, not worker calls** (recorded in
+  `gameplay-roadmap.json` → GP7a → `design_user_decisions`): the pad writes
+  fabricated §0 months into `assess`, and it retroactively repairs
+  `commute` / `avgcom` / `approv` on mature pre-v17 saves.
+
 ## Open
 
 > Rotation staging + criteria live in `docs/rotation-design.json`; the

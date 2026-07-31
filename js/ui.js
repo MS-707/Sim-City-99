@@ -31,6 +31,19 @@ const UI = {
     // the shipped default render is pixel-unchanged; idx gives the raw-number
     // legend + the 100yr monthly-tail fallback (there is no annual record).
     approv: { on: false, color: "#a0208a", key: "approv", label: "Approval %", idx: true },
+    // GP7a: the monthly SHADOW assessed take (history.assess) — the ruler, not
+    // the bill, so it plots against "tax" as a month-over-month shadow-vs-actual
+    // pair. OFF by default so the shipped default render is pixel-unchanged.
+    // `idx` is deliberately OMITTED: this is money, not a 0-255 index, so
+    // drawGraphLegend prints it with the § prefix exactly like tax/net. There is
+    // no annual record for it, so seriesData's 100yr branch falls through to the
+    // monthly tail — the same fallback commute/avgcom/approv already take, but
+    // those signal it with `idx`, which assess cannot borrow. `monthly` carries
+    // that ONE meaning on its own so the 100yr right-edge span label still
+    // divides this series' point count by 12 (without it a 240-month tail
+    // captions as "yr 240" instead of "yr 20"); it is the first series to need
+    // the two flags apart. Annual records exist for pop/net/tax only.
+    assess: { on: false, color: "#0a7d6a", key: "assess", label: "Assessed take", monthly: true },
   },
   graphRange: "10yr",   // "1yr" | "10yr" | "100yr"
   // GP1a: the open Tile Info target ({x, y, at}) — null whenever the dialog is
@@ -1638,10 +1651,14 @@ function openGraphs() {
   // MONTHLY tail — so convert each series' point count to its real span before
   // taking the max, else a long monthly index series would caption months as
   // "yr N". 1yr/10yr are uniformly monthly, so maxLen is already in months.
+  // GP7a: the test is "does this series have an ANNUAL record", which `idx` only
+  // stood proxy for while every tail-falling series happened to be an index.
+  // assess is money (no `idx`, so the legend prints §) but has no annual record,
+  // so it declares `monthly` and lands on the same /12 path.
   let spanLabel;
   if (range === "100yr") {
     const yrs = enabled.reduce((m, s) =>
-      Math.max(m, s.desc.idx ? s.data.length / 12 : s.data.length), 0);
+      Math.max(m, (s.desc.idx || s.desc.monthly) ? s.data.length / 12 : s.data.length), 0);
     spanLabel = "yr " + Math.max(1, Math.round(yrs));
   } else {
     spanLabel = unit + " " + maxLen;

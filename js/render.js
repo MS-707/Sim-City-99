@@ -1011,14 +1011,23 @@ function renderFrame(city, uiState, clearBG) {
             // marker boarded. Pure function of city.aband[i] + city.lvl[i], so
             // all four rotations are free (M32a/b).
             else if (city.aband[i]) drawBoarded(spr, wx, wy, city.lvl[i] > 0);
-            // GP10a: the blight wash — a lot that has been failing for months
-            // grimes over. FIRE DOMINATES (an `else`): a burning building must
-            // keep the char as its single unambiguous read. Skipped at level 0
-            // (nothing built to grime) and below BLIGHT_MIN consecutive failing
-            // months (see the constant: a one-month dip is not blight), and
-            // free at every rotation, since it is a pure function of
-            // city.distress[i].
-            else if (city.lvl[i] && city.distress[i] >= BLIGHT_MIN)
+            /* GP10a: the blight wash — a lot that has been failing for months
+               grimes over. FIRE DOMINATES (an `else`): a burning building must
+               keep the char as its single unambiguous read. Skipped below
+               BLIGHT_MIN consecutive failing months (see the constant: a
+               one-month dip is not blight), and free at every rotation, since
+               it is a pure function of city.distress[i].
+               GP10b FIX PASS: the `city.lvl[i] &&` guard is GONE. GP10a
+               reasoned "nothing built to grime", but the ledger's own reading
+               is about the LOT, not the building, and the consequence was that
+               an empty zoned lot rendered IDENTICALLY at 0, 4, 8 and 13 months
+               of unbroken failure — four states of the shipped distress ladder
+               collapsed into one pixel-for-pixel image. Level 0 is also where
+               abandonment overwhelmingly lands, so this is the form the player
+               actually meets. The zone marker now dims through the same three
+               BLIGHT_ALPHA rungs the buildings use, and the boarded hoarding
+               above it remains the terminal, visually distinct fifth state. */
+            else if (city.distress[i] >= BLIGHT_MIN)
               drawBlight(spr, wx, wy, distressBand(city.distress[i]));
             // G9: mast-bearing C3 towers blink their aircraft beacon live,
             // each tower phase-offset by its tile index — the baked red tip
@@ -1469,54 +1478,115 @@ function drawBlight(spr, wx, wy, band) {
      lvl = 0  the 64x32 zone marker (1328 opaque px measured) takes the same
               silhouette fill; the planks then cross the empty lot like a
               hoarding around a cleared site.
-   THE PLANKS are drawn live in SCREEN space at FIXED offsets from the tile
-   origin — no sprite, no cache, no randomness, and no rotation term, so an
-   X of boards reads identically at cam.r 0..3 (the tile diamond is rotationally
-   symmetric about its own centre, which is exactly why a fixed-offset cross
-   works here and a directional mark would not). */
+   THE PLANKS ARE BAKED INTO THAT SAME TIER, not stroked per frame. Their
+   geometry is a pure function of the SPRITE (its measured opaque bbox) and of
+   the tile diamond (HW/HH) — never of the tile index, the camera or the clock
+   — so there is exactly one possible mark per sprite per form and it can live
+   in the cache with the fill. That makes a boarded lot cost ONE drawImage,
+   the same as a healthy one, instead of a save/beginPath/six-segment/stroke/
+   restore per tile per frame. Measured: the marginal cost of the treatment on
+   the gate's developed-128 fixture is 1.01x, and the pathological
+   every-lot-boarded case at the minimum reachable zoom fell from 1.55x.
+   Still no ART_RNG, no R() draw and no randomness of any kind, so all four
+   camera rotations and all four seasons stay free and the shipped sprite set
+   is byte-unchanged. */
 const BOARD_ALPHA = 0.66;
 const BOARD_WOOD = "#6b5334";      // weathered pine hoarding
 const BOARD_FILL = "#3b3a36";      // condemned grey, cooler than blight's soot
-function drawBoarded(spr, wx, wy, built) {
-  if (!spr.aband) {
-    const c = document.createElement("canvas");
-    c.width = spr.c.width; c.height = spr.c.height;
-    const g = c.getContext("2d");
-    g.drawImage(spr.c, 0, 0);
-    g.globalCompositeOperation = "source-in";
-    g.fillStyle = BOARD_FILL;
-    g.fillRect(0, 0, c.width, c.height);
-    spr.aband = c;
-  }
-  ctx.globalAlpha = BOARD_ALPHA;
-  ctx.drawImage(spr.aband, wx - spr.ox, wy - spr.oy);
-  ctx.globalAlpha = 1;
-  // the planks: two crossed boards on a building's face, a low hoarding rail
-  // across an empty lot. Fixed offsets, integer widths, no state.
-  ctx.save();
-  ctx.strokeStyle = BOARD_WOOD;
-  ctx.lineCap = "butt";
-  if (built) {
-    const h = Math.min(30, Math.max(12, (spr.c.height - HH) * 0.5));
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(wx - 13, wy - h - 6); ctx.lineTo(wx + 13, wy - h + 8);
-    ctx.moveTo(wx - 13, wy - h + 8); ctx.lineTo(wx + 13, wy - h - 6);
-    ctx.stroke();
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(wx - 15, wy - 4); ctx.lineTo(wx + 15, wy - 4);
-    ctx.stroke();
+function bakeBoarded(spr, built) {
+  const c = document.createElement("canvas");
+  c.width = spr.c.width; c.height = spr.c.height;
+  const g = c.getContext("2d");
+  g.drawImage(spr.c, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = BOARD_FILL;
+  g.fillRect(0, 0, c.width, c.height);
+  /* Knock the silhouette fill back to BOARD_ALPHA INSIDE the bake, so the tile
+     loop can blit the finished mark at globalAlpha 1: the translucent wash and
+     the opaque boards then live in one image and still read exactly as the
+     two-pass version did. */
+  g.globalCompositeOperation = "destination-in";
+  g.globalAlpha = BOARD_ALPHA;
+  g.fillRect(0, 0, c.width, c.height);
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = "source-over";
+  /* MEASURE THE SILHOUETTE. The first cut placed the boards at a FIXED height
+     derived from the canvas box ((spr.c.height - HH) / 2), and a sprite canvas
+     is mostly empty air: on all five ZR level-1 variants — 456 of the 856
+     built lots on the reference city, and precisely where blight concentrates
+     — only 8.1% of the cross actually lay on the building. The other 92% hung
+     in the sky above the roof and, in the s = x + y painter order, printed
+     over the tile BEHIND, which is also what chained the marks into a
+     basket-weave lattice at district scale. */
+  let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+  const px = g.getImageData(0, 0, c.width, c.height).data;
+  for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++)
+    if (px[(y * c.width + x) * 4 + 3] > 24) {
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  g.strokeStyle = BOARD_WOOD;
+  g.lineCap = "butt";
+  // the sprite's origin inside its own canvas — the tile's world origin lands here
+  const ox = spr.ox, oy = spr.oy;
+  if (built && x1 >= 0) {
+    /* THE CROSS, SEATED ON THE FACADE. Every coordinate is expressed in the
+       MEASURED silhouette's frame, so the mark cannot leave the building it
+       belongs to and cannot reach the neighbouring tile:
+         * it is inset into the LOWER part of the silhouette — boarding is a
+           ground-level act, and a symbol stamped on the roof read in the same
+           grammar as the shipped hospital's red roof cross;
+         * the arms are clamped to at most half an iso step (HW/2 x HH/2), so
+           two adjacent boarded lots can never concatenate into the continuous
+           diagonal the lattice complaint was about. */
+    const bw = x1 - x0, bh = y1 - y0, cx = (x0 + x1) * 0.5;
+    const fy1 = Math.min(y1 - Math.max(1, bh * 0.10), oy + HH * 0.35);
+    const fy0 = Math.max(y0 + bh * 0.35, fy1 - HH);
+    const cy = (fy0 + fy1) * 0.5;
+    const ax = Math.max(4, Math.min(bw * 0.34, HW * 0.5));
+    const ay = Math.max(3, Math.min((fy1 - fy0) * 0.5, HH * 0.5));
+    g.lineWidth = bw > 26 ? 3 : 2;
+    g.beginPath();
+    g.moveTo(cx - ax, cy - ay); g.lineTo(cx + ax, cy + ay);
+    g.moveTo(cx - ax, cy + ay); g.lineTo(cx + ax, cy - ay);
+    g.stroke();
+    g.lineWidth = 2;
+    g.beginPath();                      // one board nailed across the doorway
+    g.moveTo(cx - ax - 2, fy1); g.lineTo(cx + ax + 2, fy1);
+    g.stroke();
   } else {
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(wx - 16, wy - 3); ctx.lineTo(wx + 16, wy - 3);
-    ctx.moveTo(wx - 16, wy + 4); ctx.lineTo(wx + 16, wy + 4);
-    ctx.moveTo(wx - 10, wy - 8); ctx.lineTo(wx - 10, wy + 8);
-    ctx.moveTo(wx + 10, wy - 8); ctx.lineTo(wx + 10, wy + 8);
-    ctx.stroke();
+    /* THE CLEARED SITE. The first cut drew two SCREEN-HORIZONTAL rails and two
+       screen-vertical posts — slope 0 and slope infinity, neither of which
+       exists anywhere in a 2:1 isometric ground plane, so an empty boarded lot
+       read as a flat HUD glyph pasted onto the world. This form is MANDATORY
+       (most abandoned lots are level 0), so it is now built out of the tile
+       diamond itself: a hoarding whose runs lie along the iso axes at slope
+       +-HH/HW, with four short posts standing off it. Inset inside the diamond
+       so neighbouring hoardings never touch and nothing is clipped. */
+    const rx = HW * 0.5, ry = HH * 0.5, dy = 2, post = 4;
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(ox - rx, oy - dy); g.lineTo(ox, oy - ry - dy);
+    g.lineTo(ox + rx, oy - dy);
+    g.lineTo(ox, oy + ry - dy);
+    g.closePath();
+    g.stroke();
+    g.beginPath();
+    const P = [[-rx, 0], [0, -ry], [rx, 0], [0, ry]];
+    for (let k = 0; k < P.length; k++) {
+      g.moveTo(ox + P[k][0], oy + P[k][1] - dy);
+      g.lineTo(ox + P[k][0], oy + P[k][1] - dy - post);
+    }
+    g.stroke();
   }
-  ctx.restore();
+  return c;
+}
+function drawBoarded(spr, wx, wy, built) {
+  const key = built ? "abandB" : "abandE";
+  const img = spr[key] || (spr[key] = bakeBoarded(spr, built));
+  ctx.drawImage(img, wx - spr.ox, wy - spr.oy);
 }
 
 // flames as three stacked hue bands — wide dark-red base, orange mid,
@@ -2285,9 +2355,18 @@ function drawDistrictTint(city, minWX, maxWX, minWY, maxWY) {
   const ren = [];
   let anyRen = false;
   for (const d of city.districts) if (d.renewal) { ren[d.id] = true; anyRen = true; }
+  /* ONE walk, not two. The fix pass folded the renewal mark into the tint's
+     own scan: the chevron pass used to be a SECOND full MAP x MAP loop (16,384
+     iterations on a 128 map, measured +5.5% frame time while the district tool
+     is held), which contradicted the milestone's own "new whole-map scans
+     added: EXACTLY 0" note. The mark is now stamped inside the tile body the
+     tint already visits, so the marginal cost is one array read on tiles that
+     are not designated. */
+  const marks = anyRen ? [] : null;
   ctx.globalAlpha = 0.16;
   for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
-    const id = city.district[y * MAP + x];
+    const i = y * MAP + x;
+    const id = city.district[i];
     if (!id) continue;
     const wx = worldX(x, y), wy = worldY(x, y);
     if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
@@ -2296,23 +2375,33 @@ function drawDistrictTint(city, minWX, maxWX, minWY, maxWY) {
     ctx.moveTo(wx, wy - HH); ctx.lineTo(wx + HW, wy);
     ctx.lineTo(wx, wy + HH); ctx.lineTo(wx - HW, wy);
     ctx.closePath(); ctx.fill();
+    /* the renewal mark, collected here and stroked in one batched path below.
+       TWO corrections over the first cut, both of them fidelity rather than
+       taste:
+       (a) ZONED TILES ONLY. paintDistrict carries no terrain guard (it is the
+           shipped behaviour for the tint, and a district legitimately spans a
+           river), so the first cut stamped a perfect grid of bright chevrons
+           across open water and bridge decks — the highest-contrast element in
+           frame, on tiles renewal can never act on. The renewal levers
+           (setDistrictRenewal's clamp, rezoneDistrict, the §/mo charge) all
+           operate on ZONED tiles, so the mark now shows exactly where the
+           designation can do something.
+       (b) AN ISO DIRECTION. The chevron's arms now run along the tile
+           diamond's own axes (slope +-HH/HW === +-0.5), so the mark lies in
+           the ground plane instead of floating over it as a 2D symbol. */
+    if (marks && ren[id] && OV_IS_ZONE[city.over[i]]) marks.push(wx, wy);
   }
-  // the renewal hatch: a second, brighter pass so a designated neighbourhood
-  // reads as UNDER WORKS rather than merely as a different colour — the
-  // construction-hoarding chevron, on the same tiles, in the same world space.
-  if (anyRen) {
-    ctx.globalAlpha = 0.5;
+  if (marks && marks.length) {
+    ctx.globalAlpha = 0.34;          // was 0.5 — it competed with the boarded mark
     ctx.strokeStyle = "#ffd27a";
     ctx.lineWidth = 2;
-    for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
-      const id = city.district[y * MAP + x];
-      if (!id || !ren[id]) continue;
-      const wx = worldX(x, y), wy = worldY(x, y);
-      if (wx < minWX || wx > maxWX || wy < minWY || wy > maxWY) continue;
-      ctx.beginPath();
-      ctx.moveTo(wx - 12, wy + 4); ctx.lineTo(wx, wy - 4); ctx.lineTo(wx + 12, wy + 4);
-      ctx.stroke();
+    ctx.beginPath();
+    const AW = 11, AH = (AW * HH / HW) | 0;   // one iso half-step: slope exactly HH/HW
+    for (let k = 0; k < marks.length; k += 2) {
+      const wx = marks[k], wy = marks[k + 1];
+      ctx.moveTo(wx - AW, wy + AH - 2); ctx.lineTo(wx, wy - 2); ctx.lineTo(wx + AW, wy + AH - 2);
     }
+    ctx.stroke();
   }
   ctx.globalAlpha = 1;
 }

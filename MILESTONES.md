@@ -18,17 +18,40 @@ Queue policy: keep at least 5 open improvements at all times.
   an integer, and that collision is **recorded, not silently resolved**). Every
   constant is pinned to a shipped analogue rather than picked: `ABAND_W` = 15
   (`DISTRESS_ABAND_W_FLOOR`, GP10a's own forward constraint, at its floor),
-  `REVIVE_W` = 6 (`DISTRESS_BANDS[0]`), `ABAND_SMOG` = `LF_SMELL_FULL`,
-  `ABAND_CRIME` = the Teen Curfew's `crimeCut`, `ABAND_LV` = `LF_LV_CAP`.
+  `REVIVE_W` = 6 (`DISTRESS_BANDS[0]`), `ABAND_SMOG` = `SEAPORT_SMOG` (90, on a
+  *developed* derelict lot only), `ABAND_CRIME` = Neighborhood Watch's
+  `crimeCut` + Teen Curfew's (32), `ABAND_LV` = `LF_LV_CAP`. **Four fix-pass
+  corrections**, each closing a measured feedback loop rather than tuning a
+  number: (1) the distress `CRIME` row does **not** apply to an already-boarded
+  lot — `crime[]` never diffuses, so every term in a derelict lot's crime is a
+  term the lot generates itself, and letting that reading re-arm its own
+  countdown made blight permanent (288 lots trapped at level 2-3 on the shipped
+  `gridlock-97`, 269 of them still trapped even at `ABAND_CRIME` = 0); (2) a
+  boarded lot generates **no trips**, the same predicate the census already
+  applies, which closes the identical loop on the `GRIDLOCK` row; (3) only a
+  boarded lot that *had a building* emits smog — pollution is the one
+  abandonment term that diffuses, and unguarded it turned every zoned-but-never
+  connected lot into a tip, crushing land value citywide and pushing further
+  lots over the `CRIME` line; (4) the flip is spread over `ABAND_SPREAD` = 6
+  months by `abandPhase(i)`, a pure index avalanche that spends no RNG, because
+  a bare shared threshold on a monotone counter boarded an entire district on
+  one rollover (7,832 → 904 people in a single month).
   **The measurement that decided the design**: the *shipped* `UNPOWERED` decay
   strips a failing lot to level 0 long before its distress counter reaches 15,
   so a `lvl > 0` abandonment guard would make abandonment a few-percent
   curiosity — and scope §1's justification for it ("the tile keeps `lvl[]` so
   the derelict sprite has a size") was **already false on HEAD** before this
   milestone touched anything. Hence **no level guard**, and hence the derelict
-  treatment has **two forms**: a boarded building, and a boarded *empty lot* —
-  the shipped blight wash measures **0.00%** of the bbox at level 0, the new
-  level-0 hoarding measures **17.32%** against a 2% bar. `ABANDONED` is
+  treatment has **two forms**: a boarded building whose crossed boards are
+  seated inside the sprite's *measured* opaque silhouette (the first cut placed
+  them at a fixed height and 92% of the mark hung in the air above the roof, in
+  front of the tile behind), and a boarded *empty lot* whose hoarding runs
+  along the tile diamond's own iso axes. Both forms are **baked** into the
+  `spr.aband*` cache tier, so a boarded lot costs one `drawImage` and nothing
+  is stroked per frame. The shipped distress wash was also unbound from
+  `lvl > 0`: at level 0 all four ledger states used to render **pixel
+  identically**; every pair now separates by ≥ 13% of the tile bbox at all four
+  rotations against a 2% bar. `ABANDONED` is
   inserted at `GROWTH_GATES` **index 1**, above `UNPOWERED`, because
   `diagnoseTile` reports `firstGate`'s row as the *primary* verdict and every
   abandoned tile on the dark path is also unpowered — a row below it could
@@ -44,10 +67,13 @@ Queue policy: keep at least 5 open improvements at all times.
   ordinance whose `reviveCut` needed **both** halves of the closed effect-cache
   key set or it would have been silently ignored. Measured hysteresis:
   undesignated latency **exactly 6**, designated **exactly 2**, and a lot that
-  fails again **re-arms** rather than resuming. `ABAND_CRIME` feeds the same
-  `crime[]` plane the distress `CRIME` row reads, so a value over 50 would have
-  made blight permanent and unescapable — at 18 the boarded stock falls 983 →
-  162 within twelve rollovers of the cause being removed. **The economic bite
+  fails again **re-arms** rather than resuming (50 of 50 probed lots restart
+  from the full window). The escape from blight is now **structural** rather
+  than a matter of constant size: with the cause removed, **100%** (381 of 381)
+  of the boarded footprint reaches `distress === 0` within one rollover, and
+  the only lots still held are ones whose cause is genuinely still there
+  (58 that remain physically unpowered, 48 on roads still over the congestion
+  line). **The economic bite
   is honestly reported**: `RES_POP[0]` is 0 and nearly every abandoned lot is
   at level 0, so the census exclusion moves pop and jobs by *exactly zero* on
   the primary path; the cost comes from the redevelopment **refusal** — today a

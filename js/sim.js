@@ -2133,13 +2133,22 @@ const distressBand = (n) => n <= 0 ? -1
                      block smells like a capped tip. Deliberately BELOW the
                      fire term (100) so G3's "fire is the strongest read"
                      hierarchy survives on the pollution plane too.
-   ABAND_CRIME       === the Teen Curfew ordinance's crimeCut. Abandonment
-                     costs the city exactly what a curfew buys back. It is far
-                     under DISTRESS_T.crime (50) ON PURPOSE: crime[] is the
-                     SAME plane the DISTRESS_CAUSES CRIME row reads, so a
-                     larger constant would hold distress > 0 forever, re-arm
-                     the countdown every rollover and make blight permanent and
-                     unescapable.
+   ABAND_CRIME       === Neighborhood Watch's crimeCut (14) PLUS Teen Curfew's
+                     (18): a derelict block hands back exactly what BOTH of the
+                     city's crime ordinances buy. The first cut used 18 alone
+                     and justified it as "far under DISTRESS_T.crime (50) on
+                     purpose", so the constant could not re-arm the tile's own
+                     countdown — but that argument was never load-bearing and
+                     never sound: an abandoned lot KEEPS its level, so its
+                     density term alone (lvl*40) reads 80-120, and 269 of 288
+                     measured trapped lots on gridlock-97 stayed over the line
+                     even at ABAND_CRIME === 0. The escape is now STRUCTURAL —
+                     the CRIME distress row does not apply to a lot that is
+                     already boarded (see DISTRESS_CAUSES) — which frees the
+                     constant to be sized for what it is meant to read: 32 is
+                     what puts the measured cluster delta clear of C5's
+                     >= ABAND_CRIME-2 bar on 10 of 10 seeds once the [0,255]
+                     clamp on the control lots is accounted for.
    ABAND_LV          === LF_LV_CAP, the shipped land-value penalty cap.
    RENEWAL_PER_TILE  §/mo per zoned tile inside a designated district.
    REZONE_DISCOUNT   mass rezone is priced against the §100/tile REZONE cost
@@ -2149,11 +2158,42 @@ const distressBand = (n) => n <= 0 ? -1
 const ABAND_W = DISTRESS_ABAND_W_FLOOR;  // 15 months of unbroken failure
 const REVIVE_W = DISTRESS_BANDS[0];      // 6 clear months to come back
 const RENEWAL_REVIVE_W = 2;              // ...or 2 inside a renewal district
-const ABAND_SMOG = LF_SMELL_FULL;        // 46 — the saturated-tip source
-const ABAND_CRIME = 18;                  // === ORD("curfew").mods.crimeCut
+const ABAND_SMOG = SEAPORT_SMOG;         // 90 — a working seaport's plume, on a
+                                         // DEVELOPED derelict lot only (see the
+                                         // recomputeMaps guard). Design D8's own
+                                         // ladder: 46 (tip) / 70 (incinerator) /
+                                         // 90 (seaport), all under the fire term
+                                         // 100 so G3's hierarchy survives.
+const ABAND_CRIME = 14 + 18;             // === watch.crimeCut + curfew.crimeCut
 const ABAND_LV = LF_LV_CAP;              // 12 — the shipped land-value cap
 const RENEWAL_PER_TILE = 3;              // §/mo per zoned tile designated
 const REZONE_DISCOUNT = 0.6;             // bulk rezone multiplier on COST.zr
+
+/* GP10b (fix pass): THE PHASE — why a shared integer threshold is not enough.
+   distress[] is a MONOTONE counter that every failing lot increments on the
+   same rollover, so a bare `distress >= ABAND_W` predicate flips an entire
+   district on ONE month boundary. Measured on the shipped gridlock-97 scenario
+   (945 dense lots, no police, so 100% of them are crime-distressed from month
+   one): 288 lots boarded on a single rollover and the city fell from 7,832 to
+   904 people in that one month — a cliff, not a decline, and one the mayor
+   cannot see coming or react to. The RCI model amplifies it, because the
+   census exclusion pulls all 288 lots' jobs out at once and the demand slump
+   then downlevels everything else (growth gate sim.js:1591).
+
+   abandPhase spreads the flip over ABAND_SPREAD consecutive months. It is a
+   PURE FUNCTION OF THE TILE INDEX — a 32-bit avalanche, the same shape as
+   rngHashAt's mixer — so it draws no RNG, spends no cursor, is identical
+   across saves, loads, rotations and machines, and costs one multiply on the
+   flip test only. ABAND_SPREAD is capped at 6 by C2's own bar: distress hits
+   ABAND_W at rollover 15 and the gate reads the footprint at rollover 18, so
+   phases 0..3 have all fired by then and at least 4/6 = 67% of the footprint
+   is boarded, clear of the 60% floor. */
+const ABAND_SPREAD = 6;                  // months over which a district boards up
+function abandPhase(i) {
+  let h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 8) % ABAND_SPREAD;
+}
 
 // GP6: argmax of a plane, lowest-index tie-break, optionally restricted to an
 // eligible set. Returns null when nothing eligible carries a positive value.
@@ -2540,8 +2580,22 @@ const DISTRESS_CAUSES = Object.freeze([
     fix: "Run a line from a plant with capacity to spare.",
     evid: (c, i) => [["Powered", "no"], ["Dark growth checks", c.unpow[i]]] },
 
+  /* GP10b: `!c.aband[i]` is the ESCAPE HATCH, and it is load-bearing rather
+     than cosmetic. crime[] never diffuses (recomputeMaps runs diffuse() for
+     poll/landv/traffic only), so every term in an abandoned lot's crime is a
+     term the lot generates ITSELF: the density of a building that now has no
+     tenants, plus ABAND_CRIME. Letting that reading hold the CRIME row true
+     would re-arm the tile's own countdown every rollover and make blight
+     PERMANENT AND UNESCAPABLE — the milestone's declared regression risk #3,
+     measured on gridlock-97 as 288 lots trapped at level 2-3 with crime 80-138
+     against a threshold of 50, which no choice of ABAND_CRIME can fix because
+     the density term alone clears it. A boarded lot is not kept boarded by the
+     crime its own dereliction causes; it is kept boarded by DARK / SLUMP /
+     GRIDLOCK, the three causes a mayor can actually act on. crime[] itself is
+     UNCHANGED — the overlay, the minimap and the neighbours still read the
+     full blight signal (see recomputeMaps' ABAND_CRIME term). */
   { code: "CRIME", label: "Crime",
-    test: (c, i, t) => c.crime[i] >= DISTRESS_T.crime,
+    test: (c, i, t) => !c.aband[i] && c.crime[i] >= DISTRESS_T.crime,
     fix: `Crime reads past the ${DISTRESS_T.crime} a working city sits under — patrols reach here thinly.`,
     evid: (c, i) => [["Crime", c.crime[i]], ["Line", DISTRESS_T.crime],
                      ["Police coverage", c.polCov[i]]] },
@@ -4345,7 +4399,20 @@ class City {
     let totR = 0, strR = 0, arrR = 0, hopSum = 0; // commute accounting (post-rail-diversion trips)
     for (let i = 0; i < n; i++) {
       const t = this.over[i];
-      if ((t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0) continue;
+      /* GP10b (fix pass): a BOARDED lot generates no trips. This is the same
+         one predicate the census already applies at computeDemandParts' three
+         arm heads — the identical set of lots that contribute no pop and no
+         jobs must also contribute no commuters, or the model asserts two
+         contradictory things about the same tile.
+         It is also the SECOND self-sustaining loop, and it is the one that
+         trapped the shipped gridlock-97 scenario: boarded lots kept emitting
+         rush-hour trips, the GRIDLOCK distress row read that congestion back
+         off the same roads, and the countdown re-armed every rollover on
+         traffic the derelict lots themselves were generating. Measured: 240+
+         lots held boarded indefinitely by their own phantom commuters.
+         Zero-draw: the reservoir walk keys off rngHashAt(dom, epoch, ...),
+         a pure hash and never a cursor, so skipping a source spends nothing. */
+      if ((t !== OV.ZR && t !== OV.ZC && t !== OV.ZI) || this.lvl[i] === 0 || this.aband[i]) continue;
       // M22: Carpool Incentive scales trips at the SOURCE (trafficMul), so fewer
       // trips deposit everywhere the random walk lands — no 2nd pass. 1 when off.
       const baseTrips = (4 + this.lvl[i] * 9) * this.ordMods.trafficMul; // busier at higher development
@@ -5117,10 +5184,26 @@ class City {
       if (t === OV.INCIN && this.powered[i]) src[i] += INCIN_SMOG;
       // GP9b: uncollected rubbish on a developed block.
       if (wasteAny && bp > 0 && OV_IS_ZONE[t] && this.lvl[i] > 0) src[i] += bp;
-      // GP10b: a derelict block smells like a capped tip — fly-tipping, damp,
-      // rot. Deliberately BELOW the fire term on the next line, so a burning
-      // lot is still the strongest source on the plane (the G3 hierarchy).
-      if (abandAny && this.aband[i]) src[i] += ABAND_SMOG;
+      /* GP10b: a derelict BLOCK smells — fly-tipping, damp, rot in a shell
+         nobody maintains. Deliberately BELOW the fire term on the next line,
+         so a burning lot is still the strongest source on the plane (the G3
+         hierarchy).
+         `this.lvl[i] > 0` is a FIX-PASS correction, and it is the difference
+         between a mechanic and a runaway. Pollution is the ONE abandonment
+         term that diffuses (crime never diffuses; the land-value hole is
+         applied after diffuse, per the fold below), so it is the only one that
+         can feed back into other lots' distress. Without the guard, every
+         zoned lot the mayor drew and never connected — 256 of them on the
+         pinned reference city, all at level 0, none of which ever had a
+         building — emitted tip-grade smog, which crushed land value citywide,
+         which raised crime everywhere (crime carries a -landv term), which
+         pushed further lots over the CRIME line: a self-amplifying blight wave
+         that measured as a monotone 60-rollover decline with no floor.
+         A hoarding around a cleared site does not stink. A derelict BUILDING
+         does, and now it does so at the seaport's rate rather than the tip's,
+         which is what puts the neighbourhood land-value read where C5 asks for
+         it while HALVING the total emitting footprint. */
+      if (abandAny && this.aband[i] && this.lvl[i] > 0) src[i] += ABAND_SMOG;
       if (this.fire[i]) src[i] += 100;
     }
     this.diffuse(src, this.poll, 3, 0.24);
@@ -7101,6 +7184,10 @@ class City {
     let anyRenewal = 0;
     for (const d of this.districts) if (d.renewal && d.id >= 0 && d.id <= DIST_MAX) { renewalById[d.id] = 1; anyRenewal = 1; }
     const revCut = this.ordMods.reviveCut | 0;
+    // the revive window has exactly TWO values city-wide, so hoist both rather
+    // than recomputing a Math.max per zoned tile (C13: the arm is a hot path)
+    const W_PLAIN = Math.max(1, REVIVE_W - revCut);
+    const W_RENEW = Math.max(1, RENEWAL_REVIVE_W - revCut);
     let abandoned = 0, revived = 0, abandNow = 0, renewalZoned = 0, anyA = 0, touched = 0;
     for (let i = 0; i < n; i++) {
       const t = this.over[i];               // the ONE over[] read per tile
@@ -7123,17 +7210,25 @@ class City {
         distressed++; byCause[row]++;
         if (lv > 0) devDistressed++;
       }
-      // ---- GP10b: the abandonment arm (zero RNG, own plane only) ----
+      /* ---- GP10b: the abandonment arm (zero RNG, own plane only) ----
+         Ordered for cost, not for prose: the overwhelmingly common tile is
+         neither boarded nor anywhere near the window, so it pays ONE aband[]
+         read and ONE distress[] compare and falls straight out. The district
+         lookup is behind `anyRenewal` (nothing designated => never read) and
+         abandPhase's mixer is behind the cheap `>= ABAND_W` test, so the
+         avalanche runs only on the handful of tiles actually at the cliff. */
       const inRenewal = anyRenewal && renewalById[this.district[i]];
       if (inRenewal) renewalZoned++;
-      const W = Math.max(1, (inRenewal ? RENEWAL_REVIVE_W : REVIVE_W) - revCut);
+      const d = this.distress[i];
       if (this.aband[i]) {
-        if (this.distress[i] === 0) {
+        const W = inRenewal ? W_RENEW : W_PLAIN;
+        if (d === 0) {
           if (--this.aband[i] === 0) { revived++; touched = 1; }
           else { abandNow++; anyA = 1; }
         } else { this.aband[i] = W; abandNow++; anyA = 1; }   // RE-ARM, not resume
-      } else if (this.distress[i] >= ABAND_W) {
-        this.aband[i] = W; abandoned++; abandNow++; anyA = 1; touched = 1;
+      } else if (d >= ABAND_W && d >= ABAND_W + abandPhase(i)) {
+        this.aband[i] = inRenewal ? W_RENEW : W_PLAIN;
+        abandoned++; abandNow++; anyA = 1; touched = 1;
       }
     }
     // the sweep-honesty observable: every tile on the map, every rollover

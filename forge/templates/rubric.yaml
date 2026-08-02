@@ -1,0 +1,432 @@
+# FORGE default shippability rubric
+#
+# THE CARDINAL RULE
+#   A row that cannot be tested by an instrument the harness actually builds DOES NOT GET
+#   WRITTEN DOWN. Refusing to emit such a row is /forge:goal's entire value. A rubric of
+#   unfalsifiable adjectives is worse than no rubric, because it launders vibes as a standard.
+#
+# THE TECHNIQUE-LEAK RULE
+#   No `statement` may name a technique. Say "the silhouette reads at 1/8 scale", never
+#   "inverted-hull outlines are present". A critic told the technique verifies compliance
+#   instead of quality, and nothing in the system can notice.
+#
+# Row schema: id | axis | seat | statement | observable_test | instrument | threshold |
+#             weight | severity_ceiling | milestone_scope | applies_when
+#
+# instrument ∈ capture | contact-sheet | diff-map | replay | telemetry | audio-buffer | lint
+# applies_when: `universal`, or a slot condition e.g. `{{GENRE}} has motion`
+
+meta:
+  version: 1
+  attainment_floor: 0.95
+  axis_floors: { visual: 0.90, motion: 0.90, systems: 1.00, performance: 1.00, experience: 0.95 }
+  major_ceiling: 3
+
+rows:
+
+# ─────────────────────────────── VISUAL (seat: visual) ───────────────────────────────
+- id: VIS-01
+  axis: visual; seat: visual
+  statement: The primary subject is separable from its background at 1/8 scale in every enumerated moment.
+  observable_test: Downsample each moment capture to 1/8; subject region vs adjacent background region differ in luminance by the threshold.
+  instrument: capture
+  threshold: ΔL* ≥ 15 at every moment
+  weight: 5; severity_ceiling: blocker; milestone_scope: slice; applies_when: universal
+
+- id: VIS-02
+  axis: visual; seat: visual
+  statement: The frame resolves into no more than four distinct value groups.
+  observable_test: Luminance histogram of each capture clusters into ≤ 4 modes covering ≥ 90% of pixels.
+  instrument: capture
+  threshold: ≤ 4 modes, ≥ 90% coverage
+  weight: 4; severity_ceiling: major; milestone_scope: slice; applies_when: universal
+
+- id: VIS-03
+  axis: visual; seat: visual
+  statement: The palette holds to the declared style brief across every moment — no moment introduces an unplanned hue family.
+  observable_test: Quantized hue histogram per moment compared against the palette declared in {{STYLE_BRIEF}}.
+  instrument: capture
+  threshold: ≤ 2% of pixels outside declared hue families
+  weight: 4; severity_ceiling: major; milestone_scope: alpha; applies_when: universal
+
+- id: VIS-04
+  axis: visual; seat: visual
+  statement: Edge/line weight is constant in screen space regardless of subject distance.
+  observable_test: Measure edge width in pixels on the same subject captured at near, mid and far camera distances.
+  instrument: capture
+  threshold: width variance ≤ 1px across distances
+  weight: 4; severity_ceiling: major; milestone_scope: slice; applies_when: "{{STYLE_BRIEF}} declares outlined or graphic rendering"
+
+- id: VIS-05
+  axis: visual; seat: visual
+  statement: No surface reads as physically-based when the style brief declares a non-photoreal target.
+  observable_test: Pairwise judgement against the two declared reference frames — is this closer to the stylized reference or the photoreal foil?
+  instrument: capture
+  threshold: stylized reference chosen in ≥ 8/8 moments, order-swapped
+  weight: 5; severity_ceiling: major; milestone_scope: alpha; applies_when: "{{STYLE_BRIEF}} declares non-photoreal"
+
+- id: VIS-06
+  axis: visual; seat: visual
+  statement: Foreground, midground and background are separable by value alone with colour removed.
+  observable_test: Desaturate the capture; the three depth bands remain distinguishable by luminance.
+  instrument: capture
+  threshold: pairwise band ΔL* ≥ 10
+  weight: 4; severity_ceiling: major; milestone_scope: slice; applies_when: universal
+
+- id: VIS-07
+  axis: visual; seat: visual
+  statement: Composed frames containing multiple subsystems show no doubled, competing or cancelling treatments.
+  observable_test: Composed-frame review against the coherence reference; findings here outrank isolation findings.
+  instrument: capture
+  threshold: zero composite defects at severity ≥ major
+  weight: 5; severity_ceiling: blocker; milestone_scope: alpha; applies_when: universal
+
+- id: VIS-08
+  axis: visual; seat: visual
+  statement: Interface elements are legible against every background they can appear over.
+  observable_test: Composite each UI element over the extreme-luminance backgrounds from the moment set; measure contrast ratio.
+  instrument: capture
+  threshold: ≥ 4.5:1 in all combinations
+  weight: 5; severity_ceiling: blocker; milestone_scope: alpha; applies_when: universal
+
+- id: VIS-09
+  axis: visual; seat: visual
+  statement: No capture exhibits banding, posterization or compression artifacts introduced by the render path.
+  observable_test: Gradient regions sampled for stepping above the dither floor.
+  instrument: capture
+  threshold: zero visible steps in ≥ 20-pixel gradient runs
+  weight: 3; severity_ceiling: major; milestone_scope: beta; applies_when: universal
+
+- id: VIS-10
+  axis: visual; seat: visual
+  statement: The showcase moments and the randomly sampled content moments are of indistinguishable quality.
+  observable_test: Order-swapped pairwise between curated moments and content sampled from the held-out set.
+  instrument: capture
+  threshold: preference ≤ 60/40 — beyond that indicates showcase-tuning
+  weight: 5; severity_ceiling: blocker; milestone_scope: rc; applies_when: universal
+
+# ─────────────────────────────── MOTION (seat: motion) ───────────────────────────────
+- id: MOT-01
+  axis: motion; seat: motion
+  statement: Static regions of the frame are stable frame to frame — nothing crawls, shimmers or fizzes while at rest.
+  observable_test: Temporal diff map over a burst with the camera and subject held still; measure energy in nominally static regions.
+  instrument: diff-map
+  threshold: mean |Δ| ≤ 2/255 in static regions
+  weight: 5; severity_ceiling: blocker; milestone_scope: slice; applies_when: "{{GENRE}} has motion"
+
+- id: MOT-02
+  axis: motion; seat: motion
+  statement: No detail level, shadow cascade or streamed region visibly pops during traversal.
+  observable_test: Temporal diff map over a traversal burst; isolate single-frame spikes.
+  instrument: diff-map
+  threshold: zero frames with Δ energy > 4× the burst median
+  weight: 5; severity_ceiling: blocker; milestone_scope: alpha; applies_when: "{{GENRE}} has camera traversal"
+
+- id: MOT-03
+  axis: motion; seat: motion
+  statement: Animation reads as weighted — acceleration and settle are present, not linear interpolation.
+  observable_test: Contact sheet of a full animation cycle at fixed dt; inspect spacing distribution across frames.
+  instrument: contact-sheet
+  threshold: non-uniform spacing present in ≥ 90% of cycles reviewed
+  weight: 4; severity_ceiling: major; milestone_scope: content; applies_when: "{{GENRE}} has animated characters"
+
+- id: MOT-04
+  axis: motion; seat: motion
+  statement: No animated element holds a rest pose while its context implies motion.
+  observable_test: Contact sheet across a traversal; every visible animated element changes pose within the burst.
+  instrument: contact-sheet
+  threshold: zero static-in-motion elements
+  weight: 4; severity_ceiling: major; milestone_scope: content; applies_when: "{{GENRE}} has animated characters"
+
+- id: MOT-05
+  axis: motion; seat: motion
+  statement: Transitions between states are continuous — no teleports, snaps or single-frame discontinuities.
+  observable_test: Contact sheet across each state transition in the moment set.
+  instrument: contact-sheet
+  threshold: zero discontinuities outside declared intentional cuts
+  weight: 4; severity_ceiling: major; milestone_scope: alpha; applies_when: universal
+
+- id: MOT-06
+  axis: motion; seat: motion
+  statement: Camera motion is free of overshoot oscillation and jitter at every speed in the tape.
+  observable_test: Camera transform sampled per tick across the replay; second derivative inspected for ringing.
+  instrument: replay
+  threshold: no oscillation exceeding 2 cycles after any settle
+  weight: 4; severity_ceiling: major; milestone_scope: alpha; applies_when: "{{GENRE}} has a dynamic camera"
+
+- id: MOT-07
+  axis: motion; seat: motion
+  statement: Tiling, repetition or seams are not perceivable in continuous surfaces during traversal.
+  observable_test: Contact sheet across a long traversal; inspect for periodic structure.
+  instrument: contact-sheet
+  threshold: no periodicity detectable at the traversal rate
+  weight: 3; severity_ceiling: major; milestone_scope: alpha; applies_when: "{{GENRE}} has continuous surfaces"
+
+- id: MOT-08
+  axis: motion; seat: motion
+  statement: Effects triggered by events appear within the same frame budget window every time.
+  observable_test: Replay with tagged event ticks; measure frames between trigger and first visible change.
+  instrument: replay
+  threshold: variance ≤ 1 frame across repetitions
+  weight: 3; severity_ceiling: major; milestone_scope: beta; applies_when: universal
+
+# ─────────────────────────────── SYSTEMS (seat: systems) ─────────────────────────────
+- id: SYS-01
+  axis: systems; seat: systems
+  statement: Two runs of the same seed and input tape produce identical captures.
+  observable_test: Determinism self-test — capture the same moment twice, compare.
+  instrument: lint
+  threshold: identical within tolerance; harness refuses all visual verdicts until green
+  weight: 6; severity_ceiling: blocker; milestone_scope: prototype; applies_when: universal
+
+- id: SYS-02
+  axis: systems; seat: systems
+  statement: The full replay suite completes without a crash, hang, or unhandled error.
+  observable_test: Run every replay tape end to end on {{MIN_SPEC}}.
+  instrument: replay
+  threshold: crash-free rate ≥ 0.995
+  weight: 6; severity_ceiling: blocker; milestone_scope: beta; applies_when: universal
+
+- id: SYS-03
+  axis: systems; seat: systems
+  statement: No capture is compared against one taken at a different base sha.
+  observable_test: Every capture manifest carries base_sha; ledger refuses cross-base comparison.
+  instrument: lint
+  threshold: zero cross-base comparisons in the ledger
+  weight: 5; severity_ceiling: blocker; milestone_scope: prototype; applies_when: universal
+
+- id: SYS-04
+  axis: systems; seat: systems
+  statement: No code path branches on a headless, capture or screenshot flag.
+  observable_test: The anti-reward-hacking grep over the source tree.
+  instrument: lint
+  threshold: zero matches — build fails otherwise
+  weight: 6; severity_ceiling: blocker; milestone_scope: prototype; applies_when: universal
+
+- id: SYS-05
+  axis: systems; seat: systems
+  statement: A capture taken by the harness is identical to one taken through normal play at the same tick.
+  observable_test: Harness capture vs user-driven capture at matched tick.
+  instrument: capture
+  threshold: identical within determinism tolerance
+  weight: 5; severity_ceiling: blocker; milestone_scope: alpha; applies_when: universal
+
+- id: SYS-06
+  axis: systems; seat: systems
+  statement: Saved state restores exactly — a save/load round trip is indistinguishable from uninterrupted play.
+  observable_test: Replay to tick N, save, load, continue; compare against uninterrupted replay.
+  instrument: replay
+  threshold: identical state and captures from tick N onward
+  weight: 5; severity_ceiling: blocker; milestone_scope: content; applies_when: "{{SESSION_SHAPE}} includes persistence"
+
+- id: SYS-07
+  axis: systems; seat: systems
+  statement: Goldens show no regression on rows outside the current scope.
+  observable_test: Golden diff across the full accepted capture set.
+  instrument: capture
+  threshold: zero regressions
+  weight: 5; severity_ceiling: blocker; milestone_scope: alpha; applies_when: universal
+
+- id: SYS-08
+  axis: systems; seat: systems
+  statement: Every ledger defect reaches a terminal status; none oscillate indefinitely.
+  observable_test: Ledger scan for reopen_count.
+  instrument: lint
+  threshold: zero defects with reopen_count ≥ 2 left unescalated
+  weight: 4; severity_ceiling: major; milestone_scope: beta; applies_when: universal
+
+- id: SYS-09
+  axis: systems; seat: systems
+  statement: Simulation advances on a fixed timestep independent of render rate.
+  observable_test: Replay at forced 30/60/144 render rates; compare simulation state traces.
+  instrument: replay
+  threshold: identical state traces at all rates
+  weight: 5; severity_ceiling: blocker; milestone_scope: alpha; applies_when: universal
+
+- id: SYS-10
+  axis: systems; seat: systems
+  statement: No asset the player perceives originates outside the repository.
+  observable_test: Asset-policy lint over the build output against {{ASSET_POLICY}}.
+  instrument: lint
+  threshold: zero violations, engine infrastructure excepted
+  weight: 4; severity_ceiling: major; milestone_scope: alpha; applies_when: universal
+
+# ───────────────────────────── PERFORMANCE (seat: performance) ───────────────────────
+# All performance rows are measured on {{MIN_SPEC}}, never the development machine.
+- id: PERF-01
+  axis: performance; seat: performance
+  statement: Frametime stays within budget at the 95th percentile across the full replay suite.
+  observable_test: Frametime distribution; p95 reported. Mean FPS is never used.
+  instrument: telemetry
+  threshold: p95 ≤ {{PERF_BUDGET}}.frametime
+  weight: 6; severity_ceiling: blocker; milestone_scope: beta; applies_when: universal
+
+- id: PERF-02
+  axis: performance; seat: performance
+  statement: Long frames are rare enough to be imperceptible as stutter.
+  observable_test: Count frames exceeding 2× budget across the replay suite.
+  instrument: telemetry
+  threshold: ≤ 0.1% of frames, and never 2 consecutive
+  weight: 6; severity_ceiling: blocker; milestone_scope: beta; applies_when: universal
+
+- id: PERF-03
+  axis: performance; seat: performance
+  statement: The 99th percentile frametime does not exceed the stutter ceiling.
+  observable_test: p99 from the same distribution.
+  instrument: telemetry
+  threshold: p99 ≤ 2× {{PERF_BUDGET}}.frametime
+  weight: 5; severity_ceiling: blocker; milestone_scope: rc; applies_when: universal
+
+- id: PERF-04
+  axis: performance; seat: performance
+  statement: Draw calls stay under the declared ceiling in the heaviest enumerated moment.
+  observable_test: Draw call count at the worst-case moment.
+  instrument: telemetry
+  threshold: ≤ {{PERF_BUDGET}}.draws
+  weight: 4; severity_ceiling: major; milestone_scope: beta; applies_when: universal
+
+- id: PERF-05
+  axis: performance; seat: performance
+  statement: Memory is stable across a full session — no growth attributable to leakage.
+  observable_test: Memory sampled across the longest replay; linear regression on the tail.
+  instrument: telemetry
+  threshold: tail slope ≈ 0; peak ≤ {{PERF_BUDGET}}.memory
+  weight: 5; severity_ceiling: blocker; milestone_scope: beta; applies_when: universal
+
+- id: PERF-06
+  axis: performance; seat: performance
+  statement: Time from launch to interactive is within budget on min spec.
+  observable_test: Boot timer from process start to first accepted input.
+  instrument: telemetry
+  threshold: ≤ 4s on {{MIN_SPEC}}
+  weight: 4; severity_ceiling: major; milestone_scope: rc; applies_when: universal
+
+- id: PERF-07
+  axis: performance; seat: performance
+  statement: Input becomes visible within a bounded number of frames.
+  observable_test: Tag the frame in which each input's effect first appears.
+  instrument: telemetry
+  threshold: ≤ 3 frames at p95
+  weight: 5; severity_ceiling: blocker; milestone_scope: beta; applies_when: universal
+
+- id: PERF-08
+  axis: performance; seat: performance
+  statement: Quality tiers exist and each one meets budget on its declared target.
+  observable_test: Run the replay suite at every declared tier.
+  instrument: telemetry
+  threshold: every tier within its own budget
+  weight: 4; severity_ceiling: major; milestone_scope: rc; applies_when: "{{TARGET_PLATFORMS}} spans more than one performance class"
+
+# ───────────────────────────── EXPERIENCE (seat: experience) ─────────────────────────
+- id: EXP-01
+  axis: experience; seat: experience
+  statement: Content breadth meets the declared scope.
+  observable_test: Content manifest counted against {{CONTENT_SCOPE}}.
+  instrument: lint
+  threshold: 100% of declared scope present and reachable
+  weight: 5; severity_ceiling: blocker; milestone_scope: content; applies_when: universal
+
+- id: EXP-02
+  axis: experience; seat: experience
+  statement: A scripted naive player reaches the first success state without external instruction.
+  observable_test: Onboarding replay driven by a deliberately unskilled input tape.
+  instrument: replay
+  threshold: first success reached within the declared onboarding window
+  weight: 5; severity_ceiling: blocker; milestone_scope: content; applies_when: universal
+
+- id: EXP-03
+  axis: experience; seat: experience
+  statement: Difficulty increases monotonically across the content set.
+  observable_test: Fixed-skill replay agent run across all content; outcome metric ordered.
+  instrument: replay
+  threshold: monotone non-decreasing within noise band
+  weight: 4; severity_ceiling: major; milestone_scope: content; applies_when: "{{GENRE}} has difficulty progression"
+
+- id: EXP-04
+  axis: experience; seat: experience
+  statement: Sessions complete rather than dead-ending under scripted play.
+  observable_test: Session-completion rate over the replay suite.
+  instrument: replay
+  threshold: ≥ 0.98
+  weight: 5; severity_ceiling: blocker; milestone_scope: beta; applies_when: universal
+
+- id: EXP-05
+  axis: experience; seat: experience
+  statement: All information conveyed by colour is redundantly conveyed by shape, position or text.
+  observable_test: Capture set re-rendered under protanopia, deuteranopia and tritanopia simulation; every gameplay-critical distinction remains resolvable.
+  instrument: capture
+  threshold: zero distinctions lost in any simulation
+  weight: 5; severity_ceiling: blocker; milestone_scope: content; applies_when: universal
+
+- id: EXP-06
+  axis: experience; seat: experience
+  statement: Camera shake, flashing and large-field motion can be reduced or disabled.
+  observable_test: Toggle each option; diff-map energy measured before and after.
+  instrument: diff-map
+  threshold: motion energy reduced ≥ 80% when disabled
+  weight: 4; severity_ceiling: blocker; milestone_scope: content; applies_when: "{{GENRE}} has motion"
+
+- id: EXP-07
+  axis: experience; seat: experience
+  statement: Every action is rebindable and the rebinding persists.
+  observable_test: Rebind each action, save, reload, replay against the new binding.
+  instrument: replay
+  threshold: 100% of actions rebindable and persistent
+  weight: 4; severity_ceiling: major; milestone_scope: content; applies_when: universal
+
+- id: EXP-08
+  axis: experience; seat: experience
+  statement: Text remains legible at the smallest supported window and largest text scale.
+  observable_test: Capture UI at min window × max text scale; check for clipping, overlap, truncation.
+  instrument: capture
+  threshold: zero clipped or overlapping strings
+  weight: 4; severity_ceiling: major; milestone_scope: rc; applies_when: universal
+
+- id: EXP-09
+  axis: experience; seat: experience
+  statement: The audio mix is balanced, unclipped, and free of dead channels.
+  observable_test: Offline-rendered mix buffer analysed for peak, LUFS and per-channel silence.
+  instrument: audio-buffer
+  threshold: peak ≤ -1dBFS, no channel silent when its cue fires
+  weight: 4; severity_ceiling: major; milestone_scope: beta; applies_when: "{{PROJECT}} has audio"
+
+- id: EXP-10
+  axis: experience; seat: experience
+  statement: Every audio cue carrying gameplay information has a visual counterpart.
+  observable_test: Cross-reference the cue manifest against visual events in the replay.
+  instrument: replay
+  threshold: 100% of informative cues mirrored
+  weight: 4; severity_ceiling: major; milestone_scope: content; applies_when: "{{PROJECT}} has audio"
+
+- id: EXP-11
+  axis: experience; seat: experience
+  statement: The application survives window resize, focus loss, graphics-context loss and device change.
+  observable_test: Hardening replay injecting each event mid-session.
+  instrument: replay
+  threshold: zero crashes, zero unrecoverable states
+  weight: 5; severity_ceiling: blocker; milestone_scope: rc; applies_when: universal
+
+- id: EXP-12
+  axis: experience; seat: experience
+  statement: Quality on the held-out capture set matches quality on the public set.
+  observable_test: Overfit delta — attainment on reserved captures vs public captures.
+  instrument: capture
+  threshold: delta ≤ 0.05; a widening delta is itself a BLOCKER
+  weight: 6; severity_ceiling: blocker; milestone_scope: rc; applies_when: universal
+
+# ─────────────────── HUMAN SIGN-OFF — the council cannot grant these ─────────────────
+- id: HUM-01
+  axis: experience; seat: human
+  statement: It is fun.
+  observable_test: Human plays an unassisted session and signs.
+  instrument: human
+  threshold: signed
+  weight: 8; severity_ceiling: blocker; milestone_scope: rc; applies_when: universal
+
+- id: HUM-02
+  axis: visual; seat: human
+  statement: The art direction coheres across the full content set, not only the showcase moments.
+  observable_test: Human reviews the content sweep and signs.
+  instrument: human
+  threshold: signed
+  weight: 8; severity_ceiling: blocker; milestone_scope: rc; applies_when: universal
